@@ -23,7 +23,7 @@ jobs:
           cache: maven
 
       - name: Set version from tag
-        run: mvn -B versions:set -DnewVersion="${GITHUB_REF_NAME#v}" -DgenerateBackupPoms=false
+        run: mvn -B versions:set-property -Dproperty=revision -DnewVersion="${GITHUB_REF_NAME#v}" -DgenerateBackupPoms=false
 
       - name: Build uber-jar
         run: mvn -B package
@@ -70,7 +70,7 @@ jobs:
 
       - name: Set version from tag
         shell: bash
-        run: mvn -B versions:set -DnewVersion="${GITHUB_REF_NAME#v}" -DgenerateBackupPoms=false
+        run: mvn -B versions:set-property -Dproperty=revision -DnewVersion="${GITHUB_REF_NAME#v}" -DgenerateBackupPoms=false
 
       - name: Build native image
         run: mvn -B package -Dnative -DskipTests -pl server -am
