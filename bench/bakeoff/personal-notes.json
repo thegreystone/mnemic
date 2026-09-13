@@ -1,0 +1,2014 @@
+{
+ "about": "Personal-note samples for the embedder bake-off (PLAN.md M4, P4). Each item is a text as a store would hold it (an observation in the owner's words, or a rendered fact) with one question per language asking for it. Questions are paraphrases: they share as few words with the text as the meaning allows, so what is measured is meaning, not spelling. Items in the same group share a name and differ in one thing; a query must rank its own item above the others in its group. Items n01-n60: texts and all three questions by the assistant (2026-09-11). Items n061-n200: texts and English questions by the assistant, German and Swedish translated by the local Qwen3.5 9B (items carry translated_by; 58 Swedish and 2 German translations were corrected by hand where the model produced a non-word, a literal mistranslation, or 'Vil' for 'Vilken'); on n01-n60 its translations scored within 0.03 of the assistant's for every model, same ranking.",
+ "languages": [
+  "en",
+  "de",
+  "sv"
+ ],
+ "items": [
+  {
+   "id": "n01",
+   "text": "My accounts are at Postfinance, the savings and the salary account.",
+   "q": {
+    "en": "Where do I bank?",
+    "de": "Bei welcher Bank bin ich?",
+    "sv": "Vilken bank använder jag?"
+   }
+  },
+  {
+   "id": "n02",
+   "text": "The 3D printer needs a new nozzle, the old one is clogged.",
+   "q": {
+    "en": "What is wrong with the printer?",
+    "de": "Was ist mit dem Drucker los?",
+    "sv": "Vad är det för fel på skrivaren?"
+   }
+  },
+  {
+   "id": "n03",
+   "text": "Alex works at Hooli (since 2018).",
+   "q": {
+    "en": "Which company employs me?",
+    "de": "Bei welcher Firma bin ich angestellt?",
+    "sv": "Vilket företag är jag anställd hos?"
+   }
+  },
+  {
+   "id": "n04",
+   "text": "I'm leaning toward the Polestar 4, delivery would be in October 2026; the BMW iX is out.",
+   "q": {
+    "en": "Which car am I thinking of getting?",
+    "de": "Welches Auto überlege ich mir zu kaufen?",
+    "sv": "Vilken bil funderar jag på att skaffa?"
+   }
+  },
+  {
+   "id": "n05",
+   "text": "Anna is Alex's sister.",
+   "group": "anna",
+   "q": {
+    "en": "How is Anna related to me?",
+    "de": "In welcher Beziehung steht Anna zu mir?",
+    "sv": "Hur är Anna släkt med mig?"
+   }
+  },
+  {
+   "id": "n06",
+   "text": "Anna lives in Gothenburg.",
+   "group": "anna",
+   "q": {
+    "en": "In which city does Anna live?",
+    "de": "In welcher Stadt wohnt Anna?",
+    "sv": "I vilken stad bor Anna?"
+   }
+  },
+  {
+   "id": "n07",
+   "text": "Anna's birthday is on the 3rd of May.",
+   "group": "anna",
+   "q": {
+    "en": "When was Anna born?",
+    "de": "Wann hat Anna Geburtstag?",
+    "sv": "När fyller Anna år?"
+   }
+  },
+  {
+   "id": "n08",
+   "text": "Anna works as a nurse at Sahlgrenska hospital.",
+   "group": "anna",
+   "q": {
+    "en": "What does Anna do for a living?",
+    "de": "Was macht Anna beruflich?",
+    "sv": "Vad jobbar Anna med?"
+   }
+  },
+  {
+   "id": "n09",
+   "text": "We decided to move the team standup to 09:30 so the Swiss colleagues can join.",
+   "q": {
+    "en": "What time is the daily meeting now?",
+    "de": "Um wie viel Uhr ist jetzt das tägliche Meeting?",
+    "sv": "Vilken tid är det dagliga mötet numera?"
+   }
+  },
+  {
+   "id": "n10",
+   "text": "I prefer window seats on long flights and always pick the aisle on short ones.",
+   "q": {
+    "en": "Where do I like to sit on a plane?",
+    "de": "Wo sitze ich im Flugzeug am liebsten?",
+    "sv": "Var vill jag helst sitta på flyget?"
+   }
+  },
+  {
+   "id": "n11",
+   "text": "The cabin in Åre has no running water in winter; we bring canisters.",
+   "q": {
+    "en": "What is the problem with the mountain house in the cold season?",
+    "de": "Was ist das Problem mit der Hütte in den Bergen im Winter?",
+    "sv": "Vad är problemet med fjällstugan på vintern?"
+   }
+  },
+  {
+   "id": "n12",
+   "text": "Alex lives in Rüschlikon (since 2019).",
+   "q": {
+    "en": "Where is my home?",
+    "de": "Wo ist mein Zuhause?",
+    "sv": "Var har jag mitt hem?"
+   }
+  },
+  {
+   "id": "n13",
+   "text": "Alex was born in Lund.",
+   "q": {
+    "en": "Which town do I come from originally?",
+    "de": "Aus welcher Stadt stamme ich?",
+    "sv": "Vilken stad kommer jag ursprungligen från?"
+   }
+  },
+  {
+   "id": "n14",
+   "text": "The dentist appointment is on the 14th of November at 15:00 with Dr. Keller.",
+   "q": {
+    "en": "When do I have to see the dentist?",
+    "de": "Wann muss ich zum Zahnarzt?",
+    "sv": "När ska jag till tandläkaren?"
+   }
+  },
+  {
+   "id": "n15",
+   "text": "Lisa is allergic to peanuts, so nothing with peanuts when she comes for dinner.",
+   "group": "lisa",
+   "q": {
+    "en": "What can't Lisa eat?",
+    "de": "Was darf Lisa nicht essen?",
+    "sv": "Vad tål Lisa inte?"
+   }
+  },
+  {
+   "id": "n16",
+   "text": "Lisa moved to Berlin in March for a job at a startup.",
+   "group": "lisa",
+   "q": {
+    "en": "Where did Lisa relocate to?",
+    "de": "Wohin ist Lisa umgezogen?",
+    "sv": "Vart flyttade Lisa?"
+   }
+  },
+  {
+   "id": "n17",
+   "text": "Lisa's daughter is called Maja and just started school.",
+   "group": "lisa",
+   "q": {
+    "en": "What is the name of Lisa's child?",
+    "de": "Wie heißt Lisas Kind?",
+    "sv": "Vad heter Lisas barn?"
+   }
+  },
+  {
+   "id": "n18",
+   "text": "I switched the home network to a Unifi setup with two access points last spring.",
+   "q": {
+    "en": "What wifi equipment do I use at home?",
+    "de": "Welche WLAN-Geräte nutze ich zu Hause?",
+    "sv": "Vilken wifi-utrustning har jag hemma?"
+   }
+  },
+  {
+   "id": "n19",
+   "text": "The Volvo's summer tyres are stored at the garage in Thalwil.",
+   "q": {
+    "en": "Where are the car's other set of wheels kept?",
+    "de": "Wo ist der andere Radsatz des Autos gelagert?",
+    "sv": "Var förvaras bilens andra hjuluppsättning?"
+   }
+  },
+  {
+   "id": "n20",
+   "text": "Alex dislikes cilantro.",
+   "q": {
+    "en": "Which herb do I not want in my food?",
+    "de": "Welches Kraut möchte ich nicht im Essen haben?",
+    "sv": "Vilken krydda vill jag inte ha i maten?"
+   }
+  },
+  {
+   "id": "n21",
+   "text": "We are considering renting out the flat in Malmö instead of selling it.",
+   "q": {
+    "en": "What are the plans for the apartment in Sweden?",
+    "de": "Was sind die Pläne für die Wohnung in Schweden?",
+    "sv": "Vad är planerna för lägenheten i Skåne?"
+   }
+  },
+  {
+   "id": "n22",
+   "text": "The JMC project uses Eclipse and needs Java 21 to build.",
+   "q": {
+    "en": "Which JDK does the mission control build require?",
+    "de": "Welches JDK braucht der Build von Mission Control?",
+    "sv": "Vilket JDK kräver bygget av Mission Control?"
+   }
+  },
+  {
+   "id": "n23",
+   "text": "Erik is Alex's father.",
+   "group": "erik",
+   "q": {
+    "en": "Who is my dad?",
+    "de": "Wer ist mein Vater?",
+    "sv": "Vem är min pappa?"
+   }
+  },
+  {
+   "id": "n24",
+   "text": "Erik retired from the shipyard in 2011.",
+   "group": "erik",
+   "q": {
+    "en": "When did Erik stop working?",
+    "de": "Wann hat Erik aufgehört zu arbeiten?",
+    "sv": "När slutade Erik jobba?"
+   }
+  },
+  {
+   "id": "n25",
+   "text": "Erik's hip surgery is scheduled for early February.",
+   "group": "erik",
+   "q": {
+    "en": "When is Erik's operation?",
+    "de": "Wann wird Erik operiert?",
+    "sv": "När ska Erik opereras?"
+   }
+  },
+  {
+   "id": "n26",
+   "text": "Our wedding anniversary is the 21st of June.",
+   "q": {
+    "en": "On what date did we get married?",
+    "de": "An welchem Datum haben wir geheiratet?",
+    "sv": "Vilket datum gifte vi oss?"
+   }
+  },
+  {
+   "id": "n27",
+   "text": "I run three times a week, usually along the lake before work.",
+   "q": {
+    "en": "How often do I exercise?",
+    "de": "Wie oft treibe ich Sport?",
+    "sv": "Hur ofta tränar jag?"
+   }
+  },
+  {
+   "id": "n28",
+   "text": "The new espresso machine is a Rancilio Silvia; it needs descaling every two months.",
+   "q": {
+    "en": "What coffee maker did I buy?",
+    "de": "Welche Kaffeemaschine habe ich gekauft?",
+    "sv": "Vilken kaffemaskin köpte jag?"
+   }
+  },
+  {
+   "id": "n29",
+   "text": "Alex does not own a boat.",
+   "q": {
+    "en": "Do I have a sailing vessel?",
+    "de": "Besitze ich ein Segelschiff?",
+    "sv": "Äger jag en segelbåt?"
+   }
+  },
+  {
+   "id": "n30",
+   "text": "The kids' school has a holiday the whole week of Ascension.",
+   "q": {
+    "en": "When are the children off from school in May?",
+    "de": "Wann haben die Kinder im Mai schulfrei?",
+    "sv": "När är barnen lediga från skolan i maj?"
+   }
+  },
+  {
+   "id": "n31",
+   "text": "Sofia is Alex's wife.",
+   "group": "sofia",
+   "q": {
+    "en": "Who am I married to?",
+    "de": "Mit wem bin ich verheiratet?",
+    "sv": "Vem är jag gift med?"
+   }
+  },
+  {
+   "id": "n32",
+   "text": "Sofia works at the cantonal hospital in Zurich.",
+   "group": "sofia",
+   "q": {
+    "en": "Where does Sofia have her job?",
+    "de": "Wo arbeitet Sofia?",
+    "sv": "Var jobbar Sofia?"
+   }
+  },
+  {
+   "id": "n33",
+   "text": "Sofia wants to learn Italian before the trip to Puglia.",
+   "group": "sofia",
+   "q": {
+    "en": "Which language does Sofia want to study?",
+    "de": "Welche Sprache will Sofia lernen?",
+    "sv": "Vilket språk vill Sofia lära sig?"
+   }
+  },
+  {
+   "id": "n34",
+   "text": "The mortgage with UBS runs until 2029 at a fixed rate.",
+   "q": {
+    "en": "When does the home loan expire?",
+    "de": "Wann läuft die Hypothek aus?",
+    "sv": "När löper bolånet ut?"
+   }
+  },
+  {
+   "id": "n35",
+   "text": "We booked the summer house in Skåne for the last two weeks of July.",
+   "q": {
+    "en": "When is the vacation in the south of Sweden?",
+    "de": "Wann ist der Urlaub in Südschweden?",
+    "sv": "När är semestern i södra Sverige?"
+   }
+  },
+  {
+   "id": "n36",
+   "text": "I decided to write the new service in Rust rather than Go.",
+   "q": {
+    "en": "Which programming language did I choose for the service?",
+    "de": "Für welche Programmiersprache habe ich mich beim Service entschieden?",
+    "sv": "Vilket programspråk valde jag för tjänsten?"
+   }
+  },
+  {
+   "id": "n37",
+   "text": "The garden hose split; I need a new 25-metre one before the weekend.",
+   "q": {
+    "en": "What do I have to buy for the garden?",
+    "de": "Was muss ich für den Garten kaufen?",
+    "sv": "Vad behöver jag köpa till trädgården?"
+   }
+  },
+  {
+   "id": "n38",
+   "text": "Alex holds the role of Senior Staff Engineer at Hooli.",
+   "q": {
+    "en": "What is my job title?",
+    "de": "Wie lautet meine Berufsbezeichnung?",
+    "sv": "Vad är min titel på jobbet?"
+   }
+  },
+  {
+   "id": "n39",
+   "text": "The cat, Misse, gets her thyroid pill every morning hidden in a treat.",
+   "q": {
+    "en": "What medication does the cat take?",
+    "de": "Welches Medikament bekommt die Katze?",
+    "sv": "Vilken medicin får katten?"
+   }
+  },
+  {
+   "id": "n40",
+   "text": "Grandma's recipe for saffron buns uses quark instead of butter.",
+   "q": {
+    "en": "What is special about the lussekatter recipe?",
+    "de": "Was ist das Besondere am Rezept für die Safranbrötchen?",
+    "sv": "Vad är speciellt med receptet på lussekatter?"
+   }
+  },
+  {
+   "id": "n41",
+   "text": "Jonas is the neighbour with the spare key to our house.",
+   "group": "jonas",
+   "q": {
+    "en": "Who can let us in if we are locked out?",
+    "de": "Wer kann uns reinlassen, wenn wir uns ausgesperrt haben?",
+    "sv": "Vem kan släppa in oss om vi låst oss ute?"
+   }
+  },
+  {
+   "id": "n42",
+   "text": "Jonas plays in a jazz band on Thursdays at the Moods club.",
+   "group": "jonas",
+   "q": {
+    "en": "What does Jonas do in the evenings?",
+    "de": "Was macht Jonas abends?",
+    "sv": "Vad gör Jonas på kvällarna?"
+   }
+  },
+  {
+   "id": "n43",
+   "text": "Jonas's dog is a border collie named Tess.",
+   "group": "jonas",
+   "q": {
+    "en": "What kind of pet does Jonas have?",
+    "de": "Was für ein Haustier hat Jonas?",
+    "sv": "Vad har Jonas för husdjur?"
+   }
+  },
+  {
+   "id": "n44",
+   "text": "The passport expires in August 2027; renewal takes six weeks at the consulate.",
+   "q": {
+    "en": "How long is my travel document valid?",
+    "de": "Wie lange ist mein Reisepass gültig?",
+    "sv": "Hur länge gäller mitt pass?"
+   }
+  },
+  {
+   "id": "n45",
+   "text": "I gave up on the standing desk; my back is better with the chair and breaks.",
+   "q": {
+    "en": "What did I conclude about working standing up?",
+    "de": "Was habe ich über das Arbeiten im Stehen festgestellt?",
+    "sv": "Vad kom jag fram till om att jobba stående?"
+   }
+  },
+  {
+   "id": "n46",
+   "text": "Alex uses Neovim (since 2022).",
+   "q": {
+    "en": "What editor do I code in?",
+    "de": "In welchem Editor programmiere ich?",
+    "sv": "Vilken editor programmerar jag i?"
+   }
+  },
+  {
+   "id": "n47",
+   "text": "The company offsite is in Lisbon in the second week of September.",
+   "q": {
+    "en": "Where is the team trip going?",
+    "de": "Wohin geht der Teamausflug?",
+    "sv": "Vart går teamresan?"
+   }
+  },
+  {
+   "id": "n48",
+   "text": "Peter owes me 400 francs from the ski weekend.",
+   "group": "peter",
+   "q": {
+    "en": "Who still has to pay me back?",
+    "de": "Wer schuldet mir noch Geld?",
+    "sv": "Vem är skyldig mig pengar?"
+   }
+  },
+  {
+   "id": "n49",
+   "text": "Peter is training for the Zurich marathon in April.",
+   "group": "peter",
+   "q": {
+    "en": "What race is Peter preparing for?",
+    "de": "Auf welchen Lauf bereitet sich Peter vor?",
+    "sv": "Vilket lopp tränar Peter inför?"
+   }
+  },
+  {
+   "id": "n50",
+   "text": "Peter and Karin are splitting up; he is looking for a flat.",
+   "group": "peter",
+   "q": {
+    "en": "What is happening in Peter's relationship?",
+    "de": "Was ist mit Peters Beziehung los?",
+    "sv": "Vad händer i Peters förhållande?"
+   }
+  },
+  {
+   "id": "n51",
+   "text": "The boiler was serviced in October; the technician said the pump will need replacing next year.",
+   "q": {
+    "en": "What will the heating need soon?",
+    "de": "Was braucht die Heizung demnächst?",
+    "sv": "Vad kommer värmepannan snart att behöva?"
+   }
+  },
+  {
+   "id": "n52",
+   "text": "I only own property in Switzerland.",
+   "q": {
+    "en": "In which country is all my real estate?",
+    "de": "In welchem Land liegen alle meine Immobilien?",
+    "sv": "I vilket land finns alla mina fastigheter?"
+   }
+  },
+  {
+   "id": "n53",
+   "text": "The book club meets the first Tuesday of the month; next one is on Klara and the Sun.",
+   "q": {
+    "en": "What are we reading for the literature group?",
+    "de": "Was lesen wir für den Lesekreis?",
+    "sv": "Vad läser vi till bokcirkeln?"
+   }
+  },
+  {
+   "id": "n54",
+   "text": "My blood pressure medication is amlodipine, 5 mg in the morning.",
+   "q": {
+    "en": "What pill do I take for my heart?",
+    "de": "Welche Tablette nehme ich fürs Herz?",
+    "sv": "Vilken tablett tar jag för hjärtat?"
+   }
+  },
+  {
+   "id": "n55",
+   "text": "The old MacBook goes to Maja when the new one arrives.",
+   "q": {
+    "en": "Who is getting my previous laptop?",
+    "de": "Wer bekommt meinen alten Laptop?",
+    "sv": "Vem får min gamla dator?"
+   }
+  },
+  {
+   "id": "n56",
+   "text": "Alex is considering a sabbatical in 2027.",
+   "q": {
+    "en": "Am I planning a longer break from work?",
+    "de": "Plane ich eine längere Auszeit vom Job?",
+    "sv": "Planerar jag en längre paus från jobbet?"
+   }
+  },
+  {
+   "id": "n57",
+   "text": "The piano tuner comes twice a year, in April and October.",
+   "q": {
+    "en": "How often is the instrument tuned?",
+    "de": "Wie oft wird das Klavier gestimmt?",
+    "sv": "Hur ofta stäms pianot?"
+   }
+  },
+  {
+   "id": "n58",
+   "text": "We switched electricity providers to a green tariff from EKZ in January.",
+   "q": {
+    "en": "Where does our power come from now?",
+    "de": "Woher beziehen wir jetzt unseren Strom?",
+    "sv": "Varifrån får vi vår el numera?"
+   }
+  },
+  {
+   "id": "n59",
+   "text": "The talk at JavaOne was accepted; it is about JFR streaming.",
+   "q": {
+    "en": "What is my conference presentation about?",
+    "de": "Worum geht es in meinem Konferenzvortrag?",
+    "sv": "Vad handlar min konferensföreläsning om?"
+   }
+  },
+  {
+   "id": "n60",
+   "text": "Karin recommended the physiotherapist on Seestrasse for the shoulder.",
+   "q": {
+    "en": "Who did someone suggest for my arm pain?",
+    "de": "Wen hat man mir für die Schmerzen im Arm empfohlen?",
+    "sv": "Vem rekommenderades för smärtan i armen?"
+   }
+  },
+  {
+   "id": "n061",
+   "text": "The car insurance with AXA renews on the 1st of March; the premium went up by 8 percent this year.",
+   "group": "insurance",
+   "q": {
+    "en": "When is the vehicle policy up for renewal?",
+    "de": "Wann ist die Fahrzeugversicherung für die Verlängerung fällig?",
+    "sv": "När ska bilförsäkringen förnyas?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n062",
+   "text": "The house insurance is with Mobiliar, and it covers the cabin in Åre as well.",
+   "group": "insurance",
+   "q": {
+    "en": "Which company insures the building, and does it include the mountain place?",
+    "de": "Welches Unternehmen versichert das Gebäude, und umfasst dies den Bergort?",
+    "sv": "Vilket bolag försäkrar huset, och täcker det stället i fjällen?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n063",
+   "text": "I cancelled the travel insurance; the credit card covers the same things.",
+   "q": {
+    "en": "Why did I drop the cover for trips abroad?",
+    "de": "Warum habe ich die Reiseversicherung gekündigt?",
+    "sv": "Varför sa jag upp reseförsäkringen?"
+   },
+   "translated_by": "local-qwen3.5-9b, corrected by the assistant"
+  },
+  {
+   "id": "n064",
+   "text": "Karin is Sofia's younger sister and lives in Uppsala.",
+   "group": "karin",
+   "q": {
+    "en": "Where does my wife's sibling live?",
+    "de": "Wo wohnt die Schwester meiner Frau?",
+    "sv": "Var bor min frus syster?"
+   },
+   "translated_by": "local-qwen3.5-9b, corrected by the assistant"
+  },
+  {
+   "id": "n065",
+   "text": "Karin is coming for Christmas and staying until the 28th.",
+   "group": "karin",
+   "q": {
+    "en": "How long is the visitor over the holidays going to stay?",
+    "de": "Wie lange wird der Besucher über die Feiertage bleiben?",
+    "sv": "Hur länge ska besökaren stanna över helgerna?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n066",
+   "text": "Karin's boyfriend is called Oskar; he is a carpenter.",
+   "group": "karin",
+   "q": {
+    "en": "What does Karin's partner do?",
+    "de": "Was macht Karins Partner?",
+    "sv": "Vad gör Karins partner?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n067",
+   "text": "Alex has two children, Elsa and Nils.",
+   "q": {
+    "en": "What are my kids called?",
+    "de": "Wie heißen meine Kinder?",
+    "sv": "Vad heter mina barn?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n068",
+   "text": "Elsa started at the gymnasium in Zurich in August; the commute is 40 minutes by train.",
+   "group": "elsa",
+   "q": {
+    "en": "How does my daughter get to her new school, and how long does it take?",
+    "de": "Wie kommt meine Tochter zur neuen Schule und wie lange dauert es?",
+    "sv": "Hur kommer min dotter till den nya skolan och hur lång tid tar det?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n069",
+   "text": "Elsa wants to study medicine after school, ideally in Sweden.",
+   "group": "elsa",
+   "q": {
+    "en": "What career is Elsa aiming for?",
+    "de": "Welche Karriere strebt Elsa an?",
+    "sv": "Vilken karriär siktar Elsa efter?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n070",
+   "text": "Elsa's phone is on our family plan; the number ends in 4471.",
+   "group": "elsa",
+   "q": {
+    "en": "Whose mobile subscription is bundled with ours?",
+    "de": "Wessen Mobilfunkvertrag ist mit dem unseren kombiniert?",
+    "sv": "Vems mobilabonnemang är kopplat till vårt?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n071",
+   "text": "Nils plays floorball on Wednesdays and Saturdays at the hall in Adliswil.",
+   "group": "nils",
+   "q": {
+    "en": "When does my son have sports practice?",
+    "de": "Wann hat mein Sohn Sporttraining?",
+    "sv": "När har min son träning?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n072",
+   "text": "Nils broke his wrist in February; the cast came off after five weeks.",
+   "group": "nils",
+   "q": {
+    "en": "What injury did Nils have this winter?",
+    "de": "Welche Verletzung hatte Nils diesen Winter?",
+    "sv": "Vilken skada hade Nils denna vinter?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n073",
+   "text": "Nils is saving up for a mountain bike; we said we would match what he saves.",
+   "group": "nils",
+   "q": {
+    "en": "What deal did we make about the bicycle?",
+    "de": "Welches Abkommen haben wir über das Fahrrad getroffen?",
+    "sv": "Vilken överenskommelse gjorde vi om cykeln?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n074",
+   "text": "The Volvo is due for its service at 90,000 km, probably in May.",
+   "group": "volvo",
+   "q": {
+    "en": "When does the car need to go to the workshop next?",
+    "de": "Wann muss das Auto als Nächstes zur Werkstatt?",
+    "sv": "När måste bilen åka till verkstaden nästa gång?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n075",
+   "text": "The Volvo's roof box is in the basement behind the bikes.",
+   "group": "volvo",
+   "q": {
+    "en": "Where did we put the luggage carrier for the car?",
+    "de": "Wo haben wir den Gepäckträger für das Auto hingelegt?",
+    "sv": "Var lade vi bagagehållaren för bilen?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n076",
+   "text": "The Volvo has a dent in the rear bumper from the parking garage in Lucerne; not worth claiming.",
+   "group": "volvo",
+   "q": {
+    "en": "What damage does the car have and did we report it?",
+    "de": "Welche Schäden hat das Auto und haben wir es gemeldet?",
+    "sv": "Vilka skador har bilen och har vi rapporterat det?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n077",
+   "text": "I have not owned a motorcycle since 2009.",
+   "q": {
+    "en": "Do I still ride a motorbike?",
+    "de": "Fahre ich immer noch mit dem Motorrad?",
+    "sv": "Kör jag fortfarande motorcykel?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n078",
+   "text": "Alex does not drink coffee after 14:00.",
+   "q": {
+    "en": "Until what time of day do I take caffeine?",
+    "de": "Bis zu welcher Tageszeit nehme ich Koffein?",
+    "sv": "Till vilken tid på dagen tar jag koffein?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n079",
+   "text": "My resting heart rate has been around 52 since I started running regularly.",
+   "q": {
+    "en": "What is my pulse when I am at rest?",
+    "de": "Wie ist mein Puls in Ruhe?",
+    "sv": "Vad är min puls i vila?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n080",
+   "text": "The physio said to do the shoulder exercises daily for six weeks, then reassess.",
+   "q": {
+    "en": "What was the treatment plan for my arm?",
+    "de": "Was war der Behandlungsplan für meinen Arm?",
+    "sv": "Vad var behandlingsplanen för min arm?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n081",
+   "text": "My glasses prescription is -2.25 on the left and -2.0 on the right; last checked in 2025.",
+   "q": {
+    "en": "How strong are my lenses?",
+    "de": "Wie stark sind meine Linsen?",
+    "sv": "Hur starka är mina glasögon?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n082",
+   "text": "Sofia's mother, Birgitta, is in the care home in Lund now; visits are best in the afternoon.",
+   "q": {
+    "en": "Where does my mother-in-law live these days?",
+    "de": "Wo wohnt meine Schwiegermutter heutzutage?",
+    "sv": "Var bor min svärmor just nu?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n083",
+   "text": "Erik's brother Lennart died in 2020; the funeral was in Kalmar.",
+   "group": "erik",
+   "q": {
+    "en": "When did my uncle pass away?",
+    "de": "Wann ist mein Onkel gestorben?",
+    "sv": "När dog min onkel?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n084",
+   "text": "Erik still lives in the house in Lund where I grew up.",
+   "group": "erik",
+   "q": {
+    "en": "Does my dad still live in my childhood home?",
+    "de": "Wohnt mein Dad noch im Haus meiner Kindheit?",
+    "sv": "Bor min pappa fortfarande i mitt barndomshem?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n085",
+   "text": "Anna and her husband Tomas are getting a dog in the spring, a golden retriever.",
+   "group": "anna",
+   "q": {
+    "en": "What pet is my sister planning to get?",
+    "de": "Welches Haustier plant meine Schwester zu bekommen?",
+    "sv": "Vilket husdjur planerar min syster att skaffa?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n086",
+   "text": "Anna borrowed the tent and the camping stove in July and has not returned them yet.",
+   "group": "anna",
+   "q": {
+    "en": "What outdoor gear is still at my sister's place?",
+    "de": "Welche Outdoor-Ausrüstung ist noch bei meiner Schwester?",
+    "sv": "Vilken friluftsutrustning är fortfarande kvar hos min syster?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n087",
+   "text": "The company laptop is a MacBook Pro 16 from 2024; the old one was returned to IT in Boston.",
+   "q": {
+    "en": "What computer do I use for work?",
+    "de": "Welchen Computer verwende ich für die Arbeit?",
+    "sv": "Vilken dator använder jag på jobbet?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n088",
+   "text": "Alex leads the JVM runtime team (since 2023).",
+   "q": {
+    "en": "Which group at work do I manage?",
+    "de": "Welche Gruppe am Arbeitsplatz verwalte ich?",
+    "sv": "Vilken grupp på jobbet leder jag?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n089",
+   "text": "My manager is Priya; she is based in New York and we have a 1:1 every other Tuesday.",
+   "q": {
+    "en": "Who do I report to and when do we meet?",
+    "de": "Wem muss ich berichten und wann treffen wir uns?",
+    "sv": "Vem ska jag rapportera till och när träffas vi?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n090",
+   "text": "The performance review cycle closes at the end of January; self-assessments are due two weeks before.",
+   "q": {
+    "en": "When do I have to write my yearly evaluation?",
+    "de": "Wann muss ich meine jährliche Bewertung schreiben?",
+    "sv": "När måste jag skriva min årliga utvärdering?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n091",
+   "text": "Alex worked at Oracle from 2010 to 2018.",
+   "q": {
+    "en": "Where was I employed before my current job?",
+    "de": "Wo war ich vor meinem aktuellen Job beschäftigt?",
+    "sv": "Var jag anställd innan mitt nuvarande jobb?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n092",
+   "text": "The profiler project is code-named Falcon; the repo is under the runtime org on GitHub.",
+   "q": {
+    "en": "What is the internal name of the profiling work?",
+    "de": "Was ist der interne Name der Profilierungsarbeit?",
+    "sv": "Vad är det interna namnet på profileringsarbetet?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n093",
+   "text": "Falcon's release is planned for Q2; the blocker is the Windows build.",
+   "group": "falcon",
+   "q": {
+    "en": "What is holding up the Falcon launch?",
+    "de": "Was hält den Falcon-Start auf?",
+    "sv": "Vad håller upp Falcon-lanseringen?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n094",
+   "text": "Falcon's tech lead is Daniel, who sits in Paris.",
+   "group": "falcon",
+   "q": {
+    "en": "Who runs the engineering on Falcon?",
+    "de": "Wer leitet die Ingenieursarbeiten an Falcon?",
+    "sv": "Vem leder utvecklingsarbetet på Falcon?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n095",
+   "text": "Falcon was almost cancelled in 2025 when the budget was cut; it survived by merging with the agent team.",
+   "group": "falcon",
+   "q": {
+    "en": "How did Falcon avoid being shut down?",
+    "de": "Wie hat Falcon einen Shutdown vermieden?",
+    "sv": "Hur lyckades Falcon undvika att stängas ner?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n096",
+   "text": "I use a Kinesis split keyboard because of the wrist pain from 2019.",
+   "q": {
+    "en": "Why do I type on that unusual keyboard?",
+    "de": "Warum tippe ich auf dieser ungewöhnlichen Tastatur?",
+    "sv": "Varför skriver jag på det där ovanliga tangentbordet?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n097",
+   "text": "The home server runs Proxmox on a used Dell with 64 GB of RAM; backups go to Backblaze nightly.",
+   "q": {
+    "en": "What runs on the machine in the basement and where do the copies go?",
+    "de": "Was läuft auf der Maschine im Keller und wohin gehen die Kopien?",
+    "sv": "Vad körs på maskinen i källaren och vart går kopiorna?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n098",
+   "text": "The router's admin password is in the password manager under 'home network', not on the sticker.",
+   "q": {
+    "en": "Where can I find the login for the wifi box?",
+    "de": "Wo finde ich den Login für das WLAN-Modem?",
+    "sv": "Var hittar jag inloggningen till wifi-routern?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n099",
+   "text": "My GitHub handle is aberg and the work account is alex.berg at the company domain.",
+   "q": {
+    "en": "What are my usernames for code hosting?",
+    "de": "Wie sind meine Benutzernamen für Code-Hosting?",
+    "sv": "Vilka är mina användarnamn för kodhosting?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n100",
+   "text": "The domain berg.example expires in September 2027 and is registered at Loopia.",
+   "q": {
+    "en": "When does my personal web address need renewing?",
+    "de": "Wann muss meine persönliche Web-Adresse erneuert werden?",
+    "sv": "När behöver min personliga webbadress förnyas?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n101",
+   "text": "We use Splitwise for shared costs with Peter and Karin from the ski trips.",
+   "q": {
+    "en": "How do we keep track of who owes what after holidays with friends?",
+    "de": "Wie halten wir nach Feiertagen mit Freunden den Überblick darüber, wem was schuldet?",
+    "sv": "Hur håller vi reda på vem som är skyldig vad efter semestrar med vänner?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n102",
+   "text": "The kitchen renovation is booked with Schreinerei Huber for the last two weeks of October.",
+   "q": {
+    "en": "When are the builders coming for the cooking area?",
+    "de": "Wann kommen die Bauarbeiter für den Kochbereich?",
+    "sv": "När kommer hantverkarna för köket?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n103",
+   "text": "We chose the dark green for the kitchen cabinets, not the grey.",
+   "q": {
+    "en": "What colour did we pick for the cupboards?",
+    "de": "Welche Farbe haben wir für die Schränke gewählt?",
+    "sv": "Vilken färg valde vi till skåpen?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n104",
+   "text": "The neighbours on the other side, the Meiers, complained about the hedge; we agreed to trim it to two metres.",
+   "q": {
+    "en": "What did we settle with the people next door about the garden?",
+    "de": "Was haben wir mit den Leuten von nebenan über den Garten geregelt?",
+    "sv": "Vad kom vi överens om med grannarna angående trädgården?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n105",
+   "text": "The flat in Malmö has a tenant since November, a couple from Copenhagen, on a two-year lease.",
+   "q": {
+    "en": "Who is renting the apartment in Sweden?",
+    "de": "Wer mietet die Wohnung in Schweden?",
+    "sv": "Vem hyr lägenheten i Sverige?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n106",
+   "text": "Alex owns the house in Rüschlikon and the flat in Malmö.",
+   "q": {
+    "en": "What real estate do I have?",
+    "de": "Welche Immobilien habe ich?",
+    "sv": "Vilka fastigheter har jag?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n107",
+   "text": "The Åre cabin is shared with Anna; we take alternate weeks in the ski season.",
+   "group": "anna",
+   "q": {
+    "en": "How do my sister and I divide the mountain house?",
+    "de": "Wie teilen meine Schwester und ich das Berghaus auf?",
+    "sv": "Hur delar min syster och jag upp bergshuset?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n108",
+   "text": "The cabin's roof was redone in 2022; the well pump was replaced the year after.",
+   "q": {
+    "en": "What repairs has the cabin had recently?",
+    "de": "Welche Reparaturen hat die Kabine kürzlich vorgenommen?",
+    "sv": "Vilka reparationer har stugan fått nyligen?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n109",
+   "text": "The ferry to Gotland was booked for the 10th of July, car included, from Nynäshamn.",
+   "q": {
+    "en": "When and from where do we sail to the island?",
+    "de": "Wann und von wo segeln wir zur Insel?",
+    "sv": "När och varifrån seglar vi till ön?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n110",
+   "text": "Our favourite restaurant in Zurich is Kronenhalle for occasions and the Vietnamese place on Langstrasse otherwise.",
+   "q": {
+    "en": "Where do we like to eat out?",
+    "de": "Wo mögen wir auswärts essen?",
+    "sv": "Var brukar vi gilla att äta ute?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n111",
+   "text": "Sofia is vegetarian; the kids are not.",
+   "group": "sofia",
+   "q": {
+    "en": "Does my wife eat meat?",
+    "de": "Isst meine Frau Fleisch?",
+    "sv": "Äter min hustru kött?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n112",
+   "text": "Sofia's birthday is the 9th of February; she turns 50 in 2027.",
+   "group": "sofia",
+   "q": {
+    "en": "When is my wife's big round birthday?",
+    "de": "Wann ist der große runde Geburtstag meiner Frau?",
+    "sv": "När fyller min fru jämnt?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n113",
+   "text": "Sofia drives the Volvo; I mostly take the train.",
+   "group": "sofia",
+   "q": {
+    "en": "Who uses the car most?",
+    "de": "Wer nutzt das Auto am meisten?",
+    "sv": "Vem använder bilen mest?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n114",
+   "text": "Peter's new address is Seefeldstrasse 12 in Zurich, third floor.",
+   "group": "peter",
+   "q": {
+    "en": "Where does Peter live now after the separation?",
+    "de": "Wo wohnt Peter jetzt nach der Trennung?",
+    "sv": "Var bor Peter nu efter skilsmässan?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n115",
+   "text": "Peter finished the marathon in 3:41.",
+   "group": "peter",
+   "q": {
+    "en": "What was Peter's time in the race?",
+    "de": "Wie war Peters Zeit im Rennen?",
+    "sv": "Vilken tid fick Peter i loppet?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n116",
+   "text": "Jonas's band is playing at the Kaufleuten on the 5th of December; we have tickets.",
+   "group": "jonas",
+   "q": {
+    "en": "When is the concert we are going to?",
+    "de": "Wann ist das Konzert, zu dem wir gehen?",
+    "sv": "När är konserten vi ska gå på?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n117",
+   "text": "Jonas and I usually go climbing at Minimum on Monday evenings.",
+   "group": "jonas",
+   "q": {
+    "en": "What do Jonas and I do together during the week?",
+    "de": "Was mache ich mit Jonas während der Woche zusammen?",
+    "sv": "Vad gör jag och Jonas tillsammans under veckan?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n118",
+   "text": "Lisa's startup is called Fjordly; they do payroll software for small firms.",
+   "group": "lisa",
+   "q": {
+    "en": "What does the company Lisa joined make?",
+    "de": "Was stellt das Unternehmen her, dem Lisa beigetreten ist?",
+    "sv": "Vad tillverkar företaget som Lisa gick med i?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n119",
+   "text": "Lisa got engaged in September to a man named Felix.",
+   "group": "lisa",
+   "q": {
+    "en": "Who is Lisa going to marry?",
+    "de": "Mit wem wird Lisa heiraten?",
+    "sv": "Vem ska Lisa gifta sig med?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n120",
+   "text": "Maja is nine now and obsessed with horses.",
+   "group": "maja",
+   "q": {
+    "en": "How old is Lisa's daughter and what is she into?",
+    "de": "Wie alt ist Lisas Tochter und worin interessiert sie sich?",
+    "sv": "Hur gammal är Lisas dotter och vad intresserar hon sig för?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n121",
+   "text": "Maja's birthday party is on the 17th; we promised to bring the cake.",
+   "group": "maja",
+   "q": {
+    "en": "What are we contributing to the child's celebration?",
+    "de": "Was tragen wir zum Fest des Kindes bei?",
+    "sv": "Vad bidrar vi till barnets firande?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n122",
+   "text": "I switched from Spotify to Apple Music in January because of the family plan.",
+   "q": {
+    "en": "Which streaming service do we pay for now, and why did we change?",
+    "de": "Für welchen Streaming-Dienst bezahlen wir jetzt, und warum haben wir gewechselt?",
+    "sv": "Vilken strömningstjänst betalar vi nu för, och varför bytte vi?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n123",
+   "text": "The piano is a Yamaha U1 from 1998, bought second-hand in 2015.",
+   "q": {
+    "en": "What instrument do we have in the living room?",
+    "de": "Welches Instrument haben wir im Wohnzimmer?",
+    "sv": "Vilket instrument har vi i vardagsrummet?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n124",
+   "text": "I gave up learning the guitar; the piano is enough.",
+   "q": {
+    "en": "Did I stick with the string instrument?",
+    "de": "Habe ich beim Streichinstrument geblieben?",
+    "sv": "Höll jag fast vid stränginstrumentet?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n125",
+   "text": "The gym membership at Activ Fitness is paid yearly in April; it includes the pool.",
+   "q": {
+    "en": "When is the sports club fee due?",
+    "de": "Wann ist der Sportverein-Beitrag fällig?",
+    "sv": "När ska sportklubbens avgift betalas?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n126",
+   "text": "My marathon best is 3:28, in Stockholm in 2016; I have not raced since.",
+   "q": {
+    "en": "What is the fastest I have run 42 kilometres?",
+    "de": "Was ist mein schnellstes Ergebnis über 42 Kilometer?",
+    "sv": "Vad är min snabbaste tid över 42 kilometer?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n127",
+   "text": "The dog we had, Bella, was a labrador; she died in 2021 at fourteen.",
+   "q": {
+    "en": "What pet did the family used to have?",
+    "de": "Welches Haustier hat die Familie früher gehabt?",
+    "sv": "Vilket husdjur hade familjen tidigare?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n128",
+   "text": "We have no pets now apart from the cat.",
+   "q": {
+    "en": "Which animals live with us at the moment?",
+    "de": "Welche Tiere leben gerade bei mir?",
+    "sv": "Vilka djur bor just nu hos mig?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n129",
+   "text": "Misse the cat is chipped and registered with Anis; the vet is Dr. Brunner in Kilchberg.",
+   "group": "misse",
+   "q": {
+    "en": "Who treats the cat when she is ill?",
+    "de": "Wer behandelt die Katze, wenn sie krank ist?",
+    "sv": "Vem behandlar katten när den är sjuk?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n130",
+   "text": "Misse goes to the cattery in Horgen when we travel; book two weeks ahead in summer.",
+   "group": "misse",
+   "q": {
+    "en": "Where does the cat stay when we are away?",
+    "de": "Wo bleibt der Katze, wenn wir weg sind?",
+    "sv": "Var stannar katten när vi är borta?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n131",
+   "text": "The wine in the cellar is mostly Barolo from the 2016 trip; about thirty bottles left.",
+   "q": {
+    "en": "What do we have stored in the basement to drink?",
+    "de": "Was haben wir im Keller zum Trinken gelagert?",
+    "sv": "Vad har vi i källaren att dricka?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n132",
+   "text": "I quit smoking in 2004 and have not touched a cigarette since.",
+   "q": {
+    "en": "Do I still smoke?",
+    "de": "Rauche ich noch?",
+    "sv": "Röker jag fortfarande?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n133",
+   "text": "Alex is allergic to penicillin.",
+   "q": {
+    "en": "Which antibiotic must I never be given?",
+    "de": "Welches Antibiotikum darf mir auf keinen Fall verabreicht werden?",
+    "sv": "Vilket antibiotikum får jag aldrig ges?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n134",
+   "text": "My blood type is A positive.",
+   "q": {
+    "en": "What is my blood group?",
+    "de": "Welches ist mein Blutgruppe?",
+    "sv": "Vilken är min blodgrupp?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n135",
+   "text": "The family doctor is Dr. Steiner at the practice in Thalwil; appointments through their app.",
+   "q": {
+    "en": "Who is our GP and how do we book?",
+    "de": "Wer ist unser Hausarzt und wie buchen wir einen Termin?",
+    "sv": "Vem är vår husläkare och hur bokar vi en tid?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n136",
+   "text": "The tax return for 2025 was filed in March through the accountant, Treuhand Meier.",
+   "q": {
+    "en": "Who prepares our taxes?",
+    "de": "Wer bereitet unsere Steuern vor?",
+    "sv": "Vem förbereder våra skatter?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n137",
+   "text": "The pension fund statement shows the buy-in option is still open until age 55.",
+   "q": {
+    "en": "Until when can I make extra payments into my retirement plan?",
+    "de": "Bis wann kann ich zusätzliche Zahlungen in meinen Altersvorsorgeplan leisten?",
+    "sv": "Till när kan jag göra extra inbetalningar till min pension?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n138",
+   "text": "The stock options from Oracle were all exercised in 2019.",
+   "q": {
+    "en": "Do I still have equity from my previous employer?",
+    "de": "Habe ich noch Aktien von meinem ehemaligen Arbeitgeber?",
+    "sv": "Har jag fortfarande aktier från min tidigare arbetsgivare?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n139",
+   "text": "We keep about three months of expenses in the savings account as a buffer.",
+   "q": {
+    "en": "How big is our emergency reserve?",
+    "de": "Wie groß ist unser Notvorrat?",
+    "sv": "Hur stor är vår buffert?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n140",
+   "text": "The credit card limit was raised to 15,000 francs before the kitchen work.",
+   "q": {
+    "en": "How much can I charge to the card?",
+    "de": "Wie viel kann ich auf die Karte aufladen?",
+    "sv": "Hur mycket kan jag handla för på kortet?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n141",
+   "text": "The safe deposit box at Postfinance holds the passports' copies, the deeds, and Grandma's jewellery.",
+   "q": {
+    "en": "What is kept in the bank vault?",
+    "de": "Was wird im Banktresor aufbewahrt?",
+    "sv": "Vad förvaras i bankfacket?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n142",
+   "text": "Our will was updated in 2024 with the notary in Horgen; Anna is the executor.",
+   "q": {
+    "en": "Who handles the estate if something happens to us?",
+    "de": "Wer verwaltet das Erbe, wenn uns etwas passiert?",
+    "sv": "Vem sköter arvet om något händer oss?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n143",
+   "text": "Nils's godfather is Peter.",
+   "group": "peter",
+   "q": {
+    "en": "Which of my friends has a formal role in my son's life?",
+    "de": "Welcher meiner Freunde hat eine formale Rolle im Leben meines Sohnes?",
+    "sv": "Vilken av mina vänner har en formell roll i min sons liv?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n144",
+   "text": "Elsa's godmother is Karin.",
+   "group": "karin",
+   "q": {
+    "en": "Who did we choose as godparent for our daughter?",
+    "de": "Wer wurde als Paten für unsere Tochter gewählt?",
+    "sv": "Vem valde vi som gudmor för vår dotter?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n145",
+   "text": "The Christmas tree comes from the farm in Hirzel; we go the second Saturday of December.",
+   "q": {
+    "en": "Where do we get the tree for the holidays?",
+    "de": "Wo bekommen wir den Baum für die Feiertage?",
+    "sv": "Var hämtar vi granen till jul?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n146",
+   "text": "Midsummer is always at Erik's in Lund; we bring the herring.",
+   "q": {
+    "en": "Where do we celebrate the June holiday?",
+    "de": "Wo feiern wir den Juni-Feiertag?",
+    "sv": "Var firar vi helgen i juni?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n147",
+   "text": "The summer house in Skåne belongs to Sofia's family; her brother Anders manages the bookings.",
+   "q": {
+    "en": "Who owns the holiday house in the south and who runs the calendar?",
+    "de": "Wer besitzt das Ferienhaus im Süden und wer führt den Kalender?",
+    "sv": "Vem äger semesterstugan i söder och vem driver kalendern?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n148",
+   "text": "Anders is Sofia's older brother; he is a pilot with SAS.",
+   "group": "anders",
+   "q": {
+    "en": "What does my brother-in-law do?",
+    "de": "Was macht mein Schwager?",
+    "sv": "Vad gör min svåger?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n149",
+   "text": "Anders and his wife Helena have three kids and live outside Stockholm.",
+   "group": "anders",
+   "q": {
+    "en": "How big is Anders's family?",
+    "de": "Wie groß ist Andys Familie?",
+    "sv": "Hur stor är Anders familj?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n150",
+   "text": "The flight to Boston for the offsite is on the 8th; I land at 15:10 local time.",
+   "q": {
+    "en": "When do I arrive in the US for the work trip?",
+    "de": "Wann reise ich für die Geschäftsreise in die USA an?",
+    "sv": "När anländer jag till USA för arbetsresan?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n151",
+   "text": "The Lisbon offsite hotel was the Bairro Alto; the team dinner was at a fado place nearby.",
+   "q": {
+    "en": "Where did we stay on the team trip to Portugal?",
+    "de": "Wo haben wir auf der Teamreise nach Portugal übernachtet?",
+    "sv": "Var bodde vi på teamresan till Portugal?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n152",
+   "text": "My frequent flyer number is with SAS EuroBonus; the card is in the wallet app.",
+   "q": {
+    "en": "Which airline loyalty programme am I in?",
+    "de": "In welchem Airline-Loyalty-Programm bin ich?",
+    "sv": "I vilket flygbolags lojalitetsprogram är jag?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n153",
+   "text": "We always rent through Sixt at Arlanda; the corporate code gives a discount.",
+   "q": {
+    "en": "Which car hire do we use when landing in Stockholm?",
+    "de": "Welches Mietwagenunternehmen nutzen wir bei der Landung in Stockholm?",
+    "sv": "Vilket hyrbilsföretag använder vi vid landning i Stockholm?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n154",
+   "text": "The trip to Japan is pencilled in for April 2027, two weeks, Tokyo and Kyoto.",
+   "q": {
+    "en": "When are we going to Asia?",
+    "de": "Wann fahren wir nach Asien?",
+    "sv": "När ska vi åka till Asien?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n155",
+   "text": "I do not want to fly business on private trips; the money goes to the hotel instead.",
+   "q": {
+    "en": "What is my rule about seat class on holidays?",
+    "de": "Was ist meine Regel zur Sitzklasse an Feiertagen?",
+    "sv": "Vilken regel har jag om sittklass på semesterresor?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n156",
+   "text": "The espresso beans come from Stoll in Zurich; the medium roast, one kilo a month.",
+   "q": {
+    "en": "Where do I buy coffee and how much?",
+    "de": "Wo kaufe ich Kaffee und wie viel kostet er?",
+    "sv": "Var köper jag kaffe och hur mycket?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n157",
+   "text": "The sourdough starter is called Sigge and lives in the fridge; feed it on Fridays.",
+   "q": {
+    "en": "How do I look after the bread culture?",
+    "de": "Wie pflege ich die Brotkultur?",
+    "sv": "Hur sköter jag om surdegen?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n158",
+   "text": "Sofia's favourite flowers are peonies.",
+   "group": "sofia",
+   "q": {
+    "en": "What should I bring my wife from the florist?",
+    "de": "Was sollte ich meiner Frau vom Blumenhändler mitbringen?",
+    "sv": "Vad ska jag ta med till min fru från blomsterhandeln?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n159",
+   "text": "The anniversary dinner is booked at Kronenhalle on the 21st of June at 19:30.",
+   "q": {
+    "en": "Where are we celebrating our wedding day this year?",
+    "de": "Wo feiern wir in diesem Jahr unseren Hochzeitstag?",
+    "sv": "Var firar vi i år vårt bröllop?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n160",
+   "text": "Alex is a member of the Swiss Alpine Club, section Uto (since 2020).",
+   "q": {
+    "en": "Which mountaineering association do I belong to?",
+    "de": "Wozu gehöre ich im Bergsteigen?",
+    "sv": "Vilken bergsklättringsförening tillhör jag?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n161",
+   "text": "The ski pass for Flumserberg is the season pass; the kids' passes are on the family card.",
+   "q": {
+    "en": "Which resort do we have lift tickets for?",
+    "de": "Für welches Resort haben wir Lifttickets?",
+    "sv": "Vilken skidort har vi liftkort till?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n162",
+   "text": "My skis are Head Kore 93 from 2023; the bindings need adjusting for the new boots.",
+   "q": {
+    "en": "What needs doing on my winter gear before the season?",
+    "de": "Was muss ich an meiner Winterausrüstung vor der Saison tun?",
+    "sv": "Vad behöver jag göra med min vinterutrustning innan säsongen?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n163",
+   "text": "The bike is a Canyon Grail gravel bike; the lock code is Nils's birthday.",
+   "q": {
+    "en": "How do I open the lock on my bicycle?",
+    "de": "Wie öffne ich das Schloss meines Fahrrads?",
+    "sv": "Hur öppnar jag låset på min cykel?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n164",
+   "text": "I decided against the e-bike; the hill is fine on the gravel bike.",
+   "q": {
+    "en": "Did I go for the electric bicycle?",
+    "de": "Bin ich für das E-Fahrrad gegangen?",
+    "sv": "Blev det elcykeln?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n165",
+   "text": "The book club is Karin, Lisa, Sofia, and me; we rotate hosting.",
+   "group": "karin",
+   "q": {
+    "en": "Who is in the reading group?",
+    "de": "Wer ist im Lesezirkel?",
+    "sv": "Vilka är med i bokcirkeln?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n166",
+   "text": "Alex is reading Klara and the Sun (started in September).",
+   "q": {
+    "en": "What novel am I on at the moment?",
+    "de": "Welchen Roman bin ich gerade in?",
+    "sv": "Vilken roman håller jag på med just nu?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n167",
+   "text": "I finished Project Hail Mary in August and liked it more than The Martian.",
+   "q": {
+    "en": "What did I think of the Andy Weir book I read last?",
+    "de": "Was habe ich von dem Andy-Weir-Buch gehalten, das ich zuletzt gelesen habe?",
+    "sv": "Vad tyckte jag om den Andy Weir-bok som jag läste sist?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n168",
+   "text": "The TV in the living room is a 65-inch LG OLED from 2023; the soundbar is a Sonos Arc.",
+   "q": {
+    "en": "What audio system is under the television?",
+    "de": "Welches Audiosystem befindet sich unter dem Fernseher?",
+    "sv": "Vilket ljudsystem finns under tv:n?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n169",
+   "text": "The printer at home is a Brother laser; it takes the TN-2420 toner.",
+   "q": {
+    "en": "Which cartridge does the home printer need?",
+    "de": "Welches Patronen benötigt der Heimdrucker?",
+    "sv": "Vilken kassett behöver skrivaren där hemma?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n170",
+   "text": "The 3D printer is a Prusa MK4; filament from Prusament, PLA mostly.",
+   "q": {
+    "en": "What model is the printer that makes plastic parts?",
+    "de": "Welches Modell ist der Drucker, der Kunststoffteile herstellt?",
+    "sv": "Vilken modell är skrivaren som tillverkar plastdelar?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n171",
+   "text": "The lawn mower is a robot, a Husqvarna Automower; it lives in the shed and mows at night.",
+   "q": {
+    "en": "How does the grass get cut?",
+    "de": "Wie wird das Gras gemäht?",
+    "sv": "Hur klipps gräset?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n172",
+   "text": "The heating is an oil boiler from 2008; we are looking at a heat pump for 2027.",
+   "q": {
+    "en": "What are the plans for replacing the furnace?",
+    "de": "Was sind die Pläne für den Austausch des Kessels?",
+    "sv": "Vilka planer finns för att byta ut pannan?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n173",
+   "text": "Solar panels went on the roof in 2024, 9 kWp, with a 10 kWh battery.",
+   "q": {
+    "en": "How much electricity does the roof produce?",
+    "de": "Wie viel Strom erzeugt das Dach?",
+    "sv": "Hur mycket el ger taket?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n174",
+   "text": "The electrician we trust is Elektro Frei in Adliswil.",
+   "q": {
+    "en": "Who do we call for wiring work?",
+    "de": "Wer nennen wir für Elektroarbeiten?",
+    "sv": "Vem ringer vi för elarbeten?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n175",
+   "text": "The plumber who fixed the boiler was from Sanitär Kunz; ask for Reto.",
+   "q": {
+    "en": "Which tradesman did the heating repair?",
+    "de": "Welche Handwerker hat die Heizungsreparatur durchgeführt?",
+    "sv": "Vilken hantverkare gjorde reparationen av värmen?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n176",
+   "text": "The cleaner, Maria, comes on Thursdays; she has her own key.",
+   "q": {
+    "en": "On which day is the house cleaned?",
+    "de": "An welchem Tag wird das Haus gereinigt?",
+    "sv": "På vilken dag städas huset?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n177",
+   "text": "Alex speaks Swedish, English, and German, and some French.",
+   "q": {
+    "en": "Which languages can I get by in?",
+    "de": "In welchen Sprachen kann ich mich zurechtfinden?",
+    "sv": "I vilka språk kan jag klara mig?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n178",
+   "text": "I am taking Italian classes on Tuesday evenings at the Migros Klubschule, together with Sofia.",
+   "q": {
+    "en": "What course am I attending this term?",
+    "de": "Welchen Kurs besuche ich in diesem Semester?",
+    "sv": "Vilken kurs går jag på denna termin?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n179",
+   "text": "My driving licence is Swiss since 2021; the Swedish one was handed in.",
+   "q": {
+    "en": "Which country issued my current permit to drive?",
+    "de": "Welches Land hat meine aktuelle Fahrerlaubnis ausgestellt?",
+    "sv": "Vilket land har utfärdat mitt nuvarande körkort?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n180",
+   "text": "The residence permit C was granted in 2024.",
+   "q": {
+    "en": "What is my immigration status in Switzerland?",
+    "de": "Was ist mein Aufenthaltsstatus in der Schweiz?",
+    "sv": "Vad är min uppehållstillståndssituation i Schweiz?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n181",
+   "text": "Alex is a Swedish citizen, not a Swiss one.",
+   "q": {
+    "en": "Which passport do I hold?",
+    "de": "Welches Reisepass besitze ich?",
+    "sv": "Vilket pass har jag?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n182",
+   "text": "I vote by post in Sweden; the ballot papers come from the embassy in Bern.",
+   "q": {
+    "en": "How do I take part in elections back home?",
+    "de": "Wie kann ich an den Wahlen in meiner Heimat teilnehmen?",
+    "sv": "Hur kan jag delta i valen hemifrån?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n183",
+   "text": "The JavaOne talk is on the 12th at 14:00 in room 3; slides are due a week before.",
+   "q": {
+    "en": "When am I on stage at the conference?",
+    "de": "Wann bin ich auf der Bühne bei der Konferenz?",
+    "sv": "När är jag på scenen vid konferensen?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n184",
+   "text": "Alex is on the JFR working group at the OpenJDK project.",
+   "q": {
+    "en": "Which open-source committee am I part of?",
+    "de": "Welches Open-Source-Komitee bin ich Teil?",
+    "sv": "Vilken open source-kommitté sitter jag i?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n185",
+   "text": "The blog moved from WordPress to a static site on Cloudflare Pages in 2025.",
+   "q": {
+    "en": "Where is my website hosted now?",
+    "de": "Wo ist meine Website jetzt gehostet?",
+    "sv": "Var är min webbplats nu hostad?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n186",
+   "text": "The podcast I do with Daniel is called Runtime Stories; we record every other Friday.",
+   "group": "falcon",
+   "q": {
+    "en": "What is the name of the show I record with a colleague?",
+    "de": "Wie heißt die Show, die ich mit einem Kollegen aufnehme?",
+    "sv": "Vad heter programmet som jag spelar in med en kollega?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n187",
+   "text": "I turned down the offer from Google in 2024; the role was too far from the runtime work.",
+   "q": {
+    "en": "Why did I say no to the job at the search company?",
+    "de": "Warum habe ich dem Job bei der Suchfirma nein gesagt?",
+    "sv": "Varför sa jag nej till jobbet på sökföretaget?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n188",
+   "text": "Alex never worked at Microsoft.",
+   "q": {
+    "en": "Was I ever employed in Redmond?",
+    "de": "War ich jemals in Redmond beschäftigt?",
+    "sv": "Var jag någonsin anställd i Redmond?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n189",
+   "text": "The old Hooli badge from the Boston office is in the desk drawer; it still opens the Zurich office.",
+   "q": {
+    "en": "Where is my access card for the office?",
+    "de": "Wo ist meine Zugangskarte für das Büro?",
+    "sv": "Var är mitt passerkort till kontoret?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n190",
+   "text": "Team budget for travel is 3,000 francs per person per year.",
+   "q": {
+    "en": "How much can each team member spend on trips?",
+    "de": "Wie viel kann jedes Teammitglied für Reisen ausgeben?",
+    "sv": "Hur mycket kan varje teammedlem spendera på resor?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n191",
+   "text": "The intern this summer is Leila from ETH; she works on the Windows build of Falcon.",
+   "group": "falcon",
+   "q": {
+    "en": "Who is the student joining us, and what is she doing?",
+    "de": "Wer ist die Studentin, die zu uns kommt, und was macht sie?",
+    "sv": "Vem är studenten som kommer till oss, och vad gör hon?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n192",
+   "text": "The on-call rotation is one week in six; my next week starts on the 20th.",
+   "q": {
+    "en": "When am I next responsible for production alerts?",
+    "de": "Wann bin ich als Nächstes für Produktionswarnungen verantwortlich?",
+    "sv": "När är jag nästa gång ansvarig för produktionsvarningar?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n193",
+   "text": "The Åre cabin's address is Fjällvägen 14; the key box code is the year Erik was born.",
+   "q": {
+    "en": "How do we get into the mountain house?",
+    "de": "Wie kommen wir in das Berghaus?",
+    "sv": "Hur kommer vi in i stugan på berget?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n194",
+   "text": "Erik was born in 1948.",
+   "group": "erik",
+   "q": {
+    "en": "How old is my father?",
+    "de": "Wie alt ist mein Vater?",
+    "sv": "Hur gammal är min far?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n195",
+   "text": "Alex was born on the 19th of August 1974.",
+   "q": {
+    "en": "What is my date of birth?",
+    "de": "Was ist mein Geburtsdatum?",
+    "sv": "När är jag född?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  },
+  {
+   "id": "n196",
+   "text": "Sofia and Alex married in 2003 in Lund.",
+   "group": "sofia",
+   "q": {
+    "en": "In which year and town did we get married?",
+    "de": "In welchem Jahr und in welcher Stadt haben wir geheiratet?",
+    "sv": "I vilket år och i vilken stad gifte vi oss?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n197",
+   "text": "We moved from Stockholm to Switzerland in 2019 for my job.",
+   "q": {
+    "en": "Why did we leave Sweden?",
+    "de": "Warum sind wir aus Schweden weggegangen?",
+    "sv": "Varför lämnade vi Sverige?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n198",
+   "text": "Before Rüschlikon we rented in Kilchberg for a year.",
+   "q": {
+    "en": "Where did we live when we first arrived?",
+    "de": "Wo haben wir gelebt, als wir erstmalig ankamen?",
+    "sv": "Var bodde vi när vi först ankom?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n199",
+   "text": "I am considering selling the Malmö flat in 2028 when the lease ends.",
+   "q": {
+    "en": "What might happen to the apartment in Sweden in a couple of years?",
+    "de": "Was könnte in ein paar Jahren mit der Wohnung in Schweden geschehen?",
+    "sv": "Vad kan hända med lägenheten i Sverige om några år?"
+   },
+   "translated_by": "local-qwen3.5-9b"
+  },
+  {
+   "id": "n200",
+   "text": "Alex has decided not to take the sabbatical after all.",
+   "q": {
+    "en": "Is the long break from work still happening?",
+    "de": "Findet die lange Pause von der Arbeit immer noch statt?",
+    "sv": "Blir det fortfarande en lång paus från jobbet?"
+   },
+   "translated_by": "local-qwen3.5-9b, Swedish corrected by the assistant"
+  }
+ ]
+}

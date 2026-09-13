@@ -1,0 +1,81 @@
+[
+  {
+    "question_id": "fx-001",
+    "question_type": "single-session-user",
+    "question": "Which city did I move to for the new job?",
+    "answer": "Lisbon",
+    "question_date": "2023/06/10 (Sat) 09:00",
+    "haystack_session_ids": [
+      "s-alpha",
+      "s-beta",
+      "s-gamma"
+    ],
+    "haystack_dates": [
+      "2023/05/01 (Mon) 10:00",
+      "2023/05/15 (Mon) 18:30",
+      "2023/06/01 (Thu) 08:15"
+    ],
+    "haystack_sessions": [
+      [
+        {
+          "role": "user",
+          "content": "Can you recommend a good sourdough recipe for beginners?"
+        },
+        {
+          "role": "assistant",
+          "content": "Certainly. Start with a 75% hydration dough and a 12-hour bulk ferment."
+        }
+      ],
+      [
+        {
+          "role": "user",
+          "content": "I accepted the offer and I'm moving to Lisbon for the new job next month.",
+          "has_answer": true
+        },
+        {
+          "role": "assistant",
+          "content": "Congratulations on the move to Lisbon! Do you need help planning the relocation?"
+        }
+      ],
+      [
+        {
+          "role": "user",
+          "content": "What's a good beginner's route for cycling near the coast?"
+        },
+        {
+          "role": "assistant",
+          "content": "Coastal paths with little elevation are ideal for a first ride."
+        }
+      ]
+    ],
+    "answer_session_ids": [
+      "s-beta"
+    ]
+  },
+  {
+    "question_id": "fx-002_abs",
+    "question_type": "single-session-user",
+    "question": "What was the name of the dog I adopted?",
+    "answer": "The question is unanswerable: no dog was mentioned.",
+    "question_date": "2023/06/10 (Sat) 09:00",
+    "haystack_session_ids": [
+      "s-alpha"
+    ],
+    "haystack_dates": [
+      "2023/05/01 (Mon) 10:00"
+    ],
+    "haystack_sessions": [
+      [
+        {
+          "role": "user",
+          "content": "Can you recommend a good sourdough recipe for beginners?"
+        },
+        {
+          "role": "assistant",
+          "content": "Certainly. Start with a 75% hydration dough and a 12-hour bulk ferment."
+        }
+      ]
+    ],
+    "answer_session_ids": []
+  }
+]

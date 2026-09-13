@@ -1,0 +1,110 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  # ── Uber-jar (platform-independent) ──────────────────────────────────
+  uber-jar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v5
+        with:
+          java-version: '25'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Set version from tag
+        run: mvn -B versions:set -DnewVersion="${GITHUB_REF_NAME#v}" -DgenerateBackupPoms=false
+
+      - name: Build uber-jar
+        run: mvn -B package
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: uber-jar
+          path: server/target/mnemic-server-*-runner.jar
+
+  # ── Native images ────────────────────────────────────────────────────
+  native:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            suffix: linux-x86_64
+          - os: ubuntu-24.04-arm
+            suffix: linux-aarch64
+          - os: macos-latest
+            suffix: macos-aarch64
+          - os: windows-latest
+            suffix: windows-x86_64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up GraalVM
+        uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '25'
+          distribution: 'graalvm'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set version from tag
+        shell: bash
+        run: mvn -B versions:set -DnewVersion="${GITHUB_REF_NAME#v}" -DgenerateBackupPoms=false
+
+      - name: Build native image
+        run: mvn -B package -Dnative -DskipTests -pl server -am
+
+      - name: Sanity test native binary
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          EXT=""
+          if [ "${{ runner.os }}" = "Windows" ]; then EXT=".exe"; fi
+          mvn -B -pl server test-compile failsafe:integration-test -Dnative.image.path=target/mnemic-server-${VERSION}-runner${EXT}
+
+      - name: Rename binary
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          EXT=""
+          if [ "${{ runner.os }}" = "Windows" ]; then EXT=".exe"; fi
+          mv server/target/mnemic-server-${VERSION}-runner${EXT} server/target/mnemic-${VERSION}-${{ matrix.suffix }}${EXT}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: native-${{ matrix.suffix }}
+          path: |
+            server/target/mnemic-*-${{ matrix.suffix }}
+            server/target/mnemic-*-${{ matrix.suffix }}.exe
+
+  # ── Create GitHub release with all artifacts ─────────────────────────
+  release:
+    needs: [ uber-jar, native ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v5
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: find artifacts -type f | sort
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: artifacts/*

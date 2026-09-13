@@ -1,0 +1,43 @@
+# Maven
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+buildNumber.properties
+.mvn/timing.properties
+.mvn/wrapper/maven-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+.project
+.classpath
+.settings/
+.factorypath
+.vscode/
+*.code-workspace
+nbproject/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Quarkus
+.quarkus/
+
+# Runtime artifacts
+mnemic.log*
+*.db
+*.db-wal
+*.db-shm
+
+# Benchmark data and results (datasets are MIT but large; results carry run ids in docs/BENCHMARKS.md)
+bench/data/
+bench/results/
+bench/cache/
+
+# Internal working notes (research on third-party projects and the pre-implementation stack memo); not for publication
+docs/other/

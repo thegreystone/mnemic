@@ -1,0 +1,91 @@
+/*
+ * Copyright (C) 2026 Marcus Hirt
+ *
+ * This software is free:
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESSED OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+package se.hirt.mnemic.persistence;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
+
+/** One result row as an ordered column map with typed accessors. Column names are as SQLite returns them. */
+public final class Row {
+
+	private final Map<String, Object> columns;
+
+	Row(Map<String, Object> columns) {
+		this.columns = new LinkedHashMap<>(columns);
+	}
+
+	public Object get(String column) {
+		return columns.get(column);
+	}
+
+	public String str(String column) {
+		Object v = columns.get(column);
+		return v == null ? null : v.toString();
+	}
+
+	public long lng(String column) {
+		Object v = columns.get(column);
+		if (v == null) {
+			throw new IllegalStateException("Column " + column + " is NULL");
+		}
+		return ((Number) v).longValue();
+	}
+
+	public Double dblOrNull(String column) {
+		Object v = columns.get(column);
+		return v == null ? null : ((Number) v).doubleValue();
+	}
+
+	public Long lngOrNull(String column) {
+		Object v = columns.get(column);
+		return v == null ? null : ((Number) v).longValue();
+	}
+
+	public Integer intOrNull(String column) {
+		Object v = columns.get(column);
+		return v == null ? null : ((Number) v).intValue();
+	}
+
+	public double dbl(String column) {
+		return ((Number) columns.get(column)).doubleValue();
+	}
+
+	public boolean has(String column) {
+		return columns.containsKey(column);
+	}
+
+	public Map<String, Object> asMap() {
+		return new LinkedHashMap<>(columns);
+	}
+
+	@Override
+	public String toString() {
+		return columns.toString();
+	}
+}
