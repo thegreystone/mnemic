@@ -1,0 +1,90 @@
+{
+  "manifest_version": "0.3",
+  "name": "mnemic",
+  "display_name": "Mnemic",
+  "version": "__VERSION__",
+  "description": "Long-term memory for your assistant: what you told it, kept as dated facts in one local SQLite file, recalled before it answers.",
+  "long_description": "Mnemic remembers what you tell your assistant across conversations and hands it back when it matters: the current job, the home, the family, the decision from last month, the thing you said you would do. Facts carry when they were true, so a corrected fact keeps its history and a question about 2019 gets the 2019 answer. Everything lives in one SQLite file in a folder you choose; no account, no service, and no model call unless you configure one. On first start Mnemic downloads its embedding model (about 350 MB, from Hugging Face) into the models folder under your home directory; after that it works offline. Enter your name in the settings so that \"I\" and \"me\" mean you.",
+  "author": {
+    "name": "Marcus Hirt",
+    "url": "https://www.hirt.se"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/thegreystone/mnemic"
+  },
+  "homepage": "https://github.com/thegreystone/mnemic",
+  "documentation": "https://github.com/thegreystone/mnemic/blob/main/README.md",
+  "support": "https://github.com/thegreystone/mnemic/issues",
+  "license": "BSD-3-Clause",
+  "keywords": ["memory", "knowledge", "recall", "facts", "local-first", "privacy"],
+  "server": {
+    "type": "binary",
+    "entry_point": "server/mnemic-__VERSION__-macos-aarch64",
+    "mcp_config": {
+      "command": "${__dirname}/server/mnemic-__VERSION__-macos-aarch64",
+      "args": ["-Dquarkus.mcp.server.stdio.enabled=true"],
+      "env": {
+        "MNEMIC_HOME": "${user_config.data_dir}",
+        "MNEMIC_OWNER": "${user_config.owner}",
+        "MNEMIC_OWNER_ALIASES": "${user_config.owner_aliases}",
+        "MNEMIC_OWNER_EMAILS": "${user_config.owner_emails}",
+        "MNEMIC_OWNER_GITHUB": "${user_config.owner_github}",
+        "MNEMIC_OWNER_HANDLES": "${user_config.owner_handles}"
+      },
+      "platform_overrides": {
+        "darwin": {
+          "command": "${__dirname}/server/mnemic-__VERSION__-macos-aarch64"
+        },
+        "win32": {
+          "command": "${__dirname}/server/mnemic-__VERSION__-windows-x86_64.exe"
+        }
+      }
+    }
+  },
+  "tools_generated": true,
+  "prompts_generated": false,
+  "user_config": {
+    "owner": {
+      "type": "string",
+      "title": "Your name",
+      "description": "The person \"I\", \"me\", and \"my\" refer to, as you want it rendered in facts, for example Alice Example.",
+      "required": true
+    },
+    "data_dir": {
+      "type": "directory",
+      "title": "Data home",
+      "description": "Where the memory is kept: one SQLite file, mnemic.db, and a log. Back up this folder and your memory is safe. Point a second assistant at a different folder to give it a memory of its own. A leading ~ means your home directory.",
+      "default": "~/.mnemic",
+      "required": false
+    },
+    "owner_aliases": {
+      "type": "string",
+      "title": "Other names",
+      "description": "Nicknames or the surname alone, comma-separated, so that they resolve to you as well. Leave empty if none.",
+      "required": false
+    },
+    "owner_emails": {
+      "type": "string",
+      "title": "E-mail addresses",
+      "description": "Comma-separated. Useful when the memory is used for code or mail work, where addresses appear in what is remembered.",
+      "required": false
+    },
+    "owner_github": {
+      "type": "string",
+      "title": "GitHub handle",
+      "description": "Without the @. Commits and issues carry it.",
+      "required": false
+    },
+    "owner_handles": {
+      "type": "string",
+      "title": "Other handles",
+      "description": "Comma-separated, with or without a leading @, for example @alice_example or slack:alice.",
+      "required": false
+    }
+  },
+  "compatibility": {
+    "claude_desktop": ">=1.0.0",
+    "platforms": ["darwin", "win32"]
+  }
+}

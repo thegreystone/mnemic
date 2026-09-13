@@ -154,3 +154,19 @@ temporal-reasoning (0.666 → 0.758); on the 106 questions lexical misses, it is
 `.github/workflows/release.yml` builds the uber-jar and native binaries for linux-x86_64, linux-aarch64,
 macos-aarch64, and windows-x86_64 on a tag, runs the native sanity IT on each, and names the binaries
 `mnemic-<version>-<platform>`.
+
+### MCP Bundles
+
+The release also packs an [MCP Bundle](https://github.com/anthropics/mcpb) (`.mcpb`) for macOS and Windows,
+the two platforms that have Claude Desktop. A bundle is the binary under `server/` plus a `manifest.json`
+filled in from [`mcpb/manifest.json`](../mcpb/manifest.json) (`__VERSION__`, `__BINARY__`, and `__PLATFORM__`
+are substituted). The manifest maps the extension settings onto the `MNEMIC_*` variables from the README, so
+the bundle and the manual configuration behave the same. Packing is [`mcpb/pack.sh`](../mcpb/pack.sh), run on
+the runner that built the binary so the executable bit survives on macOS.
+
+A **universal** bundle, `mnemic-<version>-universal.mcpb`, carries the macOS and Windows binaries with
+[`mcpb/manifest-universal.json`](../mcpb/manifest-universal.json) choosing one at launch; it is what a
+plugin-marketplace entry points at, since a plugin can reference only one bundle. Linux is left out, as
+Claude Desktop does not run there. It is packed on Linux by [`mcpb/pack-universal.sh`](../mcpb/pack-universal.sh).
+The manual `Bundles` workflow (`.github/workflows/bundle.yml`) re-packs any of these for an already published
+release, for instance after a binary on the release was replaced.

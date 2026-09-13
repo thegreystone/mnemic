@@ -60,8 +60,14 @@ Download the binary for your platform from the releases page, or build one yours
 | Windows x86_64 | `mnemic-<version>-windows-x86_64.exe` |
 | any, with a JDK 25 | `mnemic-server-<version>-runner.jar` |
 
+**Claude Desktop users:** the simplest install is the MCP Bundle, `mnemic-<version>-macos-aarch64.mcpb` or
+`mnemic-<version>-windows-x86_64.mcpb`, from the same releases page; see [Claude Desktop](#claude-desktop-and-other-json-configured-clients).
+
 Put the binary somewhere stable and, on Linux or macOS, make it executable. It starts in well under a second
-and needs nothing else installed.
+and needs nothing else installed. The macOS binary is signed and notarized, so Gatekeeper accepts it as
+downloaded; the one exception is a first launch while offline, because Gatekeeper fetches the notarization
+ticket from Apple, and then `xattr -d com.apple.quarantine mnemic-<version>-macos-aarch64` clears the flag
+once. The Windows binary is Authenticode-signed.
 
 Mnemic keeps its memory in a **data home**, a folder holding `mnemic.db` and a log. The default is `.mnemic`
 in your home directory. Keep the binary and the data home apart: one installed binary can serve several data
@@ -97,6 +103,14 @@ claude mcp add mnemic -e MNEMIC_OWNER="Alice Example" -e MNEMIC_HOME=/home/alice
 ```
 
 ### Claude Desktop and other JSON-configured clients
+
+The easiest way into Claude Desktop is the MCP Bundle: download the `.mcpb` for macOS or Windows from the
+releases page and double-click it, or open it from *Settings → Extensions*. Its settings page asks for your
+name and, optionally, the data home and your other names, addresses, and handles; there is no file to edit.
+The bundle wraps the same binary as the standalone download. The bundle file itself carries no signature,
+so Claude Desktop shows its standard unsigned-extension notice before installing.
+
+For other JSON-configured clients, or to point Claude Desktop at a binary you installed yourself:
 
 ```json
 {
@@ -237,7 +251,7 @@ structure alone, most of it on questions that draw on several conversations
 ## What is coming
 
 Derived facts, such as who your colleagues are from where everyone works; GPU acceleration for large
-stores; and packaged installs for the common assistants.
+stores; and package-manager installs (Homebrew, winget).
 
 ## About the name
 
