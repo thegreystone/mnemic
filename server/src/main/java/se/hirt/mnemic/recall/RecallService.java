@@ -34,6 +34,7 @@ import se.hirt.mnemic.embed.VectorStore;
 import se.hirt.mnemic.knowledge.Containment;
 import se.hirt.mnemic.knowledge.Entity;
 import se.hirt.mnemic.knowledge.EntityService;
+import se.hirt.mnemic.knowledge.EntityTypeRegistry;
 import se.hirt.mnemic.knowledge.Event;
 import se.hirt.mnemic.knowledge.EventService;
 import se.hirt.mnemic.knowledge.Fact;
@@ -138,14 +139,16 @@ public final class RecallService {
 	private final Clock clock;
 	private final VectorStore vectors;
 	private final EmbedderHolder holder;
+	private final EntityTypeRegistry types;
 	private final StructuredProbe probe;
 	private final RecallRenderer renderer;
 
 	/** {@code vectors} and {@code holder} carry the semantic channel; the holder may deliver its embedder later. */
 	public RecallService(Database db, EntityService entities, PredicateRegistry predicates, FactQueries facts,
 			EventService events, Containment containment, TokenEstimator tokens, Clock clock, VectorStore vectors,
-			EmbedderHolder holder) {
+			EmbedderHolder holder, EntityTypeRegistry types) {
 		this.db = db;
+		this.types = types;
 		this.entities = entities;
 		this.predicates = predicates;
 		this.facts = facts;
@@ -154,7 +157,7 @@ public final class RecallService {
 		this.clock = clock;
 		this.vectors = vectors;
 		this.holder = holder;
-		this.probe = new StructuredProbe(entities, facts, containment);
+		this.probe = new StructuredProbe(entities, facts, containment, types);
 		this.renderer = new RecallRenderer(predicates, facts, holder);
 	}
 
@@ -176,7 +179,7 @@ public final class RecallService {
 			throw MnemicException.invalidArgument("'max_tokens' must be positive, e.g. 800.");
 		}
 		Instant now = clock.instant();
-		Query q = Query.analyse(query, entities, predicates);
+		Query q = Query.analyse(query, entities, predicates, types);
 		Structured s = probe.probe(q, asOf, now, includeHistory);
 		Gates g = gates(q, s);
 		var ch = new Channels();

@@ -104,14 +104,17 @@ public record Predicate(String name, String description, List<String> domain, Li
 		return range.contains("literal");
 	}
 
-	public boolean acceptsSubject(String type) {
-		return domain.contains("*") || domain.contains(type) || "unknown".equals(type)
-				|| (Names.isPlace(type) && domain.contains("place"));
+	/** Whether the domain admits an entity whose type lineage (the type and its ancestors) is given. */
+	public boolean acceptsSubject(List<String> lineage) {
+		return accepts(domain, lineage);
 	}
 
-	public boolean acceptsObject(String type) {
-		return range.contains("*") || range.contains(type) || "unknown".equals(type)
-				|| (Names.isPlace(type) && range.contains("place"));
+	public boolean acceptsObject(List<String> lineage) {
+		return accepts(range, lineage);
+	}
+
+	private static boolean accepts(List<String> allowed, List<String> lineage) {
+		return allowed.contains("*") || lineage.contains("unknown") || lineage.stream().anyMatch(allowed::contains);
 	}
 
 	private static final Set<String> AUXILIARY = Set.of("is", "are", "was", "were", "has", "had", "does", "did", "can",

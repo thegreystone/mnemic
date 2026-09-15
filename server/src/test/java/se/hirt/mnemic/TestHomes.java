@@ -149,6 +149,8 @@ public final class TestHomes {
 		private final List<EventRef> events = new ArrayList<>();
 		private final List<FactRef> facts = new ArrayList<>();
 		private final List<PredicateDef> predicates = new ArrayList<>();
+		private final List<EventTypeDef> eventTypes = new ArrayList<>();
+		private final List<EntityTypeDef> entityTypes = new ArrayList<>();
 
 		public P entity(String ref, String name, String type) {
 			entities.add(new EntityRef(ref, name, type, List.of()));
@@ -186,9 +188,20 @@ public final class TestHomes {
 			return this;
 		}
 
+		public P eventType(EventTypeDef def) {
+			eventTypes.add(def);
+			return this;
+		}
+
+		public P entityType(EntityTypeDef def) {
+			entityTypes.add(def);
+			return this;
+		}
+
 		public Proposal build() {
 			return new Proposal(Proposal.CURRENT_SPEC_VERSION, List.copyOf(entities), List.copyOf(events),
-					List.copyOf(facts), List.copyOf(predicates));
+					List.copyOf(facts), List.copyOf(predicates), List.of(), List.copyOf(eventTypes),
+					List.copyOf(entityTypes));
 		}
 	}
 }

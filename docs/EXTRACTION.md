@@ -119,6 +119,17 @@ eight facts each; then up to five open questions. Nothing in the ordering comes
 from a caller-supplied importance score, which would be opinion recorded as
 evidence.
 
+#### Event types and entity types
+
+The same holds for the other two vocabularies. A proposal may carry `event_types` (name, description, the
+predicates the type `opens`, `closes`, or `supersedes`, `ends_entity`, and the `lexicon` a question names it by)
+and `entity_types` (name, description, an optional `parent` the kind nests within, `synonyms` that map a proposed
+type onto it, and `type_words`, the words that say what kind of thing a name is rather than which one). Both are
+validated (an event type may only name registered predicates, a parent must exist), stored, listed by
+`list_predicates` with their origin, and corrected through `correct`, which logs every change with its reason.
+An event of a type nobody registered is stored as a plain occurrence with no effect on facts; an entity type
+nobody registered passes through as written.
+
 #### Predicate registry
 
 Predicates are first-class knowledge objects, not an enum. Mnemic ships with a

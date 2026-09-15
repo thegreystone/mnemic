@@ -16,7 +16,9 @@ MEMORY PROTOCOL
    structured reading of it as `proposal`, its literal parts in the store's language (`status` names it),
    the observation in the user's own words. A leaning or intention is `considering`, not `decided`. What the
    user says is not so goes in as a negated fact, a restriction (`only`), or a closure, never as a fact with
-   the bound as its object. Call `list_predicates` when unsure what relation to use; `status` only counts
+   the bound as its object. An event type or entity type the registry lacks goes in the same proposal
+   (`event_types`, `entity_types`) and stays registered. Call `list_predicates` when unsure what relation, event
+   type, or entity type to use; `status` only counts
    them. Record at
    natural boundaries: a topic change, the end of a task, before your context is compacted. Do not record
    every message.

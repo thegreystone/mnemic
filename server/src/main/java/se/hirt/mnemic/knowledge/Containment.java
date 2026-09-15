@@ -129,8 +129,4 @@ public final class Containment {
 		return tx.queryOne("SELECT type FROM entity WHERE id = ?", entityId).map(r -> r.str("type")).orElse("unknown");
 	}
 
-	/** A closure over {@code place} covers towns and countries; any other class is exact. */
-	public static boolean kindMatches(String closureType, String entityType) {
-		return closureType.equals(entityType) || ("place".equals(closureType) && Names.isPlace(entityType));
-	}
 }

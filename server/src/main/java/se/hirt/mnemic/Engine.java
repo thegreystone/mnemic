@@ -32,6 +32,7 @@ import se.hirt.mnemic.embed.Embedder;
 import se.hirt.mnemic.embed.EmbedderHolder;
 import se.hirt.mnemic.embed.VectorStore;
 import se.hirt.mnemic.knowledge.EntityService;
+import se.hirt.mnemic.knowledge.EntityTypeRegistry;
 import se.hirt.mnemic.knowledge.EventService;
 import se.hirt.mnemic.knowledge.EventTypeRegistry;
 import se.hirt.mnemic.knowledge.FactQueries;
@@ -180,7 +181,7 @@ public final class Engine implements AutoCloseable {
 		this.vectors = new VectorStore(db);
 		this.recall = new RecallService(db, knowledge.entities(), knowledge.predicates(), knowledge.facts(),
 				knowledge.events(), knowledge.containment(), TokenEstimator.CHARS_PER_TOKEN, options.clock(), vectors,
-				options.embedder());
+				options.embedder(), knowledge.entityTypes());
 		this.briefing = recall.briefing(knowledge.questions());
 		String renderedIn = db.meta("language");
 		if (db.migrated() > 0 || !options.lang().code().equals(renderedIn)) {
@@ -378,6 +379,51 @@ public final class Engine implements AutoCloseable {
 		return out;
 	}
 
+	/** Corrects an event type's definition; the change is logged with its reason. */
+	public Map<String, Object> correctEventType(String name, Map<String, Object> replacement, String reason) {
+		requireReplacement(replacement, "{\"closes\": [\"works_at\"]} or {\"lexicon\": [\"quit\", \"resigned\"]}");
+		var before = knowledge.eventTypes().get(name)
+				.orElseThrow(() -> MnemicException.notFound("No event type " + name));
+		var after = knowledge.eventTypes().update(name, replacement, reason,
+				p -> knowledge.predicates().get(p).isPresent());
+		var out = new LinkedHashMap<String, Object>();
+		out.put("event_type", after.name());
+		out.put("before", Map.of("opens", before.opens(), "closes", before.closes(), "supersedes", before.supersedes(),
+				"ends_entity", before.endsEntity(), "lexicon", before.lexicon()));
+		out.put("after", Map.of("opens", after.opens(), "closes", after.closes(), "supersedes", after.supersedes(),
+				"ends_entity", after.endsEntity(), "lexicon", after.lexicon()));
+		out.put("changes", knowledge.eventTypes().changes(after.name()));
+		return out;
+	}
+
+	/** Corrects an entity type's definition; the change is logged with its reason. */
+	public Map<String, Object> correctEntityType(String name, Map<String, Object> replacement, String reason) {
+		requireReplacement(replacement, "{\"parent\": \"place\"} or {\"type_words\": [\"kanton\", \"canton\"]}");
+		var before = knowledge.entityTypes().get(name)
+				.orElseThrow(() -> MnemicException.notFound("No entity type " + name));
+		var after = knowledge.entityTypes().update(name, replacement, reason);
+		var out = new LinkedHashMap<String, Object>();
+		out.put("entity_type", after.name());
+		out.put("before", typeMap(before));
+		out.put("after", typeMap(after));
+		out.put("changes", knowledge.entityTypes().changes(after.name()));
+		return out;
+	}
+
+	private static Map<String, Object> typeMap(EntityTypeRegistry.EntityType t) {
+		var m = new LinkedHashMap<String, Object>();
+		m.put("parent", t.parent());
+		m.put("synonyms", t.synonyms());
+		m.put("type_words", t.typeWords());
+		return m;
+	}
+
+	private static void requireReplacement(Map<String, Object> replacement, String example) {
+		if (replacement == null || replacement.isEmpty()) {
+			throw MnemicException.invalidArgument("'replacement' must name what changes, e.g. " + example + ".");
+		}
+	}
+
 	public History history(long entityId, String predicate) {
 		return knowledge.facts().history(entityId, predicate);
 	}
@@ -565,6 +611,10 @@ public final class Engine implements AutoCloseable {
 
 	public EventTypeRegistry eventTypes() {
 		return knowledge.eventTypes();
+	}
+
+	public EntityTypeRegistry entityTypes() {
+		return knowledge.entityTypes();
 	}
 
 	public EntityService entities() {

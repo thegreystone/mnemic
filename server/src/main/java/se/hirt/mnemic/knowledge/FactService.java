@@ -37,6 +37,8 @@ import se.hirt.mnemic.persistence.Tx;
 import se.hirt.mnemic.proposal.Proposal;
 import se.hirt.mnemic.proposal.Proposal.ClosureRef;
 import se.hirt.mnemic.proposal.Proposal.EntityRef;
+import se.hirt.mnemic.proposal.Proposal.EntityTypeDef;
+import se.hirt.mnemic.proposal.Proposal.EventTypeDef;
 import se.hirt.mnemic.proposal.Proposal.EventRef;
 import se.hirt.mnemic.proposal.Proposal.FactRef;
 import se.hirt.mnemic.proposal.Proposal.PredicateDef;
@@ -69,14 +71,14 @@ public final class FactService {
 	/** What a proposal produced. Every id is reported so the caller can refer to it later. */
 	public record Applied(List<EntityOut> entities, List<EventOut> events, List<FactOut> facts,
 			List<PredicateOut> predicates, List<Map<String, Object>> questions, List<String> warnings,
-			List<Map<String, Object>> superseded) {
+			List<Map<String, Object>> superseded, List<Map<String, Object>> definitions) {
 		public static final Applied NOTHING = new Applied(List.of(), List.of(), List.of(), List.of(), List.of(),
-				List.of(), List.of());
+				List.of(), List.of(), List.of());
 
 		public Applied withWarning(String warning) {
 			var all = new ArrayList<>(warnings);
 			all.add(warning);
-			return new Applied(entities, events, facts, predicates, questions, all, superseded);
+			return new Applied(entities, events, facts, predicates, questions, all, superseded, definitions);
 		}
 	}
 
@@ -134,6 +136,8 @@ public final class FactService {
 		final List<EventOut> eventOut = new ArrayList<>();
 		final List<FactOut> factOut = new ArrayList<>();
 		final List<PredicateOut> predicateOut = new ArrayList<>();
+		/** Event types and entity types the proposal defined: {@code {kind, name, resolution}}. */
+		final List<Map<String, Object>> definitions = new ArrayList<>();
 
 		Application(Observation obs, Proposal p, Map<String, Entity> bound) {
 			this.obs = obs;
@@ -157,7 +161,8 @@ public final class FactService {
 		}
 
 		Applied result() {
-			return new Applied(entityOut, eventOut, factOut, predicateOut, questions, warnings, superseded);
+			return new Applied(entityOut, eventOut, factOut, predicateOut, questions, warnings, superseded,
+					definitions);
 		}
 	}
 
@@ -177,6 +182,7 @@ public final class FactService {
 	private final FactRenderer renderer;
 	private final FactLedger ledger;
 	private final ConflictCheck conflicts;
+	private final EntityTypeRegistry types;
 	private final Lang lang;
 
 	/**
@@ -188,7 +194,7 @@ public final class FactService {
 
 	FactService(Database db, EntityService entities, PredicateRegistry predicates, EventTypeRegistry eventTypes,
 			EventService events, QuestionService questions, FactQueries queries, FactQuestions asks,
-			FactRenderer renderer, FactLedger ledger) {
+			FactRenderer renderer, FactLedger ledger, EntityTypeRegistry types) {
 		this.db = db;
 		this.entities = entities;
 		this.predicates = predicates;
@@ -199,7 +205,8 @@ public final class FactService {
 		this.asks = asks;
 		this.renderer = renderer;
 		this.ledger = ledger;
-		this.conflicts = new ConflictCheck(eventTypes);
+		this.types = types;
+		this.conflicts = new ConflictCheck(eventTypes, types);
 		this.lang = renderer.lang();
 	}
 
@@ -219,6 +226,7 @@ public final class FactService {
 			}
 			declaredInProposal = declared;
 			var a = new Application(obs, p, bound);
+			registerVocabulary(a);
 			resolveEntities(a);
 			List<FactRef> opened = applyEvents(a);
 			applyFacts(a, opened);
@@ -242,6 +250,45 @@ public final class FactService {
 		out.removeAll(own);
 		out.remove(entities.owner().id());
 		return out;
+	}
+
+	/**
+	 * Vocabulary the proposal defines goes first, so the entities and events that follow can use it. A definition that
+	 * names an unknown predicate or parent is skipped with a warning; an existing name is left as it is.
+	 */
+	private void registerVocabulary(Application a) {
+		for (EntityTypeDef d : a.p.entityTypes()) {
+			try {
+				boolean known = d.name() != null && types.get(d.name().replace(' ', '_')).isPresent();
+				a.definitions.add(definition("entity_type", types.register(d, a.obs.id()).name(), known));
+			} catch (MnemicException e) {
+				skipped(a, e, "Entity type '" + d.name() + "'");
+			}
+		}
+		for (EventTypeDef d : a.p.eventTypes()) {
+			try {
+				boolean known = d.name() != null && eventTypes.get(d.name().replace(' ', '_')).isPresent();
+				var t = eventTypes.register(d, a.obs.id(), name -> predicates.get(name).isPresent());
+				a.definitions.add(definition("event_type", t.name(), known));
+			} catch (MnemicException e) {
+				skipped(a, e, "Event type '" + d.name() + "'");
+			}
+		}
+	}
+
+	private static Map<String, Object> definition(String kind, String name, boolean known) {
+		var m = new LinkedHashMap<String, Object>();
+		m.put("kind", kind);
+		m.put("name", name);
+		m.put("resolution", known ? "exists" : "registered");
+		return m;
+	}
+
+	private static void skipped(Application a, MnemicException e, String what) {
+		if (e.code() != MnemicException.Code.INVALID_ARGUMENT) {
+			throw e;
+		}
+		a.warnings.add(what + " skipped: " + e.getMessage());
 	}
 
 	private void resolveEntities(Application a) {
@@ -360,8 +407,8 @@ public final class FactService {
 			}
 			for (String pred : et.get().opens()) {
 				Predicate pr = predicates.get(pred).orElse(null);
-				if (pr == null || pr.literalRange() || !pr.acceptsSubject(subj.type())
-						|| !pr.acceptsObject(obj.type())) {
+				if (pr == null || pr.literalRange() || !pr.acceptsSubject(types.lineage(subj.type()))
+						|| !pr.acceptsObject(types.lineage(obj.type()))) {
 					continue;
 				}
 				opened.add(new FactRef(ev.participants().getFirst(), pred, ev.participants().get(i), null, null,
@@ -548,7 +595,7 @@ public final class FactService {
 			if (object == null) {
 				return null;
 			}
-			if ("only".equals(mode) && !Names.isPlace(object.type())) {
+			if ("only".equals(mode) && !types.isA(object.type(), "place")) {
 				throw MnemicException.invalidArgument("'only' needs a place as its object (the bound everything lies "
 						+ "within); " + object.name() + " is " + object.type() + ".");
 			}
@@ -556,11 +603,11 @@ public final class FactService {
 				warnIfContainsAnotherObject(a, subject, pred, object);
 			}
 		}
-		if (!pred.acceptsSubject(subject.type())) {
+		if (!pred.acceptsSubject(types.lineage(subject.type()))) {
 			a.ask(asks.typeMismatch(a.obs, pred, "subject", subject, pred.domain()));
 			return null;
 		}
-		if (object != null && !pred.acceptsObject(object.type())) {
+		if (object != null && !pred.acceptsObject(types.lineage(object.type()))) {
 			a.ask(asks.typeMismatch(a.obs, pred, "object", object, pred.range()));
 			return null;
 		}
@@ -673,7 +720,7 @@ public final class FactService {
 		if (subject == null) {
 			return Optional.empty();
 		}
-		String type = Names.type(c.type());
+		String type = types.canonical(c.type());
 		String rendering = renderer.sentence(pred, "closure", subject.name(), type, null, null);
 		String kind = derivationKind(
 				new FactRef(c.subject(), c.predicate(), type, null, null, null, null, List.of(), null, null), a.obs,

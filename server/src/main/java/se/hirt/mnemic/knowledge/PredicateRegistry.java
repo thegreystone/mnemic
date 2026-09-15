@@ -79,13 +79,15 @@ public final class PredicateRegistry {
 
 	private final Database db;
 	private final Lang lang;
+	private final EntityTypeRegistry entityTypes;
 	/** The negation templates of the language, by predicate; empty for the base language. */
 	private final Map<String, String> negated = new HashMap<>();
 	private Map<String, Predicate> cache;
 
 	/** {@code lang}: the store's language; its templates and cue words are loaded over the base (English) ones. */
-	public PredicateRegistry(Database db, Lang lang) {
+	public PredicateRegistry(Database db, Lang lang, EntityTypeRegistry entityTypes) {
 		this.db = db;
+		this.entityTypes = entityTypes;
 		this.lang = lang;
 		seedIfMissing();
 		seedRendersIfMissing();
@@ -639,7 +641,7 @@ public final class PredicateRegistry {
 				list(r.str("aliases")), list(r.str("inverse_lexicon")), r.lngOrNull("defined_by"), r.lng("seed") == 1);
 	}
 
-	private static List<String> types(String csv) {
+	private List<String> types(String csv) {
 		if (csv == null || csv.isBlank()) {
 			return List.of("*");
 		}
@@ -647,7 +649,7 @@ public final class PredicateRegistry {
 		for (String t : csv.split("[|,/]")) {
 			String v = t.trim();
 			if (!v.isEmpty()) {
-				out.add("*".equals(v) || "literal".equals(v) ? v : Names.type(v));
+				out.add("*".equals(v) || "literal".equals(v) ? v : entityTypes.canonical(v));
 			}
 		}
 		return out.isEmpty() ? List.of("*") : out;

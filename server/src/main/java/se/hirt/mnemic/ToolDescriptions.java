@@ -48,7 +48,15 @@ final class ToolDescriptions {
 			+ "\"participants\": [\"self\", \"Hooli\"], \"valid_time\": {\"start\": \"2018\"}}]}. Subjects and objects are "
 			+ "entity names or 'self'; predicates come from the registry (works_at, holds_role, leads, lives_in, born_in, "
 			+ "member_of, parent_of[mother|father], spouse_of, sibling_of, owns, prefers, dislikes, uses, decided, "
-			+ "considering, related_to, knows, part_of, located_in) or are defined in 'predicates'. A leaning, plan, or "
+			+ "considering, related_to, knows, part_of, located_in) or are defined in 'predicates'. Vocabulary the "
+			+ "registry lacks is defined in the same proposal and kept for good: \"event_types\": [{\"name\": "
+			+ "\"inherited\", \"description\": ..., \"opens\": [\"owns\"], \"closes\": [], \"supersedes\": [], "
+			+ "\"ends_entity\": false, \"lexicon\": [\"inherited\", \"inherit\"]}] for an event type (what it opens, "
+			+ "closes, or supersedes must be registered predicates), and \"entity_types\": [{\"name\": \"canton\", "
+			+ "\"parent\": \"place\", \"synonyms\": [\"kanton\"], \"type_words\": [\"kanton\", \"canton\"]}] "
+			+ "for a kind of entity (parent nests it, so everything that accepts a place accepts a canton; type_words "
+			+ "say what kind of thing a name is rather than which one). Entity types are written in the 'type' of an "
+			+ "entity, e.g. {\"name\": \"Kanton Schwyz\", \"type\": \"canton\"}. A leaning, plan, or "
 			+ "intention ('leaning toward the H2D') is 'considering', never 'decided'. The store has a language (status: "
 			+ "'language'): write literal objects, qualifiers, event types, and predicate definitions in it, whatever "
 			+ "language the conversation was in; names and the observation text stay as they are. What is NOT so has its "
@@ -110,12 +118,15 @@ final class ToolDescriptions {
 			+ "can be corrected too (pass valid_time to fix an end date an event set wrongly); a corrected or rejected one "
 			+ "cannot. To correct a predicate's definition instead (its render template, lexicon, qualifiers, functional "
 			+ "flag, description) pass 'predicate' with the name and 'replacement' with the changed keys; every fact under "
-			+ "it is re-rendered.";
+			+ "it is re-rendered. To correct an event type (description, opens, closes, supersedes, ends_entity, lexicon) "
+			+ "or an entity type (description, parent, synonyms, type_words) pass 'event_type' or 'entity_type' with the "
+			+ "name and 'replacement' with the changed keys.";
 
 	static final String CORRECT_REPLACEMENT = "Fact: {object | subject | qualifier | scope | valid_time | ended | "
 			+ "caller_confidence}, or {\"wrong\": true} when the fact was never true: it is retracted with the reason, no "
 			+ "replacement, and leaves recall. Predicate: {render | lexicon | qualifiers | functional | volatility | "
-			+ "description}";
+			+ "description}. Event type: {description | opens | closes | supersedes | ends_entity | lexicon}. Entity "
+			+ "type: {description | parent | synonyms | type_words}";
 
 	static final String PROPOSE = "Give an observation already stored without a structured reading its facts: one that came "
 			+ "from a connector (an email, a document; connectors never carry a proposal) or one remembered without a "
@@ -169,10 +180,11 @@ final class ToolDescriptions {
 			+ "extract from them (an answer, a note): [\"obs-12\", ...]. They keep their text and history.";
 
 	static final String LIST_PREDICATES = "The registry: every predicate a proposal may use (seed and caller-defined, with "
-			+ "description, domain, range, functional, symmetric, qualifiers, volatility, aliases, lexicon) and every event "
-			+ "type (with the facts it opens, closes, or supersedes). USE before proposing a relation you are unsure the "
-			+ "registry has, after a remember reported a registered or similar predicate, or when the predicate count in "
-			+ "status changed. Read-only.";
+			+ "description, domain, range, functional, symmetric, qualifiers, volatility, aliases, lexicon), every event "
+			+ "type (with the facts it opens, closes, or supersedes, and its lexicon), and every entity type (with its "
+			+ "parent, synonyms, and type words). USE before proposing a relation, event type, or entity type you are "
+			+ "unsure the registry has, after a remember reported a registered or similar predicate, or when the "
+			+ "predicate count in status changed. Read-only.";
 
 	static final String STATUS = "Server version, data home, schema version, owner, counts of observations, facts, and "
 			+ "predicates (list_predicates names them), the number of observations waiting for a structured proposal, open "

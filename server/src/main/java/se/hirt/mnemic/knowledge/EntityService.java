@@ -66,11 +66,13 @@ public final class EntityService {
 	private static final int MAX_NGRAM = 4;
 
 	private final Database db;
+	private final EntityTypeRegistry types;
 	private final Entity owner;
 
 	/** {@code ownerIdentity}: configured aliases, e-mail addresses, and handles, seeded as aliases of the owner. */
-	public EntityService(Database db, String ownerName, List<String> ownerIdentity) {
+	public EntityService(Database db, EntityTypeRegistry types, String ownerName, List<String> ownerIdentity) {
 		this.db = db;
+		this.types = types;
 		this.owner = ensureOwner(ownerName, ownerIdentity);
 	}
 
@@ -94,7 +96,7 @@ public final class EntityService {
 		if (name == null || name.isBlank() || SELF.contains(Names.norm(name))) {
 			return out;
 		}
-		String t = Names.type(type);
+		String t = types.canonical(type);
 		db.read(tx -> {
 			byAlias(tx, Names.norm(name), t).ifPresent(e -> out.add(e.id()));
 			for (String a : aliases) {
@@ -120,7 +122,7 @@ public final class EntityService {
 		if (SELF.contains(norm)) {
 			return new Resolved(owner, "owner", 1.0, List.of());
 		}
-		String t = Names.type(type);
+		String t = types.canonical(type);
 		return db.write(tx -> {
 			Optional<Entity> byName = byAlias(tx, norm, t);
 			Entity match = byName.orElse(null);
@@ -151,9 +153,10 @@ public final class EntityService {
 				}
 			}
 			if (match != null) {
-				// A typeless match takes the type it is now given; a place named as a country becomes one (family Q).
+				// A typeless match takes the type it is now given, and a place named as a country becomes one: the
+				// more specific kind wins (family Q).
 				if (("unknown".equals(match.type()) && !"unknown".equals(t))
-						|| ("place".equals(match.type()) && "country".equals(t))) {
+						|| (!t.equals(match.type()) && types.isA(t, match.type()))) {
 					tx.update("UPDATE entity SET type = ? WHERE id = ?", t, match.id());
 					match = new Entity(match.id(), match.name(), t, match.createdFrom(), match.mergedInto());
 				}
@@ -169,7 +172,7 @@ public final class EntityService {
 
 	/** Creates an entity outright (used when a question is answered with "new"). */
 	public Entity create(String name, String type, List<String> aliases, Long observationId) {
-		return db.write(tx -> create(tx, name, Names.type(type), aliases, observationId));
+		return db.write(tx -> create(tx, name, types.canonical(type), aliases, observationId));
 	}
 
 	private static Entity create(Tx tx, String name, String type, List<String> aliases, Long observationId) {
@@ -188,7 +191,7 @@ public final class EntityService {
 		Entity typeless = null;
 		for (Row r : rows) {
 			Entity e = Entity.from(r);
-			if ("unknown".equals(type) || Names.sameKind(e.type(), type)) {
+			if ("unknown".equals(type) || types.sameKind(e.type(), type)) {
 				return Optional.of(e);
 			}
 			if ("unknown".equals(e.type())) {
@@ -204,7 +207,7 @@ public final class EntityService {
 	 * three letters or made only of stopwords, so "AL" or "it" never fuzzy-match anything.
 	 */
 	private List<Candidate> fuzzy(Tx tx, String name, String norm, String type, Set<Long> distinctFrom) {
-		List<String> tokens = Names.identityTokens(name, type).stream().filter(x -> x.length() >= 3).toList();
+		List<String> tokens = types.identityTokens(name, type).stream().filter(x -> x.length() >= 3).toList();
 		if (norm.length() < 3 || tokens.isEmpty()) {
 			return List.of();
 		}
@@ -215,13 +218,13 @@ public final class EntityService {
 			if (distinctFrom.contains(e.id())) {
 				continue; // declared distinct by the same proposal
 			}
-			if (!"unknown".equals(type) && !"unknown".equals(e.type()) && !Names.sameKind(e.type(), type)) {
+			if (!"unknown".equals(type) && !"unknown".equals(e.type()) && !types.sameKind(e.type(), type)) {
 				continue;
 			}
 			double best = 0;
 			for (String alias : aliasesOf(tx, e.id())) {
 				String an = Names.norm(alias);
-				List<String> at = Names.identityTokens(alias, e.type()).stream().filter(x -> x.length() >= 3).toList();
+				List<String> at = types.identityTokens(alias, e.type()).stream().filter(x -> x.length() >= 3).toList();
 				long shared = tokens.stream().filter(at::contains).count();
 				double tokenScore = shared == 0 ? 0 : (double) shared / Math.max(tokens.size(), at.size());
 				// "Oskar Nyberg" against "Konrad Nyberg": two full names whose leading tokens differ share a

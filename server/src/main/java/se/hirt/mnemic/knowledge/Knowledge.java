@@ -38,14 +38,16 @@ import java.util.List;
  * reads and writes, the resolver of answers, and consolidation. The write path ({@link FactService}) and the read path
  * ({@link FactQueries}) are separate so that recall and the tool surface depend on reads only.
  */
-public record Knowledge(EntityService entities, PredicateRegistry predicates, EventTypeRegistry eventTypes,
-		EventService events, QuestionService questions, FactQueries facts, FactService factService,
-		QuestionResolver resolver, Consolidator consolidator, FactRenderer renderer, Containment containment) {
+public record Knowledge(EntityService entities, EntityTypeRegistry entityTypes, PredicateRegistry predicates,
+		EventTypeRegistry eventTypes, EventService events, QuestionService questions, FactQueries facts,
+		FactService factService, QuestionResolver resolver, Consolidator consolidator, FactRenderer renderer,
+		Containment containment) {
 
 	public static Knowledge open(Database db, Lang lang, String ownerName, List<String> ownerIdentity, Clock clock) {
-		var predicates = new PredicateRegistry(db, lang);
+		var entityTypes = new EntityTypeRegistry(db);
+		var predicates = new PredicateRegistry(db, lang, entityTypes);
 		var eventTypes = new EventTypeRegistry(db);
-		var entities = new EntityService(db, ownerName, ownerIdentity);
+		var entities = new EntityService(db, entityTypes, ownerName, ownerIdentity);
 		var questions = new QuestionService(db);
 		var renderer = new FactRenderer(db, predicates);
 		var ledger = new FactLedger(renderer);
@@ -53,10 +55,10 @@ public record Knowledge(EntityService entities, PredicateRegistry predicates, Ev
 		var facts = new FactQueries(db, predicates, clock);
 		var asks = new FactQuestions(questions, entities, facts);
 		var factService = new FactService(db, entities, predicates, eventTypes, events, questions, facts, asks,
-				renderer, ledger);
+				renderer, ledger, entityTypes);
 		var resolver = new QuestionResolver(db, entities, predicates, questions, factService, ledger);
 		var consolidator = new Consolidator(db, entities, predicates, events, facts, resolver, ledger, renderer);
-		return new Knowledge(entities, predicates, eventTypes, events, questions, facts, factService, resolver,
-				consolidator, renderer, new Containment(db));
+		return new Knowledge(entities, entityTypes, predicates, eventTypes, events, questions, facts, factService,
+				resolver, consolidator, renderer, new Containment(db));
 	}
 }

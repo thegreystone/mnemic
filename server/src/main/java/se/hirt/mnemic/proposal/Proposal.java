@@ -57,14 +57,22 @@ import java.util.TreeSet;
 @JsonIgnoreProperties(ignoreUnknown = true)
 // Jackson builds these records reflectively, which the native image only allows for registered types.
 @RegisterForReflection(targets = {Proposal.class, Proposal.EntityRef.class, Proposal.EventRef.class,
-		Proposal.FactRef.class, Proposal.ValidTime.class, Proposal.Derivation.class, Proposal.PredicateDef.class})
+		Proposal.FactRef.class, Proposal.ValidTime.class, Proposal.Derivation.class, Proposal.PredicateDef.class,
+		Proposal.ClosureRef.class, Proposal.EventTypeDef.class, Proposal.EntityTypeDef.class})
 public record Proposal(@JsonProperty("spec_version")
 Integer specVersion, List<EntityRef> entities, List<EventRef> events, List<FactRef> facts,
-		List<PredicateDef> predicates, List<ClosureRef> closures) {
+		List<PredicateDef> predicates, List<ClosureRef> closures, @JsonProperty("event_types")
+		List<EventTypeDef> eventTypes, @JsonProperty("entity_types")
+		List<EntityTypeDef> entityTypes) {
 
 	public Proposal(Integer specVersion, List<EntityRef> entities, List<EventRef> events, List<FactRef> facts,
 			List<PredicateDef> predicates) {
-		this(specVersion, entities, events, facts, predicates, List.of());
+		this(specVersion, entities, events, facts, predicates, List.of(), List.of(), List.of());
+	}
+
+	public Proposal(Integer specVersion, List<EntityRef> entities, List<EventRef> events, List<FactRef> facts,
+			List<PredicateDef> predicates, List<ClosureRef> closures) {
+		this(specVersion, entities, events, facts, predicates, closures, List.of(), List.of());
 	}
 
 	public static final int CURRENT_SPEC_VERSION = 1;
@@ -79,6 +87,8 @@ Integer specVersion, List<EntityRef> entities, List<EventRef> events, List<FactR
 		facts = facts == null ? List.of() : facts;
 		predicates = predicates == null ? List.of() : predicates;
 		closures = closures == null ? List.of() : closures;
+		eventTypes = eventTypes == null ? List.of() : eventTypes;
+		entityTypes = entityTypes == null ? List.of() : entityTypes;
 	}
 
 	/** A parsed proposal with what the parser had to say about it: keys it did not know and ignored. */
@@ -130,16 +140,19 @@ Integer specVersion, List<EntityRef> entities, List<EventRef> events, List<FactR
 	}
 
 	private static final Map<String, Set<String>> KNOWN = Map.of("",
-			Set.of("spec_version", "entities", "events", "facts", "predicates", "closures"), "entities",
-			Set.of("ref", "name", "type", "aliases"), "events", Set.of("ref", "type", "participants", "valid_time"),
-			"facts",
+			Set.of("spec_version", "entities", "events", "facts", "predicates", "closures", "event_types",
+					"entity_types"),
+			"entities", Set.of("ref", "name", "type", "aliases"), "events",
+			Set.of("ref", "type", "participants", "valid_time"), "facts",
 			Set.of("subject", "predicate", "object", "qualifier", "scope", "valid_time", "ended", "derived_from",
 					"derivation", "caller_confidence", "negated", "only"),
 			"predicates",
 			Set.of("name", "description", "domain", "range", "functional", "functional_scope", "symmetric", "inverse",
 					"volatility", "lexicon", "render", "qualifiers", "aliases"),
 			"closures", Set.of("subject", "predicate", "type"), "valid_time", Set.of("start", "end", "precision"),
-			"derivation", Set.of("kind"));
+			"derivation", Set.of("kind"), "event_types",
+			Set.of("name", "description", "opens", "closes", "supersedes", "ends_entity", "lexicon"), "entity_types",
+			Set.of("name", "description", "parent", "synonyms", "type_words"));
 
 	/**
 	 * Keys the spec does not define are ignored by the reader; every ignored key is named, with the keys that exist
@@ -151,7 +164,8 @@ Integer specVersion, List<EntityRef> entities, List<EventRef> events, List<FactR
 			return out;
 		}
 		unknownIn(root, "", "proposal", out);
-		for (String section : List.of("entities", "events", "facts", "predicates", "closures")) {
+		for (String section : List.of("entities", "events", "facts", "predicates", "closures", "event_types",
+				"entity_types")) {
 			JsonNode list = root.get(section);
 			if (list == null || !list.isArray()) {
 				continue;
@@ -360,6 +374,33 @@ Integer specVersion, List<EntityRef> entities, List<EventRef> events, List<FactR
 
 	@JsonIgnoreProperties(ignoreUnknown = true)
 	public record Derivation(String kind) {
+	}
+
+	/** A caller-defined event type: what it opens, closes, or supersedes, and the words a question names it by. */
+	@JsonIgnoreProperties(ignoreUnknown = true)
+	public record EventTypeDef(String name, String description, List<String> opens, List<String> closes,
+			List<String> supersedes, @JsonProperty("ends_entity")
+			Boolean endsEntity, List<String> lexicon) {
+		public EventTypeDef {
+			opens = opens == null ? List.of() : opens;
+			closes = closes == null ? List.of() : closes;
+			supersedes = supersedes == null ? List.of() : supersedes;
+			lexicon = lexicon == null ? List.of() : lexicon;
+		}
+	}
+
+	/**
+	 * A caller-defined kind of entity: its synonyms, the words that say what kind of thing a name is rather than which
+	 * one, and the kind it nests within (a canton is a place).
+	 */
+	@JsonIgnoreProperties(ignoreUnknown = true)
+	public record EntityTypeDef(String name, String description, String parent, List<String> synonyms,
+			@JsonProperty("type_words")
+			List<String> typeWords) {
+		public EntityTypeDef {
+			synonyms = synonyms == null ? List.of() : synonyms;
+			typeWords = typeWords == null ? List.of() : typeWords;
+		}
 	}
 
 	/** A caller-defined predicate (EXTRACTION.md, Predicate registry). */

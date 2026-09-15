@@ -30,6 +30,7 @@ package se.hirt.mnemic.recall;
 
 import se.hirt.mnemic.knowledge.Entity;
 import se.hirt.mnemic.knowledge.EntityService;
+import se.hirt.mnemic.knowledge.EntityTypeRegistry;
 import se.hirt.mnemic.knowledge.Names;
 import se.hirt.mnemic.knowledge.PredicateRegistry;
 import se.hirt.mnemic.knowledge.PredicateRegistry.Cue;
@@ -75,7 +76,8 @@ public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<Strin
 			"really", "actually", "currently", "now", "already", "also", "some", "something", "someone", "there",
 			"here", "just", "even", "own");
 
-	public static Query analyse(String text, EntityService entities, PredicateRegistry predicates) {
+	public static Query analyse(
+		String text, EntityService entities, PredicateRegistry predicates, EntityTypeRegistry types) {
 		List<Entity> spotted = entities.spot(text);
 		List<Cue> cues = predicates.cues(text);
 		var ownerTokens = new HashSet<String>();
@@ -97,7 +99,8 @@ public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<Strin
 				? beyondEntities.stream().filter(t -> !cueTokens.contains(t) && !POLAR_FILLER.contains(t)).toList()
 				: List.of();
 		return new Query(text, spotted, cues, ownerTokens, terms, entityTokens, beyondEntities, polar, isPast(text),
-				isForward(text), cueTokens, residual, namedThings(text, entityTokens), ftsQuery(text, ownerTokens));
+				isForward(text), cueTokens, residual, namedThings(text, entityTokens, types),
+				ftsQuery(text, ownerTokens));
 	}
 
 	/** The spotted entities other than the owner. */
@@ -127,7 +130,7 @@ public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<Strin
 	 * the question names ("my apartment in Shinjuku"), lowercased for matching against renderings. The cue predicate's
 	 * vocabulary is not excluded: "Software Engineer Manager" is a title whose every word counts.
 	 */
-	static List<String> namedThings(String query, Set<String> entityTokens) {
+	static List<String> namedThings(String query, Set<String> entityTokens, EntityTypeRegistry types) {
 		var out = new ArrayList<String>();
 		String[] words = query.trim().split("\\s+");
 		for (int i = 1; i < words.length; i++) {
@@ -146,7 +149,7 @@ public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<Strin
 				continue; // "I" and acronyms like "AI" are not named things
 			}
 			for (String t : Names.tokens(w)) {
-				if (t.length() >= 2 && !entityTokens.contains(t) && !Names.STOPWORDS.contains(t) && !Names.isTypeWord(t)
+				if (t.length() >= 2 && !entityTokens.contains(t) && !Names.STOPWORDS.contains(t) && !types.isTypeWord(t)
 						&& !out.contains(t)) {
 					out.add(t);
 				}

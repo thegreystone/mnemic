@@ -92,7 +92,7 @@ class MnemicToolsTest {
 		ToolResponse status = tools.status();
 		assertFalse(status.isError(), text(status));
 		Map<String, Object> result = result(status);
-		assertEquals(18, ((Number) result.get("schema_version")).intValue());
+		assertEquals(19, ((Number) result.get("schema_version")).intValue());
 		assertTrue(result.containsKey("pending_proposals"));
 		assertTrue(result.get("model_providers").toString().contains("openai-compatible"), result.toString());
 		// Every recall channel reports whether it answers; the test profile keeps the semantic one off and says so.
@@ -221,6 +221,8 @@ class MnemicToolsTest {
 		assertTrue(preds.contains("name=considering"), "the predicate added on 2026-09-10 is visible: " + preds);
 		assertTrue(preds.contains("origin=seed"), preds);
 		assertTrue(result.get("event_types").toString().contains("name=joined"), result.toString());
+		String types = result.get("entity_types").toString();
+		assertTrue(types.contains("name=country") && types.contains("parent=place"), types);
 	}
 
 	private static String text(ToolResponse r) {

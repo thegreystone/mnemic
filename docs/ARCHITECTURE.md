@@ -59,6 +59,8 @@ remember(text, source, proposal)
 
 `FactService.apply` is the one place a proposal turns into rows:
 
+0. **Vocabulary** the proposal defines (`event_types`, `entity_types`) is registered first, so what follows can
+   use it; a definition that names an unknown predicate or parent is skipped with a warning.
 1. **Entities** resolve through `EntityService`: first person → the owner; exact name or alias; then a fuzzy step
    gated by name entropy. A near match becomes an `entity_resolution` question and every fact that mentions the
    name is held in the question's payload (`FactQuestions.heldProposal`).
@@ -110,7 +112,9 @@ questions, within the budget.
 |---|---|
 | `EntityService` | entities and aliases: the owner, the resolution ladder, query-time spotting, merges |
 | `PredicateRegistry` | the seed vocabulary, caller definitions, resolution of proposed names, cues, corrections |
-| `EventTypeRegistry` | which event types open, close, supersede, or end an entity |
+| `EventTypeRegistry` | which event types open, close, supersede, or end an entity; caller definitions, corrections |
+| `EntityTypeRegistry` | the kinds of entity: synonyms, type words, nesting (a country is a place); caller definitions, corrections |
+| `Vocabulary` | what the registries share: JSON list columns, list-valued corrections, the change log (package-private) |
 | `EventService` | events stored once, their effects on facts, lookups |
 | `QuestionService` | storage of the question queue |
 | `FactService` | the write path: a proposal to rows, corrections, retractions, forgetting |
@@ -141,6 +145,7 @@ checksums, and refuses a database written by a newer binary.
 | `entity`, `entity_alias`, `entity_merge` | entities, every name they go by, and the record of merges |
 | `predicate`, `predicate_render`, `predicate_change` | the registry, per-language templates, the change log |
 | `event_type`, `event`, `event_participant` | the event vocabulary and the events |
+| `entity_type`, `vocabulary_change` | the entity kinds, and the change log of event type and entity type corrections |
 | `fact`, `fact_source`, `supersession` | facts, the observations behind each, every status change |
 | `question` | the queue of what the caller must decide |
 | `forgotten_link` | tombstones: which entities a forgotten observation had facts about |
@@ -166,7 +171,10 @@ data home. `VectorStore` keeps vectors beside their rows and searches by scan; s
   (LM Studio, Ollama, OpenAI) providers.
 - **A predicate**: a definition in a proposal, or a seed entry in `PredicateRegistry.seed()`; German templates in
   `RENDERS_DE`.
-- **An event type**: a seed entry in `EventTypeRegistry.seed()`. Callers cannot register event types yet.
+- **An event type or an entity type**: a definition in a proposal (`event_types`, `entity_types`), corrected
+  through `correct`; or a seed entry in the registry's `seed()`. The three registries read their table once at
+  start into hash maps and write through on every registration and correction, so the next start sees what this
+  one defined.
 - **A language of the fact layer**: a `Lang` constant with its suffixes and words, templates in
   `PredicateRegistry`, and first-person rules in `OwnerAlias`.
 - **A recall channel**: a method on `RecallService` that ranks observation ids into `Channels` and a line in

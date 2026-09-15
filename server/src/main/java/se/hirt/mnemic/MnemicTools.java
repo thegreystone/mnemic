@@ -119,6 +119,9 @@ public class MnemicTools {
 					.map(p -> Map.of("proposed", p.proposed(), "resolution", p.resolution(), "id", p.id())).toList());
 			out.put("superseded", a.superseded());
 			out.put("questions", a.questions());
+			if (!a.definitions().isEmpty()) {
+				out.put("definitions", a.definitions());
+			}
 			if (!o.resolved().isEmpty()) {
 				out.put("resolved", o.resolved());
 			}
@@ -206,13 +209,22 @@ public class MnemicTools {
 	Optional<String> fact_id, @ToolArg(description = ToolDescriptions.CORRECT_REPLACEMENT)
 	Map<String, Object> replacement, @ToolArg(description = "Why, in the user's words")
 	Optional<String> reason, @ToolArg(description = "The predicate to correct instead of a fact, e.g. parent_of")
-	Optional<String> predicate) {
+	Optional<String> predicate, @ToolArg(description = "The event type to correct instead of a fact, e.g. purchased")
+	Optional<String> event_type, @ToolArg(description = "The entity type to correct instead of a fact, e.g. place")
+	Optional<String> entity_type) {
 		return ToolSupport.json("correct", () -> {
 			if (predicate.isPresent()) {
 				return engine.correctPredicate(predicate.get(), replacement, reason.orElse(null));
 			}
+			if (event_type.isPresent()) {
+				return engine.correctEventType(event_type.get(), replacement, reason.orElse(null));
+			}
+			if (entity_type.isPresent()) {
+				return engine.correctEntityType(entity_type.get(), replacement, reason.orElse(null));
+			}
 			if (fact_id.isEmpty()) {
-				throw MnemicException.invalidArgument("Pass 'fact_id' (f-12) or 'predicate' (parent_of).");
+				throw MnemicException.invalidArgument(
+						"Pass 'fact_id' (f-12), 'predicate' (parent_of), 'event_type' (purchased), or 'entity_type' (place).");
 			}
 			Corrected c = engine.correct(parseId(fact_id.get(), "f-"), replacement, reason.orElse(null));
 			var out = new LinkedHashMap<String, Object>();
@@ -245,6 +257,9 @@ public class MnemicTools {
 			out.put("stored", stored(a));
 			out.put("superseded", a.superseded());
 			out.put("questions", a.questions());
+			if (!a.definitions().isEmpty()) {
+				out.put("definitions", a.definitions());
+			}
 			var warnings = new ArrayList<>(parsed.warnings());
 			warnings.addAll(a.warnings());
 			out.put("warnings", warnings);
@@ -417,9 +432,33 @@ public class MnemicTools {
 					m.put("ends_entity", true);
 				}
 				m.put("origin", t.seed() ? "seed" : "defined");
+				if (t.definedBy() != null) {
+					m.put("defined_by", "obs-" + t.definedBy());
+				}
 				types.add(m);
 			}
 			out.put("event_types", types);
+			var entityTypes = new ArrayList<Map<String, Object>>();
+			for (var t : engine.entityTypes().all()) {
+				var m = new LinkedHashMap<String, Object>();
+				m.put("name", t.name());
+				m.put("description", t.description());
+				if (t.parent() != null) {
+					m.put("parent", t.parent());
+				}
+				if (!t.synonyms().isEmpty()) {
+					m.put("synonyms", t.synonyms());
+				}
+				if (!t.typeWords().isEmpty()) {
+					m.put("type_words", t.typeWords());
+				}
+				m.put("origin", t.seed() ? "seed" : "defined");
+				if (t.definedBy() != null) {
+					m.put("defined_by", "obs-" + t.definedBy());
+				}
+				entityTypes.add(m);
+			}
+			out.put("entity_types", entityTypes);
 			return out;
 		});
 	}

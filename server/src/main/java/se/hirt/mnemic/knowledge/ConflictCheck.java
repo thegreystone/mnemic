@@ -59,9 +59,11 @@ final class ConflictCheck {
 	}
 
 	private final EventTypeRegistry eventTypes;
+	private final EntityTypeRegistry types;
 
-	ConflictCheck(EventTypeRegistry eventTypes) {
+	ConflictCheck(EventTypeRegistry eventTypes, EntityTypeRegistry types) {
 		this.eventTypes = eventTypes;
+		this.types = types;
 	}
 
 	Outcome check(Tx tx, Operands op, Bounds bounds, boolean ended, Event event, String rendering) {
@@ -112,7 +114,7 @@ final class ConflictCheck {
 				} else if (op.object() != null) {
 					for (Fact bound : boundsIn(tx, op.subject().id(), op.predicate().name())) {
 						if ("only".equals(bound.mode()) && bound.objectId() != null
-								&& Names.isPlace(op.object().type())) {
+								&& types.isA(op.object().type(), "place")) {
 							Verdict c = Containment.of(tx, op.object().id(), bound.objectId());
 							if (c.relation() == Relation.DISJOINT) {
 								conflictWith = bound;
@@ -126,7 +128,7 @@ final class ConflictCheck {
 								asks.add(new long[] {c.top(), bound.objectId(), bound.id()});
 							}
 						} else if ("closure".equals(bound.mode())
-								&& Containment.kindMatches(bound.objectText(), op.object().type())) {
+								&& types.isA(op.object().type(), bound.objectText())) {
 							conflictWith = bound;
 							why = "\"" + bound.rendering() + "\" is on record and \"" + rendering
 									+ "\" adds to that class. Was the list complete until now (ended), was it never "
@@ -148,7 +150,7 @@ final class ConflictCheck {
 			case "only" -> {
 				if (op.object() != null) {
 					for (Fact other : FactQueries.assertedOpen(tx, op.subject().id(), op.predicate().name())) {
-						if (other.objectId() == null || !Names.isPlace(Containment.typeOf(tx, other.objectId()))) {
+						if (other.objectId() == null || !types.isA(Containment.typeOf(tx, other.objectId()), "place")) {
 							continue; // a domain or a printer cannot be located: outside the class
 						}
 						Verdict c = Containment.of(tx, other.objectId(), op.object().id());

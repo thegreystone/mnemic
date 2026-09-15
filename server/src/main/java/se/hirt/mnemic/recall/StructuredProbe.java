@@ -32,6 +32,7 @@ import se.hirt.mnemic.knowledge.Containment;
 import se.hirt.mnemic.knowledge.Containment.Relation;
 import se.hirt.mnemic.knowledge.Entity;
 import se.hirt.mnemic.knowledge.EntityService;
+import se.hirt.mnemic.knowledge.EntityTypeRegistry;
 import se.hirt.mnemic.knowledge.Fact;
 import se.hirt.mnemic.knowledge.FactQueries;
 import se.hirt.mnemic.knowledge.Names;
@@ -59,11 +60,13 @@ final class StructuredProbe {
 	private final EntityService entities;
 	private final FactQueries facts;
 	private final Containment containment;
+	private final EntityTypeRegistry types;
 
-	StructuredProbe(EntityService entities, FactQueries facts, Containment containment) {
+	StructuredProbe(EntityService entities, FactQueries facts, Containment containment, EntityTypeRegistry types) {
 		this.entities = entities;
 		this.facts = facts;
 		this.containment = containment;
+		this.types = types;
 	}
 
 	Structured probe(Query q, Instant asOf, Instant now, boolean includeHistory) {
@@ -167,7 +170,7 @@ final class StructuredProbe {
 				for (Fact b : bounds) {
 					if ("only".equals(b.mode()) && b.objectId() != null) {
 						for (Entity x : xs) {
-							if (Names.isPlace(x.type()) && x.id() != b.objectId()
+							if (types.isA(x.type(), "place") && x.id() != b.objectId()
 									&& containment.of(x.id(), b.objectId()).relation() == Relation.UNKNOWN) {
 								notes.add("whether " + x.name() + " is within " + entities.nameOf(b.objectId())
 										+ " is not known");
@@ -235,7 +238,7 @@ final class StructuredProbe {
 		}
 		case "closure" -> {
 			for (Entity x : xs) {
-				if (Containment.kindMatches(b.objectText(), x.type())
+				if (types.isA(x.type(), b.objectText())
 						&& facts.assertedTouching(b.subjectId(), b.predicate(), x.id()).isEmpty()) {
 					return "closure";
 				}
@@ -244,7 +247,7 @@ final class StructuredProbe {
 		}
 		case "only" -> {
 			for (Entity x : xs) {
-				if (b.objectId() == null || !Names.isPlace(x.type()) || x.id() == b.objectId()) {
+				if (b.objectId() == null || !types.isA(x.type(), "place") || x.id() == b.objectId()) {
 					continue;
 				}
 				Relation r = containment.of(x.id(), b.objectId()).relation();
@@ -264,7 +267,7 @@ final class StructuredProbe {
 	}
 
 	/** Whether a bound could cover what the question names: its object, its class, or its kind of thing. */
-	private static boolean covers(Fact b, List<Entity> xs, List<String> residual) {
+	private boolean covers(Fact b, List<Entity> xs, List<String> residual) {
 		switch (b.mode()) {
 		case "negated" -> {
 			if (negationCovers(b, xs, residual)) {
@@ -278,7 +281,7 @@ final class StructuredProbe {
 					return true;
 				}
 				for (Entity x : xs) {
-					if (Names.identityTokens(x.name(), x.type()).stream().anyMatch(words::contains)) {
+					if (types.identityTokens(x.name(), x.type()).stream().anyMatch(words::contains)) {
 						return true;
 					}
 				}
@@ -286,10 +289,10 @@ final class StructuredProbe {
 			return false;
 		}
 		case "closure" -> {
-			return xs.stream().anyMatch(x -> Containment.kindMatches(b.objectText(), x.type()));
+			return xs.stream().anyMatch(x -> types.isA(x.type(), b.objectText()));
 		}
 		case "only" -> {
-			return xs.stream().anyMatch(x -> Names.isPlace(x.type()));
+			return xs.stream().anyMatch(x -> types.isA(x.type(), "place"));
 		}
 		default -> {
 			return true;
@@ -302,20 +305,21 @@ final class StructuredProbe {
 		if (f.subjectId() == x.id() || (f.objectId() != null && f.objectId() == x.id())) {
 			return true;
 		}
-		return f.objectId() != null && Names.isPlace(x.type()) && containment.ancestors(f.objectId()).contains(x.id());
+		return f.objectId() != null && types.isA(x.type(), "place")
+				&& containment.ancestors(f.objectId()).contains(x.id());
 	}
 
 	/**
 	 * A negation covers the question when its object is the named entity, or its literal class names the entity
 	 * ("anything in Sweden" for Sweden), or, with no entity named, the class's own words are all in the question.
 	 */
-	private static boolean negationCovers(Fact b, List<Entity> xs, List<String> residual) {
+	private boolean negationCovers(Fact b, List<Entity> xs, List<String> residual) {
 		for (Entity x : xs) {
 			if (b.objectId() != null && b.objectId() == x.id()) {
 				return true;
 			}
 			if (b.objectText() != null) {
-				List<String> ids = Names.identityTokens(x.name(), x.type());
+				List<String> ids = types.identityTokens(x.name(), x.type());
 				if (!ids.isEmpty() && new HashSet<>(Names.tokens(b.objectText())).containsAll(ids)) {
 					return true;
 				}
@@ -330,7 +334,7 @@ final class StructuredProbe {
 	}
 
 	/** The side of the relation the entity is on, from the cue, else from its type against domain and range. */
-	static String direction(Cue cue, Entity e) {
+	private String direction(Cue cue, Entity e) {
 		if (!"any".equals(cue.direction())) {
 			return cue.direction();
 		}
@@ -338,8 +342,9 @@ final class StructuredProbe {
 		if (p.symmetric()) {
 			return "any";
 		}
-		boolean inDomain = p.acceptsSubject(e.type()) && !"unknown".equals(e.type());
-		boolean inRange = p.acceptsObject(e.type()) && !"unknown".equals(e.type());
+		List<String> lineage = types.lineage(e.type());
+		boolean inDomain = p.acceptsSubject(lineage) && !"unknown".equals(e.type());
+		boolean inRange = p.acceptsObject(lineage) && !"unknown".equals(e.type());
 		if (inDomain && !inRange) {
 			return "subject";
 		}
@@ -358,7 +363,8 @@ final class StructuredProbe {
 		var seen = new HashSet<Long>();
 		var frontier = new ArrayList<Long>();
 		for (Fact f : matched) {
-			if (f.objectId() != null && entities.get(f.objectId()).map(x -> Names.isPlace(x.type())).orElse(false)) {
+			if (f.objectId() != null
+					&& entities.get(f.objectId()).map(x -> types.isA(x.type(), "place")).orElse(false)) {
 				frontier.add(f.objectId());
 			}
 		}

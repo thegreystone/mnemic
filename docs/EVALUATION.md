@@ -1658,6 +1658,63 @@ the facts were last rendered in.
 
 Expect: `fr` is refused at start (not a known language); unset means `en`.
 
+## S. Vocabularies
+
+Predicates, event types, and entity types are registries: seeded by the
+server, extended from a proposal, corrected through `correct`, listed by
+`list_predicates`. A registration is kept for good and is there at the next
+start.
+
+### S1. An event type defined in a proposal takes effect
+
+```text
+remember(text: "I inherited the cabin in Sälen from my grandmother.", proposal: {
+  event_types: [ { name: "inherited", opens: ["owns"], lexicon: ["inherited", "inherit"] } ],
+  entities: [ e1 "the Sälen cabin" (place) ], events: [ inherited(self, e1) ] })
+list_predicates()
+```
+
+Expect: the event type is registered (`definitions` names it), the event
+opens `owns` so "Mattias Sandell owns the Sälen cabin" is stored, and
+`list_predicates` lists `inherited` with origin `defined` and the
+observation that defined it.
+
+### S2. A defined vocabulary survives a restart
+
+Expect: after closing and reopening the store, `inherited` is still
+registered, a new event of that type still opens `owns`, and the entity type
+of S3 still nests within `place`.
+
+### S3. An entity type with a parent nests within it
+
+```text
+remember(text: "I live in Kanton Schwyz.", proposal: {
+  entity_types: [ { name: "canton", parent: "place", synonyms: ["kanton"], type_words: ["kanton", "canton"] } ],
+  entities: [ e1 "Kanton Schwyz" (kanton) ], facts: [ lives_in e1 ] })
+remember(text: "Kanton Luzern is next door.", proposal: { entities: [ e1 "Kanton Luzern" (canton) ] })
+```
+
+Expect: `kanton` resolves to `canton`, `lives_in` (range `place`) accepts
+the canton, and "Kanton Luzern" is a new entity rather than a question
+against "Kanton Schwyz": the shared word is a type word, not an identity.
+
+### S4. A definition that names the unknown is skipped, not stored
+
+Expect: an event type whose `opens` names an unregistered predicate, and an
+entity type whose `parent` is unregistered, are skipped with a warning; the
+rest of the proposal is applied and nothing is registered.
+
+### S5. A vocabulary correction is logged
+
+```text
+correct(event_type: "inherited", replacement: { closes: ["owns"] }, reason: "an inheritance ends the giver's ownership")
+correct(entity_type: "canton", replacement: { type_words: ["kanton", "canton", "ct"] })
+```
+
+Expect: `before` and `after` in the reply, one logged change per field with
+its reason, and the corrected definition in force at once and after a
+restart.
+
 ## External benchmarks
 
 Beyond the hand-written scenarios above, the `bench` module runs
