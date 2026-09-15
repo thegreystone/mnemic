@@ -60,7 +60,9 @@ remember(text, source, proposal)
 `FactService.apply` is the one place a proposal turns into rows:
 
 0. **Vocabulary** the proposal defines (`event_types`, `entity_types`) is registered first, so what follows can
-   use it; a definition that names an unknown predicate or parent is skipped with a warning.
+   use it; a definition that names an unknown predicate or parent is skipped with a warning. A term the proposal
+   uses without a definition (an event type, an entity type, a bare predicate) produces a `suggestion` in the reply
+   with a definition skeleton, so the assistant can ask the user and define it next time.
 1. **Entities** resolve through `EntityService`: first person → the owner; exact name or alias; then a fuzzy step
    gated by name entropy. A near match becomes an `entity_resolution` question and every fact that mentions the
    name is held in the question's payload (`FactQuestions.heldProposal`).

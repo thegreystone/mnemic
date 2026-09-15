@@ -17,8 +17,9 @@ MEMORY PROTOCOL
    the observation in the user's own words. A leaning or intention is `considering`, not `decided`. What the
    user says is not so goes in as a negated fact, a restriction (`only`), or a closure, never as a fact with
    the bound as its object. An event type or entity type the registry lacks goes in the same proposal
-   (`event_types`, `entity_types`) and stays registered. Call `list_predicates` when unsure what relation, event
-   type, or entity type to use; `status` only counts
+   (`event_types`, `entity_types`) and stays registered. When a reply carries `suggestions`, the proposal used a
+   term the registry lacks: ask the user in one line what it should mean and define it next time. Call
+   `list_predicates` when unsure what relation, event type, or entity type to use; `status` only counts
    them. Record at
    natural boundaries: a topic change, the end of a task, before your context is compacted. Do not record
    every message.

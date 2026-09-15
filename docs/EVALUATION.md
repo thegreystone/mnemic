@@ -1704,6 +1704,87 @@ Expect: an event type whose `opens` names an unregistered predicate, and an
 entity type whose `parent` is unregistered, are skipped with a warning; the
 rest of the proposal is applied and nothing is registered.
 
+### S6. A restriction over a caller-defined place kind decides a question
+
+```text
+remember(proposal: { entity_types: [ canton within place ], entities: [ Kanton Schwyz (canton), Switzerland (country) ],
+  facts: [ Kanton Schwyz located_in Switzerland, owns Kanton Schwyz only: true ] })
+recall(query: "does Mattias own anything in Sweden")       # Sweden (country) known
+remember(text: "I own a flat in Kanton Luzern.", proposal: { entities: [ Kanton Luzern (canton) ], facts: [ Kanton Luzern located_in Switzerland, owns e1 ] })
+```
+
+Expect: KNOWN FALSE by restriction, since Sweden and Kanton Schwyz reach
+different countries; the flat in Kanton Luzern is a `conflict` question,
+since the two cantons meet under Switzerland on different branches.
+
+### S7. A defined event type closes a fact that arrives later
+
+Expect: with `gave_away` defined to close `owns`, an event
+`gave_away(self, the boat)` dated 2021 followed by "I own the boat since
+2015" stores the fact as `(2015 – 2021)`, ended by the event.
+
+### S8. A defined lexicon answers a question with the event
+
+Expect: after `inherited(self, the cabin)` dated 2019 under a type whose
+lexicon is "inherited, inherit", `recall("when did Mattias inherit the
+cabin")` has the events verdict with that event on the events line.
+
+### S9. An entity typed by a synonym before its type existed takes the registered name
+
+Expect: an entity stored with type `kanton` while no such type is
+registered keeps `kanton`; registering `canton` with synonym `kanton`
+retypes it to `canton`, and `lives_in` (range `place`) now accepts it.
+
+### S10. A definition travels with a held proposal
+
+Expect: a proposal that defines `inherited` and names an ambiguous "Anna"
+as the heir holds the event behind the entity question; the type is
+registered at once, and answering the question applies the event, whose
+type opens `owns` for the chosen Anna.
+
+### S11. A defined type that ends an entity closes its open facts
+
+Expect: with `wound_up` defined with `ends_entity`, the event
+`wound_up(Nordvik AB)` dated 2023 ends "Nordvik AB is located in
+Stockholm" at 2023 and sets the organization's `existed_end`; the owner's
+`works_at Nordvik AB` is not the organization's own fact and stays.
+
+### S12. Consolidate honours a corrected event type
+
+Expect: an event of a type that closed nothing when it happened, followed
+by a correction that makes the type close `owns`, dates the end of a fact
+flagged `ended` without a date at the next `consolidate` (`reclosed: 1`).
+
+### S13. An unregistered event type is a suggestion, not a silent occurrence
+
+```text
+remember(text: "I inherited the cabin in 2019.", proposal: { entities: [ the cabin (place) ], events: [ inherited(self, the cabin) 2019 ] })
+```
+
+Expect: the event is stored with no effect on facts, and the reply carries
+`suggestions: [{kind: event_type, name: inherited, message, define}]` with a
+definition skeleton; nothing is held. Defining the type in the next remember
+registers it and the suggestion does not come back.
+
+### S14. An unregistered entity type is a suggestion
+
+Expect: an entity typed `canton` while no such type is registered is stored
+as written and the reply suggests an `entity_type` definition once, however
+many entities of that type the proposal names.
+
+### S15. A bare predicate is a suggestion as well as an extension
+
+Expect: a fact under `mentors` with no definition is stored under
+`x:mentors` with the existing warning, and the reply suggests a `predicate`
+definition with a skeleton; a predicate written as `x:` on purpose is not
+suggested.
+
+### S16. Consolidate lists vocabulary in use without a definition
+
+Expect: `suggested_registrations` names each unregistered event type and
+entity type the store holds with its number of uses, and drops an entry once
+the term is defined.
+
 ### S5. A vocabulary correction is logged
 
 ```text

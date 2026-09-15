@@ -76,7 +76,10 @@ final class ToolDescriptions {
 			+ "them later with 'resolve': [{\"question_id\": \"q-3\", \"choice\": \"ent-7\"}] (entity or predicate "
 			+ "questions take a candidate id or \"new\"; conflicts take ended | supersede | reject | reinterpret | wrong, "
 			+ "where wrong means the earlier fact was an error and the new one corrects it; containment questions take "
-			+ "yes | no).";
+			+ "yes | no). 'suggestions' names vocabulary the proposal used that the registry lacks (an event type, an "
+			+ "entity type, or a predicate sent without a definition); nothing is held, but the store cannot reason "
+			+ "with an undefined term. Check with the user in one line what it should mean and define it in your next "
+			+ "remember, starting from the 'define' skeleton each suggestion carries.";
 
 	static final String REMEMBER_PROPOSAL = "Structured proposal: {entities:[{ref,name,type,aliases}], events:[{ref,type,"
 			+ "participants,valid_time}], facts:[{subject,predicate,object,qualifier,scope,valid_time,ended,"
@@ -167,7 +170,8 @@ final class ToolDescriptions {
 
 	static final String CONSOLIDATE = "Housekeeping over stored knowledge: merges entities that later evidence showed to be "
 			+ "the same, closes facts whose ending event was recorded afterwards, lists observations still waiting for a "
-			+ "proposal, open questions, predicates the caller defined often enough to deserve registering, and 'review': "
+			+ "proposal, open questions, predicates, event types, and entity types in use without a definition (suggested_registrations: "
+			+ "check with the user and define them), and 'review': "
 			+ "plans whose date has passed with no word since ('due': true; restate to confirm, correct to postpone or "
 			+ "end), then the open facts longest without confirmation on predicates that change (jobs, homes, ownership), "
 			+ "oldest first, for the user to confirm or end; a fact confirmed within two weeks, or within a third of its "

@@ -35,6 +35,7 @@ import jakarta.inject.Inject;
 import org.junit.jupiter.api.Test;
 import se.hirt.mnemic.protocol.Json;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -223,6 +224,21 @@ class MnemicToolsTest {
 		assertTrue(result.get("event_types").toString().contains("name=joined"), result.toString());
 		String types = result.get("entity_types").toString();
 		assertTrue(types.contains("name=country") && types.contains("parent=place"), types);
+	}
+
+	@Test
+	void anUndefinedTermIsSuggestedInTheReply() {
+		Map<String, Object> proposal = Map.of("entities", List.of(Map.of("name", "the cabin", "type", "place")),
+				"events", List.of(Map.of("type", "inherited", "participants", List.of("self", "the cabin"))));
+		ToolResponse r = tools.remember("I inherited the cabin.", Optional.empty(), Optional.empty(), Optional.empty(),
+				Optional.empty(), Optional.empty(), proposal, Optional.empty(), Optional.of("tools-suggest-1"), null);
+		assertFalse(r.isError(), text(r));
+		Map<String, Object> result = result(r);
+		assertEquals(List.of(), result.get("questions"), "nothing is held");
+		String suggestions = result.get("suggestions").toString();
+		assertTrue(suggestions.contains("kind=event_type") && suggestions.contains("name=inherited"), suggestions);
+		assertTrue(suggestions.contains("Check with the user"), suggestions);
+		assertTrue(suggestions.contains("define={event_types="), "a skeleton to start from: " + suggestions);
 	}
 
 	private static String text(ToolResponse r) {

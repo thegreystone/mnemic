@@ -33,7 +33,11 @@ import se.hirt.mnemic.Engine;
 import se.hirt.mnemic.Engine.RememberOutcome;
 import se.hirt.mnemic.Scenario;
 import se.hirt.mnemic.TestHomes;
+import se.hirt.mnemic.knowledge.Entity;
 import se.hirt.mnemic.knowledge.Fact;
+import se.hirt.mnemic.knowledge.QuestionResolver.Resolve;
+import se.hirt.mnemic.proposal.Proposal.FactRef;
+import se.hirt.mnemic.recall.RecallResult;
 import se.hirt.mnemic.proposal.Proposal.EntityTypeDef;
 import se.hirt.mnemic.proposal.Proposal.EventTypeDef;
 
@@ -44,7 +48,9 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static se.hirt.mnemic.TestHomes.fact;
 import static se.hirt.mnemic.TestHomes.proposal;
+import static se.hirt.mnemic.TestHomes.recall;
 import static se.hirt.mnemic.TestHomes.remember;
 
 /** EVALUATION.md family S: event types and entity types defined by the caller. */
@@ -153,6 +159,232 @@ class VocabularyTest {
 			assertTrue(e.entityTypes().isTypeWord("ct"));
 			Fact any = e.facts().factsOf(e.entities().owner().id()).stream().findFirst().orElse(null);
 			assertEquals(null, any, "definitions alone store no facts");
+		}
+	}
+
+	@Test
+	@Scenario("S6")
+	void aRestrictionOverADefinedPlaceKindDecidesAQuestion() {
+		try (Engine e = TestHomes.engine("s6-restriction")) {
+			RememberOutcome only = remember(e, "I only own property in Kanton Schwyz, which is in Switzerland.",
+					proposal().entityType(CANTON).entity("e1", "Kanton Schwyz", "canton")
+							.entity("e2", "Switzerland", "country").fact("e1", "located_in", "e2")
+							.fact(new FactRef("self", "owns", "e1", null, null, null, null, List.of(), null, null, null,
+									Boolean.TRUE)));
+			assertEquals(List.of(), only.applied().warnings());
+			assertEquals(2, only.applied().facts().size(), only.applied().toString());
+			remember(e, "Sweden is a country.", proposal().entity("e1", "Sweden", "country"));
+			RecallResult sweden = recall(e, "does Mattias own anything in Sweden");
+			assertEquals("known_false", sweden.structured().state(), sweden.text());
+			assertEquals("restriction", sweden.structured().basis());
+			RememberOutcome flat = remember(e, "I own a flat in Kanton Luzern.",
+					proposal().entity("e1", "Kanton Luzern", "canton").entity("e2", "Switzerland", "country")
+							.entity("e3", "the Luzern flat", "place").fact("e1", "located_in", "e2")
+							.fact("e3", "located_in", "e1").fact("owns", "e3"));
+			assertEquals(1, flat.applied().questions().size(), flat.applied().toString());
+			assertEquals("conflict", flat.applied().questions().getFirst().get("kind"),
+					"two cantons under one country lie on different branches");
+		}
+	}
+
+	@Test
+	@Scenario("S7")
+	void aDefinedEventTypeClosesAFactThatArrivesLater() {
+		try (Engine e = TestHomes.engine("s7-closes-later")) {
+			remember(e, "I gave the boat away in 2021.",
+					proposal()
+							.eventType(new EventTypeDef("gave_away", "Subject gave object away.", List.of(),
+									List.of("owns"), List.of(), null, List.of("gave away")))
+							.entity("e1", "the boat", "thing").event("ev1", "gave_away", "2021", "self", "e1"));
+			RememberOutcome o = remember(e, "I have owned the boat since 2015.",
+					proposal().entity("e1", "the boat", "thing")
+							.fact(fact("self", "owns", "e1", null, null, "2015", null, null, null, null)));
+			assertEquals(List.of("Mattias Sandell owns the boat (2015 – 2021)"), renderings(e, o));
+			Fact f = e.facts().get(Long.parseLong(o.applied().facts().getFirst().id().substring(2))).orElseThrow();
+			assertEquals("event", f.endSource());
+			assertEquals("ended", f.state(e.clock().instant()));
+		}
+	}
+
+	@Test
+	@Scenario("S8")
+	void aDefinedLexiconAnswersAQuestionWithTheEvent() {
+		try (Engine e = TestHomes.engine("s8-lexicon")) {
+			remember(e, "I inherited the cabin from my grandmother in 2019.", proposal().eventType(INHERITED)
+					.entity("e1", "the cabin", "place").event("ev1", "inherited", "2019", "self", "e1"));
+			RecallResult r = recall(e, "when did Mattias inherit the cabin");
+			assertEquals("events", r.structured().state(), r.text());
+			assertEquals(1, r.events().size(), r.text());
+			assertEquals("inherited", r.events().getFirst().type());
+			assertTrue(r.text().contains("inherited(Mattias Sandell, the cabin) (since 2019)"), r.text());
+		}
+	}
+
+	@Test
+	@Scenario("S9")
+	void anEntityTypedBeforeItsTypeExistedTakesTheRegisteredName() {
+		try (Engine e = TestHomes.engine("s9-retype")) {
+			RememberOutcome before = remember(e, "Kanton Schwyz.", proposal().entity("e1", "Kanton Schwyz", "kanton"));
+			Entity schwyz = e.entities().byRef(before.applied().entities().getFirst().id()).orElseThrow();
+			assertEquals("kanton", schwyz.type(), "an unregistered type passes through as written");
+			RememberOutcome refused = remember(e, "I live there.", proposal().fact("lives_in", "Kanton Schwyz"));
+			assertEquals(0, refused.applied().facts().size());
+			assertEquals("type_mismatch", refused.applied().questions().getFirst().get("kind"));
+			remember(e, "A canton is a kind of place.", proposal().entityType(CANTON));
+			assertEquals("canton", e.entities().get(schwyz.id()).orElseThrow().type(), "retyped on registration");
+			RememberOutcome accepted = remember(e, "I live in Kanton Schwyz.",
+					proposal().fact("lives_in", "Kanton Schwyz"));
+			assertEquals(List.of("Mattias Sandell lives in Kanton Schwyz"), renderings(e, accepted));
+		}
+	}
+
+	@Test
+	@Scenario("S10")
+	void aDefinitionTravelsWithAHeldProposal() {
+		try (Engine e = TestHomes.engine("s10-held")) {
+			remember(e, "Anna Lindqvist is a colleague.", proposal().entity("e1", "Anna Lindqvist", "person"));
+			RememberOutcome held = remember(e, "Anna inherited the cabin.",
+					proposal().eventType(INHERITED).entity("e1", "Anna", "person").entity("e2", "the cabin", "place")
+							.event("ev1", "inherited", "2019", "e1", "e2"));
+			assertEquals(1, held.applied().questions().size(), held.applied().toString());
+			assertEquals("entity_resolution", held.applied().questions().getFirst().get("kind"));
+			assertEquals(0, held.applied().events().size(), "the event waits with the question");
+			assertTrue(e.eventTypes().get("inherited").isPresent(), "the definition is registered at once");
+			String q = held.applied().questions().getFirst().get("id").toString();
+			Entity anna = e.entities().byRef("Anna Lindqvist").orElseThrow();
+			RememberOutcome answered = remember(e, "Yes, that Anna.", null, new Resolve(q, anna.ref()));
+			Map<?, ?> result = answered.resolved().getFirst();
+			assertEquals("answered", result.get("status"));
+			assertEquals(1, ((List<?>) result.get("events")).size(), result.toString());
+			assertEquals(List.of("Anna Lindqvist owns the cabin (since 2019)"),
+					e.facts().factsOf(anna.id()).stream().map(Fact::rendering).toList());
+		}
+	}
+
+	@Test
+	@Scenario("S11")
+	void aDefinedTypeThatEndsAnEntityClosesItsOpenFacts() {
+		try (Engine e = TestHomes.engine("s11-ends-entity")) {
+			remember(e, "Nordvik AB is in Stockholm and I work there.",
+					proposal().entity("e1", "Nordvik AB", "organization").entity("e2", "Stockholm", "place")
+							.fact("e1", "located_in", "e2").fact("works_at", "e1"));
+			RememberOutcome o = remember(e, "Nordvik AB was wound up in 2023.",
+					proposal()
+							.eventType(new EventTypeDef("wound_up", "Subject organization was wound up.", List.of(),
+									List.of(), List.of(), true, List.of("wound up", "liquidated")))
+							.entity("e1", "Nordvik AB", "organization").event("ev1", "wound_up", "2023", "e1"));
+			assertEquals(1, o.applied().superseded().size(), o.applied().toString());
+			assertEquals("Nordvik AB is located in Stockholm", o.applied().superseded().getFirst().get("rendering"));
+			Entity nordvik = e.entities().byRef("Nordvik AB").orElseThrow();
+			List<String> now = e.facts().factsOf(nordvik.id()).stream().map(Fact::rendering).toList();
+			assertTrue(now.contains("Nordvik AB is located in Stockholm (until 2023)"), now.toString());
+			assertTrue(now.contains("Mattias Sandell works at Nordvik AB"),
+					"the owner's fact is not the organization's own");
+		}
+	}
+
+	@Test
+	@Scenario("S12")
+	void consolidateHonoursACorrectedEventType() {
+		try (Engine e = TestHomes.engine("s12-reclose")) {
+			remember(e, "I handed the boat over in 2020.",
+					proposal()
+							.eventType(new EventTypeDef("handed_over", null, List.of(), List.of(), List.of(), null,
+									List.of("handed over")))
+							.entity("e1", "the boat", "thing").event("ev1", "handed_over", "2020", "self", "e1"));
+			RememberOutcome o = remember(e, "I used to own the boat.", proposal().entity("e1", "the boat", "thing")
+					.fact(fact("self", "owns", "e1", null, null, "2015", null, Boolean.TRUE, null, null)));
+			assertEquals(List.of("Mattias Sandell owns the boat (from 2015, ended)"), renderings(e, o),
+					"the type closed nothing when the event happened");
+			e.correctEventType("handed_over", Map.of("closes", List.of("owns")), "handing over ends ownership");
+			assertEquals(1, e.consolidate(true).reclosed(), "a dry run reports what the correction would date");
+			assertEquals(1, e.consolidate(false).reclosed());
+			Fact f = e.facts().get(Long.parseLong(o.applied().facts().getFirst().id().substring(2))).orElseThrow();
+			assertEquals("Mattias Sandell owns the boat (2015 – 2020)", f.rendering());
+			assertEquals(0, e.consolidate(false).reclosed(), "done once");
+		}
+	}
+
+	private static List<Map<String, Object>> ofKind(RememberOutcome o, String kind) {
+		return o.applied().suggestions().stream().filter(x -> kind.equals(x.get("kind"))).toList();
+	}
+
+	@Test
+	@Scenario("S13")
+	void anUnregisteredEventTypeIsASuggestion() {
+		try (Engine e = TestHomes.engine("s13-suggest-event")) {
+			RememberOutcome o = remember(e, "I inherited the cabin in 2019.",
+					proposal().entity("e1", "the cabin", "place").event("ev1", "inherited", "2019", "self", "e1"));
+			assertEquals(1, o.applied().events().size(), "the occurrence is stored");
+			assertEquals(0, o.applied().facts().size(), "with no effect on facts");
+			assertEquals(0, o.applied().questions().size(), "and nothing is held");
+			List<Map<String, Object>> s = ofKind(o, "event_type");
+			assertEquals(1, s.size(), o.applied().suggestions().toString());
+			assertEquals("inherited", s.getFirst().get("name"));
+			assertTrue(s.getFirst().get("message").toString().contains("Check with the user"), s.toString());
+			Map<?, ?> define = (Map<?, ?>) s.getFirst().get("define");
+			Map<?, ?> skeleton = (Map<?, ?>) ((List<?>) define.get("event_types")).getFirst();
+			assertEquals("inherited", skeleton.get("name"));
+			assertEquals(List.of("inherited"), skeleton.get("lexicon"));
+			RememberOutcome defined = remember(e, "Inheriting means I own it.", proposal().eventType(INHERITED)
+					.entity("e1", "the boat", "thing").event("ev1", "inherited", "2021", "self", "e1"));
+			assertEquals(List.of(), defined.applied().suggestions(),
+					"defined in the same proposal: nothing to suggest");
+			assertEquals(List.of("Mattias Sandell owns the boat (since 2021)"), renderings(e, defined));
+		}
+	}
+
+	@Test
+	@Scenario("S14")
+	void anUnregisteredEntityTypeIsASuggestion() {
+		try (Engine e = TestHomes.engine("s14-suggest-type")) {
+			RememberOutcome o = remember(e, "Two cantons.", proposal().entity("e1", "Kanton Schwyz", "canton")
+					.entity("e2", "Kanton Luzern", "canton").entity("e3", "Anna Lindqvist", "person"));
+			assertEquals(3, o.applied().entities().size());
+			List<Map<String, Object>> s = ofKind(o, "entity_type");
+			assertEquals(1, s.size(), "one suggestion per unregistered type, however many entities use it");
+			assertEquals("canton", s.getFirst().get("name"));
+			assertTrue(s.getFirst().get("message").toString().contains("Kanton Schwyz"));
+			assertEquals(List.of(), ofKind(o, "predicate"));
+			RememberOutcome again = remember(e, "Again.",
+					proposal().entityType(CANTON).entity("e1", "Kanton Uri", "canton"));
+			assertEquals(List.of(), again.applied().suggestions());
+		}
+	}
+
+	@Test
+	@Scenario("S15")
+	void aBarePredicateIsASuggestionAsWellAsAnExtension() {
+		try (Engine e = TestHomes.engine("s15-suggest-predicate")) {
+			RememberOutcome o = remember(e, "I mentor Anna.",
+					proposal().entity("e1", "Anna Lindqvist", "person").fact("self", "mentors", "e1"));
+			assertEquals("x:mentors", o.applied().facts().getFirst().predicate());
+			assertTrue(o.applied().warnings().getFirst().contains("not registered"), o.applied().warnings().toString());
+			List<Map<String, Object>> s = ofKind(o, "predicate");
+			assertEquals(1, s.size(), o.applied().suggestions().toString());
+			assertEquals("mentors", s.getFirst().get("name"));
+			Map<?, ?> skeleton = (Map<?, ?>) ((List<?>) ((Map<?, ?>) s.getFirst().get("define")).get("predicates"))
+					.getFirst();
+			assertEquals("mentors", skeleton.get("name"));
+			RememberOutcome deliberate = remember(e, "I coach Anna.",
+					proposal().entity("e1", "Anna Lindqvist", "person").fact("self", "x:coaches", "e1"));
+			assertEquals(List.of(), deliberate.applied().suggestions(), "an x: predicate is an extension on purpose");
+		}
+	}
+
+	@Test
+	@Scenario("S16")
+	void consolidateListsVocabularyInUseWithoutADefinition() {
+		try (Engine e = TestHomes.engine("s16-consolidate")) {
+			remember(e, "Cantons and an inheritance.",
+					proposal().entity("e1", "Kanton Schwyz", "canton").entity("e2", "Kanton Luzern", "canton")
+							.entity("e3", "the cabin", "place").event("ev1", "inherited", "2019", "self", "e3"));
+			List<Map<String, Object>> before = e.consolidate(true).suggestedRegistrations();
+			assertTrue(before.contains(Map.of("event_type", "inherited", "uses", 1L)), before.toString());
+			assertTrue(before.contains(Map.of("entity_type", "canton", "uses", 2L)), before.toString());
+			remember(e, "Definitions.", proposal().eventType(INHERITED).entityType(CANTON));
+			List<Map<String, Object>> after = e.consolidate(true).suggestedRegistrations();
+			assertEquals(List.of(), after, "once defined, nothing is left to suggest");
 		}
 	}
 }

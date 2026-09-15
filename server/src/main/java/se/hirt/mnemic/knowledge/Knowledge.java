@@ -57,7 +57,8 @@ public record Knowledge(EntityService entities, EntityTypeRegistry entityTypes, 
 		var factService = new FactService(db, entities, predicates, eventTypes, events, questions, facts, asks,
 				renderer, ledger, entityTypes);
 		var resolver = new QuestionResolver(db, entities, predicates, questions, factService, ledger);
-		var consolidator = new Consolidator(db, entities, predicates, events, facts, resolver, ledger, renderer);
+		var consolidator = new Consolidator(db, entities, predicates, eventTypes, entityTypes, events, facts, resolver,
+				ledger, renderer);
 		return new Knowledge(entities, entityTypes, predicates, eventTypes, events, questions, facts, factService,
 				resolver, consolidator, renderer, new Containment(db));
 	}

@@ -48,7 +48,8 @@ import java.util.Set;
  * carries the synonyms that map a proposed type onto it ({@code company} → {@code organization}), the words that say
  * what kind of thing a name is rather than which one ("Kanton" in "Kanton Luzern", dropped before fuzzy matching), and
  * an optional parent: a country is a place, so everything that accepts a place accepts a country. A type nobody
- * registered passes through unchanged, so nothing is refused for its type.
+ * registered passes through unchanged, so nothing is refused for its type; once a type is registered, entities that
+ * were typed by one of its synonyms take its name.
  * <p>
  * The table is read once at start into hash maps (by name, by synonym, the set of type words); every write goes to the
  * database and into the maps in the same call, so lookups never touch the database and the next start sees everything
@@ -151,7 +152,15 @@ public final class EntityTypeRegistry {
 		var e = new EntityType(name, def.description(), parent, lower(def.synonyms()), lower(def.typeWords()),
 				observationId, false);
 		insert(e);
+		adopt(e);
 		return e;
+	}
+
+	/** Entities typed by one of the type's synonyms before it was registered take the registered name. */
+	private void adopt(EntityType e) {
+		for (String synonym : e.synonyms()) {
+			db.write(tx -> tx.update("UPDATE entity SET type = ? WHERE type = ?", e.name(), synonym));
+		}
 	}
 
 	/**
@@ -202,6 +211,7 @@ public final class EntityTypeRegistry {
 			return null;
 		});
 		index(updated);
+		adopt(updated);
 		return updated;
 	}
 

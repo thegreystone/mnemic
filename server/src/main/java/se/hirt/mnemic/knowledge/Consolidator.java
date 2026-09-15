@@ -52,17 +52,22 @@ public final class Consolidator {
 	private final Database db;
 	private final EntityService entities;
 	private final PredicateRegistry predicates;
+	private final EventTypeRegistry eventTypes;
+	private final EntityTypeRegistry entityTypes;
 	private final EventService events;
 	private final FactQueries facts;
 	private final QuestionResolver resolver;
 	private final FactLedger ledger;
 	private final FactRenderer renderer;
 
-	Consolidator(Database db, EntityService entities, PredicateRegistry predicates, EventService events,
-			FactQueries facts, QuestionResolver resolver, FactLedger ledger, FactRenderer renderer) {
+	Consolidator(Database db, EntityService entities, PredicateRegistry predicates, EventTypeRegistry eventTypes,
+			EntityTypeRegistry entityTypes, EventService events, FactQueries facts, QuestionResolver resolver,
+			FactLedger ledger, FactRenderer renderer) {
 		this.db = db;
 		this.entities = entities;
 		this.predicates = predicates;
+		this.eventTypes = eventTypes;
+		this.entityTypes = entityTypes;
 		this.events = events;
 		this.facts = facts;
 		this.resolver = resolver;
@@ -77,7 +82,28 @@ public final class Consolidator {
 		var duplicates = new ArrayList<Map<String, Object>>();
 		foldDuplicateFacts(dryRun, duplicates);
 		foldDuplicateEvents(dryRun, duplicates);
-		return new Outcome(merges, reclosed, predicates.frequentExtended(3), resolved, facts.review(5), duplicates);
+		return new Outcome(merges, reclosed, suggestedRegistrations(), resolved, facts.review(5), duplicates);
+	}
+
+	/**
+	 * Vocabulary in use without a definition, for the caller to settle with the user: extended predicates used often
+	 * (EVALUATION.md J6), and every event type and entity type the store holds that the registry lacks.
+	 */
+	private List<Map<String, Object>> suggestedRegistrations() {
+		var out = new ArrayList<>(predicates.frequentExtended(3));
+		for (Row r : db.read(tx -> tx.query("SELECT type, COUNT(*) AS n FROM event GROUP BY type ORDER BY n DESC"))) {
+			if (eventTypes.get(r.str("type")).isEmpty()) {
+				out.add(Map.of("event_type", r.str("type"), "uses", r.lng("n")));
+			}
+		}
+		for (Row r : db.read(tx -> tx.query(
+				"SELECT type, COUNT(*) AS n FROM entity WHERE merged_into IS NULL GROUP BY type ORDER BY n DESC"))) {
+			String type = r.str("type");
+			if (!EntityTypeRegistry.UNKNOWN.equals(type) && entityTypes.get(type).isEmpty()) {
+				out.add(Map.of("entity_type", type, "uses", r.lng("n")));
+			}
+		}
+		return out;
 	}
 
 	private List<Map<String, Object>> mergeSharedAliases(boolean dryRun) {

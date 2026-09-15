@@ -128,7 +128,10 @@ type onto it, and `type_words`, the words that say what kind of thing a name is 
 validated (an event type may only name registered predicates, a parent must exist), stored, listed by
 `list_predicates` with their origin, and corrected through `correct`, which logs every change with its reason.
 An event of a type nobody registered is stored as a plain occurrence with no effect on facts; an entity type
-nobody registered passes through as written.
+nobody registered passes through as written. In both cases, and for a predicate sent without a definition, the
+reply carries a `suggestion` with a definition skeleton: the caller checks with the user what the term should mean
+and defines it in the next proposal. Nothing is held, since the observation is stored either way; `consolidate`
+lists the vocabulary still in use without a definition.
 
 #### Predicate registry
 

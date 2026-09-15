@@ -71,14 +71,16 @@ public final class FactService {
 	/** What a proposal produced. Every id is reported so the caller can refer to it later. */
 	public record Applied(List<EntityOut> entities, List<EventOut> events, List<FactOut> facts,
 			List<PredicateOut> predicates, List<Map<String, Object>> questions, List<String> warnings,
-			List<Map<String, Object>> superseded, List<Map<String, Object>> definitions) {
+			List<Map<String, Object>> superseded, List<Map<String, Object>> definitions,
+			List<Map<String, Object>> suggestions) {
 		public static final Applied NOTHING = new Applied(List.of(), List.of(), List.of(), List.of(), List.of(),
-				List.of(), List.of(), List.of());
+				List.of(), List.of(), List.of(), List.of());
 
 		public Applied withWarning(String warning) {
 			var all = new ArrayList<>(warnings);
 			all.add(warning);
-			return new Applied(entities, events, facts, predicates, questions, all, superseded, definitions);
+			return new Applied(entities, events, facts, predicates, questions, all, superseded, definitions,
+					suggestions);
 		}
 	}
 
@@ -138,6 +140,8 @@ public final class FactService {
 		final List<PredicateOut> predicateOut = new ArrayList<>();
 		/** Event types and entity types the proposal defined: {@code {kind, name, resolution}}. */
 		final List<Map<String, Object>> definitions = new ArrayList<>();
+		/** Vocabulary the proposal used that the registry lacks: {@code {kind, name, message, define}}. */
+		final List<Map<String, Object>> suggestions = new ArrayList<>();
 
 		Application(Observation obs, Proposal p, Map<String, Entity> bound) {
 			this.obs = obs;
@@ -160,9 +164,22 @@ public final class FactService {
 			questions.add(q.toMap());
 		}
 
+		/** Asks the caller, once per name, to check with the user what an unregistered term should mean. */
+		void suggest(String kind, String name, String message, Map<String, Object> define) {
+			if (suggestions.stream().anyMatch(s -> kind.equals(s.get("kind")) && name.equals(s.get("name")))) {
+				return;
+			}
+			var m = new LinkedHashMap<String, Object>();
+			m.put("kind", kind);
+			m.put("name", name);
+			m.put("message", message);
+			m.put("define", define);
+			suggestions.add(m);
+		}
+
 		Applied result() {
-			return new Applied(entityOut, eventOut, factOut, predicateOut, questions, warnings, superseded,
-					definitions);
+			return new Applied(entityOut, eventOut, factOut, predicateOut, questions, warnings, superseded, definitions,
+					suggestions);
 		}
 	}
 
@@ -276,6 +293,30 @@ public final class FactService {
 		}
 	}
 
+	/** An entity of a type the registry lacks: the caller should check what kind of thing it is. */
+	private void suggestEntityType(Application a, Entity e) {
+		String type = e.type();
+		if (EntityTypeRegistry.UNKNOWN.equals(type) || types.get(type).isPresent()) {
+			return;
+		}
+		a.suggest("entity_type", type, "'" + type + "' (the type of " + e.name()
+				+ ") is not a registered entity type, so "
+				+ "no predicate's domain or range admits it and its names get no type words. Check with the user what kind "
+				+ "of thing it is (a kind of place? organization?) and define it in your next remember with entity_types, "
+				+ "with 'parent' when it nests within a registered kind.",
+				Map.of("entity_types", List.of(skeleton("name", type, "description", "", "parent", "", "synonyms",
+						List.of(), "type_words", List.of()))));
+	}
+
+	/** An ordered map from alternating keys and values, for the definition skeletons a suggestion carries. */
+	private static Map<String, Object> skeleton(Object ... keysAndValues) {
+		var m = new LinkedHashMap<String, Object>();
+		for (int i = 0; i < keysAndValues.length; i += 2) {
+			m.put((String) keysAndValues[i], keysAndValues[i + 1]);
+		}
+		return m;
+	}
+
 	private static Map<String, Object> definition(String kind, String name, boolean known) {
 		var m = new LinkedHashMap<String, Object>();
 		m.put("kind", kind);
@@ -331,6 +372,7 @@ public final class FactService {
 			a.refs.put(key, r.entity());
 			a.refs.put(Names.norm(er.name()), r.entity());
 			a.entityOut.add(new EntityOut(key, r.entity().ref(), r.entity().name(), r.how(), r.score()));
+			suggestEntityType(a, r.entity());
 		}
 	}
 
@@ -359,6 +401,17 @@ public final class FactService {
 			}
 			Bounds b = Bounds.of(ev.validTime(), a.obs.observedAt(), a.warnings);
 			String type = ev.type().trim().toLowerCase(Locale.ROOT);
+			if (eventTypes.get(type).isEmpty()) {
+				a.suggest("event_type", type, "'" + type
+						+ "' is not a registered event type, so the event is stored as an "
+						+ "occurrence with no effect on facts. Check with the user whether it starts or ends a relation "
+						+ "(for example opens owns, or closes works_at) and define it in your next remember; leave it if "
+						+ "it is a plain occurrence.",
+						Map.of("event_types",
+								List.of(skeleton("name", type, "description", "", "opens", List.of(), "closes",
+										List.of(), "supersedes", List.of(), "ends_entity", false, "lexicon",
+										List.of(type.replace('_', ' '))))));
+			}
 			String rendering = type + "(" + String.join(", ", participants.stream().map(Entity::name).toList()) + ")"
 					+ b.suffix(false, Lang.EN);
 			EventService.Stored stored = events.store(type, participants, b, rendering, a.obs);
@@ -477,6 +530,15 @@ public final class FactService {
 		if (def != null && a.predicateOut.stream().noneMatch(o -> o.proposed().equals(f.predicate()))) {
 			Predicate named = res.predicate() != null ? res.predicate() : res.candidate();
 			a.predicateOut.add(new PredicateOut(f.predicate(), res.how(), named == null ? null : named.name()));
+		}
+		if ("extended".equals(res.how()) && !f.predicate().startsWith("x:")) {
+			a.suggest("predicate", f.predicate(), "'" + f.predicate()
+					+ "' is not a registered predicate and came without " + "a definition, so it is stored as 'x:"
+					+ f.predicate() + "' and found lexically only. Check with the "
+					+ "user what it means (which kinds of subject and object, whether one value at a time) and define it in "
+					+ "'predicates' in your next remember.",
+					Map.of("predicates", List.of(skeleton("name", f.predicate(), "description", "", "domain", "person",
+							"range", "*", "functional", false, "lexicon", List.of()))));
 		}
 		if (res.asks()) {
 			a.ask(asks.predicate(a.obs, f, res.candidate(), res.how(), def, FactQuestions.heldProposal(a.p, f, def)));

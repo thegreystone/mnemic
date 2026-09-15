@@ -122,6 +122,9 @@ public class MnemicTools {
 			if (!a.definitions().isEmpty()) {
 				out.put("definitions", a.definitions());
 			}
+			if (!a.suggestions().isEmpty()) {
+				out.put("suggestions", a.suggestions());
+			}
 			if (!o.resolved().isEmpty()) {
 				out.put("resolved", o.resolved());
 			}
@@ -259,6 +262,9 @@ public class MnemicTools {
 			out.put("questions", a.questions());
 			if (!a.definitions().isEmpty()) {
 				out.put("definitions", a.definitions());
+			}
+			if (!a.suggestions().isEmpty()) {
+				out.put("suggestions", a.suggestions());
 			}
 			var warnings = new ArrayList<>(parsed.warnings());
 			warnings.addAll(a.warnings());
