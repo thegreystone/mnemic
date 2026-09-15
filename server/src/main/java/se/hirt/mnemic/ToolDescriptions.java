@@ -29,8 +29,8 @@
 package se.hirt.mnemic;
 
 /**
- * What the model reads about each tool: when to use it, when not to, one example, the words users actually say.
- * Kept apart from the code so the tool methods read as code and the prose can be edited as prose.
+ * What the model reads about each tool: when to use it, when not to, one example, the words users actually say. Kept
+ * apart from the code so the tool methods read as code and the prose can be edited as prose.
  */
 final class ToolDescriptions {
 

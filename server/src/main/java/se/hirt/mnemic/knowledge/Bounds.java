@@ -40,12 +40,12 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * A valid-time interval as stored on a fact or an event: ISO bounds, the precision each was given, and where each
- * came from ({@code stated}, {@code resolved} from a relative expression against the observation date, {@code event},
+ * A valid-time interval as stored on a fact or an event: ISO bounds, the precision each was given, and where each came
+ * from ({@code stated}, {@code resolved} from a relative expression against the observation date, {@code event},
  * {@code sequence}). Either bound may be unknown.
  */
 public record Bounds(String start, String startPrecision, String startSource, String end, String endPrecision,
-                     String endSource) {
+		String endSource) {
 
 	public static final Bounds NONE = new Bounds(null, null, null, null, null, null);
 
@@ -72,8 +72,8 @@ public record Bounds(String start, String startPrecision, String startSource, St
 
 	/** The bounds stored on a fact. */
 	public static Bounds of(Fact f) {
-		return new Bounds(f.validStart(), f.validStartPrecision(), f.startSource(), f.validEnd(),
-				f.validEndPrecision(), f.endSource());
+		return new Bounds(f.validStart(), f.validStartPrecision(), f.startSource(), f.validEnd(), f.validEndPrecision(),
+				f.endSource());
 	}
 
 	public Bounds withStart(String start, String precision, String source) {
@@ -104,9 +104,9 @@ public record Bounds(String start, String startPrecision, String startSource, St
 			return "?";
 		}
 		return switch (precision == null ? "" : precision) {
-			case "year" -> iso.substring(0, 4);
-			case "month" -> iso.substring(0, 7);
-			default -> iso.length() >= 10 ? iso.substring(0, 10) : iso;
+		case "year" -> iso.substring(0, 4);
+		case "month" -> iso.substring(0, 7);
+		default -> iso.length() >= 10 ? iso.substring(0, 10) : iso;
 		};
 	}
 
@@ -153,25 +153,25 @@ public record Bounds(String start, String startPrecision, String startSource, St
 		if (m.find()) {
 			int n = Integer.parseInt(m.group(1));
 			return switch (m.group(2)) {
-				case "year" -> resolved(base.minusYears(n).getYear() + "-01-01", "year");
-				case "month" -> resolved(base.minusMonths(n).withDayOfMonth(1).toString(), "month");
-				case "week" -> resolved(base.minusWeeks(n).toString(), "day");
-				default -> resolved(base.minusDays(n).toString(), "day");
+			case "year" -> resolved(base.minusYears(n).getYear() + "-01-01", "year");
+			case "month" -> resolved(base.minusMonths(n).withDayOfMonth(1).toString(), "month");
+			case "week" -> resolved(base.minusWeeks(n).toString(), "day");
+			default -> resolved(base.minusDays(n).toString(), "day");
 			};
 		}
 		m = LAST.matcher(t);
 		if (m.find()) {
 			return switch (m.group(1)) {
-				case "year" -> resolved(base.minusYears(1).getYear() + "-01-01", "year");
-				case "month" -> resolved(base.minusMonths(1).withDayOfMonth(1).toString(), "month");
-				default -> resolved(base.minusWeeks(1).toString(), "day");
+			case "year" -> resolved(base.minusYears(1).getYear() + "-01-01", "year");
+			case "month" -> resolved(base.minusMonths(1).withDayOfMonth(1).toString(), "month");
+			default -> resolved(base.minusWeeks(1).toString(), "day");
 			};
 		}
 		return switch (t) {
-			case "yesterday" -> resolved(base.minusDays(1).toString(), "day");
-			case "today", "now" -> resolved(base.toString(), "day");
-			case "this year" -> resolved(base.getYear() + "-01-01", "year");
-			default -> null;
+		case "yesterday" -> resolved(base.minusDays(1).toString(), "day");
+		case "today", "now" -> resolved(base.toString(), "day");
+		case "this year" -> resolved(base.getYear() + "-01-01", "year");
+		default -> null;
 		};
 	}
 

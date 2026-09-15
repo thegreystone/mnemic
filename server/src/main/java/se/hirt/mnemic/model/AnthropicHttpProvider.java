@@ -43,9 +43,9 @@ import java.util.Map;
 
 /**
  * Anthropic's Messages API over {@code java.net.http}, no SDK: one POST, {@code x-api-key} and
- * {@code anthropic-version} headers, {@code system} as a top-level field, the text blocks of the reply joined.
- * Retries on 429, 529, and 5xx with backoff, since the bench sends eight requests at once. The id is
- * {@code anthropic:<model>}; the bench's proposal cache is keyed by it.
+ * {@code anthropic-version} headers, {@code system} as a top-level field, the text blocks of the reply joined. Retries
+ * on 429, 529, and 5xx with backoff, since the bench sends eight requests at once. The id is {@code anthropic:<model>};
+ * the bench's proposal cache is keyed by it.
  */
 public final class AnthropicHttpProvider implements ModelProvider {
 
@@ -65,8 +65,8 @@ public final class AnthropicHttpProvider implements ModelProvider {
 	public ChatModel create(ModelSpec spec) {
 		String key = ModelSpec.key(spec.apiKeyEnv(), "API_KEY_ANTHROPIC", "ANTHROPIC_API_KEY");
 		if (key == null) {
-			throw new IllegalStateException("No Anthropic key: set API_KEY_ANTHROPIC (or ANTHROPIC_API_KEY), or pass "
-					+ "--api-key-env NAME");
+			throw new IllegalStateException(
+					"No Anthropic key: set API_KEY_ANTHROPIC (or ANTHROPIC_API_KEY), or pass " + "--api-key-env NAME");
 		}
 		String endpoint = spec.endpoint() == null ? "https://api.anthropic.com" : spec.endpoint();
 		return new Client("anthropic:" + spec.model(), endpoint, spec.model(), key);

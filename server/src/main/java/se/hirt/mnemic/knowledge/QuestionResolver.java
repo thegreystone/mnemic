@@ -49,9 +49,9 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Applies the caller's answers to open questions. An entity answer binds the name and applies what the question
- * held; a predicate answer confirms or registers the predicate and applies the fact; a conflict answer settles which
- * of two facts stands; a containment answer stores the missing link.
+ * Applies the caller's answers to open questions. An entity answer binds the name and applies what the question held; a
+ * predicate answer confirms or registers the predicate and applies the fact; a conflict answer settles which of two
+ * facts stands; a containment answer stores the missing link.
  */
 public final class QuestionResolver {
 
@@ -72,8 +72,7 @@ public final class QuestionResolver {
 	private final FactService facts;
 	private final FactLedger ledger;
 
-	QuestionResolver(
-			Database db, EntityService entities, PredicateRegistry predicates, QuestionService questions,
+	QuestionResolver(Database db, EntityService entities, PredicateRegistry predicates, QuestionService questions,
 			FactService facts, FactLedger ledger) {
 		this.db = db;
 		this.entities = entities;
@@ -84,10 +83,10 @@ public final class QuestionResolver {
 	}
 
 	/**
-	 * Resolves answers; each result says what happened. Entity answers are taken in two phases: every entity is
-	 * chosen or created first, then every held fragment is applied with all of them bound, so a fragment that names
-	 * another answered subject finds it whatever the order of the answers. Afterwards any open entity question whose
-	 * subject now names an entity exactly is settled.
+	 * Resolves answers; each result says what happened. Entity answers are taken in two phases: every entity is chosen
+	 * or created first, then every held fragment is applied with all of them bound, so a fragment that names another
+	 * answered subject finds it whatever the order of the answers. Afterwards any open entity question whose subject
+	 * now names an entity exactly is settled.
 	 */
 	public List<Map<String, Object>> resolve(Observation obs, List<Resolve> resolves) {
 		var out = new ArrayList<Map<String, Object>>();
@@ -123,7 +122,7 @@ public final class QuestionResolver {
 		}
 		List<Map<String, Object>> settled = settleExactSubjects(false);
 		if (!settled.isEmpty()) {
-			out.add(Map.<String, Object>of("settled", settled));
+			out.add(Map.<String, Object> of("settled", settled));
 		}
 		return out;
 	}
@@ -140,9 +139,8 @@ public final class QuestionResolver {
 		}
 		boolean listed = q.candidates().stream().anyMatch(c -> choice.equals(c.get("id")));
 		if (!listed && !choice.startsWith("ent-")) {
-			throw MnemicException.invalidArgument(
-					"'" + choice + "' is not a candidate of " + q.ref() + "; answer with one of " + q.candidates()
-							+ ", an existing entity id (ent-N), or \"new\".");
+			throw MnemicException.invalidArgument("'" + choice + "' is not a candidate of " + q.ref()
+					+ "; answer with one of " + q.candidates() + ", an existing entity id (ent-N), or \"new\".");
 		}
 		Entity chosen = entities.byRef(choice).orElseThrow(() -> MnemicException.notFound("No entity " + choice));
 		// The name the question was about is now known to be an alias of the chosen entity.
@@ -151,7 +149,7 @@ public final class QuestionResolver {
 	}
 
 	private Map<String, Object> applyHeld(
-			Question q, String choice, Entity chosen, Map<String, Entity> bindings, Observation obs) {
+		Question q, String choice, Entity chosen, Map<String, Entity> bindings, Observation obs) {
 		Proposal held = Proposal.parse(q.payload());
 		Applied a = facts.apply(source(q, obs), held, bindings);
 		questions.answer(q.id(), choice);
@@ -167,8 +165,8 @@ public final class QuestionResolver {
 	}
 
 	/**
-	 * Open entity questions whose subject now names an entity exactly are settled: what they held is applied to
-	 * that entity (identical facts corroborate rather than duplicate) and the question closes.
+	 * Open entity questions whose subject now names an entity exactly are settled: what they held is applied to that
+	 * entity (identical facts corroborate rather than duplicate) and the question closes.
 	 */
 	List<Map<String, Object>> settleExactSubjects(boolean dryRun) {
 		var settled = new ArrayList<Map<String, Object>>();
@@ -185,7 +183,8 @@ public final class QuestionResolver {
 			m.put("subject", q.subject());
 			m.put("entity", exact.get().ref());
 			if (!dryRun) {
-				Optional<Observation> src = q.observationId() == null ? Optional.empty() : observation(q.observationId());
+				Optional<Observation> src = q.observationId() == null ? Optional.empty()
+						: observation(q.observationId());
 				if (src.isPresent() && q.payload() != null) {
 					Applied a = facts.apply(src.get(), Proposal.parse(q.payload()), Map.of(q.subject(), exact.get()));
 					m.put("facts", a.facts().stream().map(FactOut::id).toList());
@@ -261,8 +260,8 @@ public final class QuestionResolver {
 			FactLedger.supersession(tx, pendingId, null, "invalidation", "user: " + choice, null, obs.id(), null);
 			return null;
 		});
-		default -> throw MnemicException.invalidArgument(
-				"'" + choice + "' is not an answer to " + q.ref() + "; use ended, supersede, reject, reinterpret, or wrong.");
+		default -> throw MnemicException.invalidArgument("'" + choice + "' is not an answer to " + q.ref()
+				+ "; use ended, supersede, reject, reinterpret, or wrong.");
 		}
 		questions.answer(q.id(), choice);
 		var m = new LinkedHashMap<String, Object>();
@@ -281,14 +280,14 @@ public final class QuestionResolver {
 		case "yes" -> {
 			var ref = new FactRef(entities.nameOf(top), "located_in", entities.nameOf(bound), null, null, null, null,
 					List.of(), new Proposal.Derivation("explicit"), null);
-			Applied a = facts.apply(obs, new Proposal(Proposal.CURRENT_SPEC_VERSION, List.of(), List.of(), List.of(ref),
-					List.of()));
+			Applied a = facts.apply(obs,
+					new Proposal(Proposal.CURRENT_SPEC_VERSION, List.of(), List.of(), List.of(ref), List.of()));
 			m.put("facts", a.facts().stream().map(FactOut::id).toList());
 		}
 		case "no" -> m.put("note", entities.nameOf(top) + " is recorded as not within " + entities.nameOf(bound)
 				+ " only in this answer; the restriction and the fact it questioned disagree, correct one of them.");
-		default -> throw MnemicException.invalidArgument(
-				"'" + choice + "' is not an answer to " + q.ref() + "; use yes or no.");
+		default -> throw MnemicException
+				.invalidArgument("'" + choice + "' is not an answer to " + q.ref() + "; use yes or no.");
 		}
 		questions.answer(q.id(), choice);
 		m.put("status", "answered");

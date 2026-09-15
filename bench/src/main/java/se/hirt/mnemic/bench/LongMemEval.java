@@ -58,7 +58,7 @@ public final class LongMemEval {
 	}
 
 	public record Question(String id, String type, String question, String answer, String dateText, Instant date,
-	                       List<Session> haystack, List<String> answerSessionIds) {
+			List<Session> haystack, List<String> answerSessionIds) {
 
 		public boolean isAbstention() {
 			return id.endsWith("_abs");

@@ -65,9 +65,9 @@ public final class PredicateRegistry {
 	/**
 	 * A predicate cue found in a query, with the qualifier when the trigger term was one ("mother"). {@code direction}
 	 * is the side of the predicate the spotted entity is on: {@code object} for a qualifier or a lexicon term of a
-	 * same-type relation ("Mattias's father": the term names the subject, so the entity is the object),
-	 * {@code subject} for an inverse term ("Mattias's children"), {@code any} otherwise, in which case the probe
-	 * decides by the entity's type against domain and range.
+	 * same-type relation ("Mattias's father": the term names the subject, so the entity is the object), {@code subject}
+	 * for an inverse term ("Mattias's children"), {@code any} otherwise, in which case the probe decides by the
+	 * entity's type against domain and range.
 	 */
 	public record Cue(Predicate predicate, String qualifier, String term, String direction) {
 	}
@@ -102,9 +102,9 @@ public final class PredicateRegistry {
 	}
 
 	/**
-	 * German templates, negations, and cue words for the seed predicates. The base row of a predicate keeps its
-	 * English template; a language row overrides the rendering and adds cue words when it is the store's language.
-	 * Stored, not compiled in, so a user can correct them like any other template (correct on the predicate).
+	 * German templates, negations, and cue words for the seed predicates. The base row of a predicate keeps its English
+	 * template; a language row overrides the rendering and adds cue words when it is the store's language. Stored, not
+	 * compiled in, so a user can correct them like any other template (correct on the predicate).
 	 */
 	private static final List<String[]> RENDERS_DE = List.of(
 			new String[] {"works_at", "{subject} arbeitet bei {object}", "{subject} arbeitet nicht bei {object}",
@@ -118,8 +118,8 @@ public final class PredicateRegistry {
 					"wohnt,wohnen,lebt,leben,zuhause,wohnort,wohnhaft", ""},
 			new String[] {"born_in", "{subject} wurde in {object} geboren", "{subject} wurde nicht in {object} geboren",
 					"geboren,geburtsort,gebürtig", ""},
-			new String[] {"member_of", "{subject} ist Mitglied von {object}", "{subject} ist nicht Mitglied von {object}",
-					"mitglied,verein,mitgliedschaft", ""},
+			new String[] {"member_of", "{subject} ist Mitglied von {object}",
+					"{subject} ist nicht Mitglied von {object}", "mitglied,verein,mitgliedschaft", ""},
 			new String[] {"parent_of", "{subject} ist {qualifier|Elternteil} von {object}",
 					"{subject} ist nicht {qualifier|Elternteil} von {object}", "mutter,vater,eltern,elternteil",
 					"kind,kinder,sohn,tochter,söhne,töchter"},
@@ -152,10 +152,12 @@ public final class PredicateRegistry {
 	private void seedRendersIfMissing() {
 		db.write(tx -> {
 			for (String[] r : RENDERS_DE) {
-				tx.update("""
-				          INSERT OR IGNORE INTO predicate_render(name, language, render, negated, lexicon, inverse_lexicon)
-				          SELECT ?, 'de', ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM predicate WHERE name = ?)""", r[0], r[1], r[2],
-						json(List.of(r[3].split(","))), json(r[4].isEmpty() ? List.of() : List.of(r[4].split(","))), r[0]);
+				tx.update(
+						"""
+								INSERT OR IGNORE INTO predicate_render(name, language, render, negated, lexicon, inverse_lexicon)
+								SELECT ?, 'de', ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM predicate WHERE name = ?)""",
+						r[0], r[1], r[2], json(List.of(r[3].split(","))),
+						json(r[4].isEmpty() ? List.of() : List.of(r[4].split(","))), r[0]);
 			}
 			return null;
 		});
@@ -165,8 +167,8 @@ public final class PredicateRegistry {
 	/** Records a caller-supplied template for a language ({@code renders} on a predicate definition). */
 	public synchronized void putRender(String predicate, String language, String render, String negatedTemplate) {
 		db.write(tx -> tx.update("""
-		                         INSERT OR REPLACE INTO predicate_render(name, language, render, negated, lexicon, inverse_lexicon)
-		                         VALUES (?,?,?,?,'[]','[]')""", predicate, language, render, negatedTemplate));
+				INSERT OR REPLACE INTO predicate_render(name, language, render, negated, lexicon, inverse_lexicon)
+				VALUES (?,?,?,?,'[]','[]')""", predicate, language, render, negatedTemplate));
 		cache = null;
 	}
 
@@ -199,10 +201,10 @@ public final class PredicateRegistry {
 	 * (registered on first use), a similar existing predicate (same domain/range, at least two content tokens shared
 	 * across name, description, and lexicon, J2), an ambiguous one (exactly one token shared, J3), or a new
 	 * registration when a definition was supplied. Similar and ambiguous are both returned as a candidate for the
-	 * caller to confirm, never applied: token overlap cannot see meaning, and a restriction defined by the caller
-	 * would otherwise be mapped onto the relation it restricts. Confirming a similar candidate records the name as
-	 * an alias, so it is asked once. A bare unknown name without a definition becomes an {@code x:} predicate with a
-	 * warning, so nothing is lost.
+	 * caller to confirm, never applied: token overlap cannot see meaning, and a restriction defined by the caller would
+	 * otherwise be mapped onto the relation it restricts. Confirming a similar candidate records the name as an alias,
+	 * so it is asked once. A bare unknown name without a definition becomes an {@code x:} predicate with a warning, so
+	 * nothing is lost.
 	 */
 	public synchronized Resolution resolve(String name, PredicateDef def, Long observationId, List<String> warnings) {
 		if (name == null || name.isBlank()) {
@@ -225,14 +227,14 @@ public final class PredicateRegistry {
 			}
 			return new Resolution(register(def, observationId), "registered", null);
 		}
-		warnings.add(
-				"Predicate '" + name + "' is not registered and no definition was supplied; stored as 'x:" + name + "' (lexical recall only). Define it in 'predicates' to make it structural.");
+		warnings.add("Predicate '" + name + "' is not registered and no definition was supplied; stored as 'x:" + name
+				+ "' (lexical recall only). Define it in 'predicates' to make it structural.");
 		return new Resolution(registerExtended("x:" + name, observationId), "extended", null);
 	}
 
 	/**
-	 * Predicate cues in a query: lexicon and qualifier terms, longest first, one cue per predicate. Terms are
-	 * compared token by token, so a hyphenated qualifier (half-brother) matches the query's tokens.
+	 * Predicate cues in a query: lexicon and qualifier terms, longest first, one cue per predicate. Terms are compared
+	 * token by token, so a hyphenated qualifier (half-brother) matches the query's tokens.
 	 */
 	public synchronized List<Cue> cues(String query) {
 		String q = " " + String.join(" ", Names.tokens(query)) + " ";
@@ -243,18 +245,21 @@ public final class PredicateRegistry {
 			}
 			Cue best = null;
 			for (String term : p.qualifiers()) {
-				if (q.contains(" " + String.join(" ", Names.tokens(term)) + " ") && (best == null || term.length() > best.term().length())) {
+				if (q.contains(" " + String.join(" ", Names.tokens(term)) + " ")
+						&& (best == null || term.length() > best.term().length())) {
 					best = new Cue(p, term, term, p.symmetric() ? "any" : "object");
 				}
 			}
 			for (String term : p.inverseLexicon()) {
-				if (q.contains(" " + String.join(" ", Names.tokens(term)) + " ") && (best == null || term.length() > best.term().length())) {
+				if (q.contains(" " + String.join(" ", Names.tokens(term)) + " ")
+						&& (best == null || term.length() > best.term().length())) {
 					best = new Cue(p, null, term, p.symmetric() ? "any" : "subject");
 				}
 			}
 			if (best == null) {
 				for (String term : p.lexicon()) {
-					if (q.contains(" " + String.join(" ", Names.tokens(term)) + " ") && (best == null || term.length() > best.term().length())) {
+					if (q.contains(" " + String.join(" ", Names.tokens(term)) + " ")
+							&& (best == null || term.length() > best.term().length())) {
 						best = new Cue(p, null, term, !p.symmetric() && p.sameType() ? "object" : "any");
 					}
 				}
@@ -271,9 +276,8 @@ public final class PredicateRegistry {
 	/** Extended ({@code x:}) predicates used by at least {@code min} facts: candidates for registration (J6). */
 	public List<Map<String, Object>> frequentExtended(int min) {
 		return db.read(tx -> tx.query("""
-		                              SELECT predicate, COUNT(*) AS n, GROUP_CONCAT(DISTINCT observation_id) AS obs FROM fact
-		                              WHERE predicate LIKE 'x:%' GROUP BY predicate HAVING n >= ? ORDER BY n DESC""",
-				min).stream().map(r -> {
+				SELECT predicate, COUNT(*) AS n, GROUP_CONCAT(DISTINCT observation_id) AS obs FROM fact
+				WHERE predicate LIKE 'x:%' GROUP BY predicate HAVING n >= ? ORDER BY n DESC""", min).stream().map(r -> {
 			var m = new LinkedHashMap<String, Object>();
 			m.put("predicate", r.str("predicate"));
 			m.put("uses", r.lng("n"));
@@ -349,8 +353,8 @@ public final class PredicateRegistry {
 				old = description;
 				description = String.valueOf(e.getValue());
 			}
-			default -> throw MnemicException.invalidArgument(
-					"Unknown predicate property '" + e.getKey() + "'; correctable: render, lexicon, inverse_lexicon, qualifiers, functional, volatility, description.");
+			default -> throw MnemicException.invalidArgument("Unknown predicate property '" + e.getKey()
+					+ "'; correctable: render, lexicon, inverse_lexicon, qualifiers, functional, volatility, description.");
 			}
 			changes.add(new String[] {e.getKey(), old,
 					e.getValue() instanceof List<?> ? json(strings(e.getValue())) : String.valueOf(e.getValue())});
@@ -364,13 +368,12 @@ public final class PredicateRegistry {
 		final String d = description;
 		db.write(tx -> {
 			tx.update("""
-			          UPDATE predicate SET render = ?, lexicon = ?, qualifiers = ?, functional = ?, volatility = ?,
-			          description = ?, inverse_lexicon = ? WHERE name = ?""", r, json(l), json(q), f ? 1 : 0, v, d,
+					UPDATE predicate SET render = ?, lexicon = ?, qualifiers = ?, functional = ?, volatility = ?,
+					description = ?, inverse_lexicon = ? WHERE name = ?""", r, json(l), json(q), f ? 1 : 0, v, d,
 					json(inv), p.name());
 			for (String[] c : changes) {
-				tx.insert(
-						"INSERT INTO predicate_change(predicate, field, old_value, new_value, reason, changed_at) " + "VALUES (?,?,?,?,?,?)",
-						p.name(), c[0], c[1], c[2], reason, Instant.now().toString());
+				tx.insert("INSERT INTO predicate_change(predicate, field, old_value, new_value, reason, changed_at) "
+						+ "VALUES (?,?,?,?,?,?)", p.name(), c[0], c[1], c[2], reason, Instant.now().toString());
 			}
 			return null;
 		});
@@ -498,17 +501,24 @@ public final class PredicateRegistry {
 				seed("member_of", "Subject is a member of object organization or group.", List.of("person"),
 						List.of("organization", "team", "group", "project"), false, null, false, "medium",
 						List.of("member", "membership", "belongs"), "{subject} is a member of {object}", List.of()),
-				seed("parent_of", "Subject is a parent of object, and the qualifier names the subject's role (mother, father).", List.of("person"), List.of("person"), false, null,
-						false, "low", List.of("parent", "parents"), "{subject} is {object}'s {qualifier|parent}",
+				seed("parent_of",
+						"Subject is a parent of object, and the qualifier names the subject's role (mother, father).",
+						List.of("person"), List.of("person"), false, null, false, "low", List.of("parent", "parents"),
+						"{subject} is {object}'s {qualifier|parent}",
 						List.of("mother", "father", "stepmother", "stepfather", "mom", "dad"),
-						List.of("child", "children", "kid", "kids", "son", "sons", "daughter", "daughters", "offspring")),
-				seed("spouse_of", "Subject is married to object, and the qualifier names the subject's role (wife, husband). Stored once, found from both sides.", List.of("person"), List.of("person"), true, null,
-						true, "low", List.of("spouse", "married", "marry", "partner"),
-						"{subject} is {object}'s {qualifier|spouse}", List.of("wife", "husband")),
-				seed("sibling_of", "Subject is a sibling of object, and the qualifier names the subject's role (brother, half-sister). Stored once, found from both sides.", List.of("person"), List.of("person"), false, null,
-						true, "low", List.of("sibling", "siblings"), "{subject} is {object}'s {qualifier|sibling}",
-						List.of("brother", "sister", "twin", "twin brother", "twin sister", "half-brother", "half-sister",
-								"stepbrother", "stepsister")),
+						List.of("child", "children", "kid", "kids", "son", "sons", "daughter", "daughters",
+								"offspring")),
+				seed("spouse_of",
+						"Subject is married to object, and the qualifier names the subject's role (wife, husband). Stored once, found from both sides.",
+						List.of("person"), List.of("person"), true, null, true, "low",
+						List.of("spouse", "married", "marry", "partner"), "{subject} is {object}'s {qualifier|spouse}",
+						List.of("wife", "husband")),
+				seed("sibling_of",
+						"Subject is a sibling of object, and the qualifier names the subject's role (brother, half-sister). Stored once, found from both sides.",
+						List.of("person"), List.of("person"), false, null, true, "low", List.of("sibling", "siblings"),
+						"{subject} is {object}'s {qualifier|sibling}",
+						List.of("brother", "sister", "twin", "twin brother", "twin sister", "half-brother",
+								"half-sister", "stepbrother", "stepsister")),
 				seed("owns", "Subject owns object.", List.of("*"), List.of("*"), false, null, false, "medium",
 						List.of("own", "owns", "owned", "buy", "bought", "purchase", "purchased", "acquired"),
 						"{subject} owns {object}", List.of()),
@@ -525,35 +535,39 @@ public final class PredicateRegistry {
 						null, false, "low",
 						List.of("decide", "decided", "decision", "chose", "choice", "pick", "picked"),
 						"{subject} decided {object}", List.of()),
-				seed("considering", "Subject is considering object (literal): a leaning, plan, or intention, not a decision.",
+				seed("considering",
+						"Subject is considering object (literal): a leaning, plan, or intention, not a decision.",
 						List.of("*"), List.of("literal"), false, null, false, "high",
-						List.of("considering", "consider", "considers", "leaning", "intend", "intends", "intention", "plan",
-								"plans", "planning", "weighing", "thinking"),
+						List.of("considering", "consider", "considers", "leaning", "intend", "intends", "intention",
+								"plan", "plans", "planning", "weighing", "thinking"),
 						"{subject} is considering {object}", List.of()),
 				seed("related_to", "Subject is related to object (generic).", List.of("*"), List.of("*"), false, null,
-						true, "medium", List.of("related", "relation"), "{subject} is related to {object}[[ ({qualifier})]]", List.of()),
+						true, "medium", List.of("related", "relation"),
+						"{subject} is related to {object}[[ ({qualifier})]]", List.of()),
 				seed("knows", "Subject knows object person.", List.of("person"), List.of("person"), false, null, true,
-						"medium", List.of("know", "knows", "met", "colleague"), "{subject} knows {object}[[ ({qualifier})]]", List.of()),
+						"medium", List.of("know", "knows", "met", "colleague"),
+						"{subject} knows {object}[[ ({qualifier})]]", List.of()),
 				seed("part_of", "Subject is part of object.", List.of("*"), List.of("*"), false, null, false, "medium",
 						List.of("part", "within"), "{subject} is part of {object}", List.of()),
-				seed("located_in", "Subject place or organization is located in object place, and places nest "
-						+ "(a town in a canton in a country), so several current values are expected.",
+				seed("located_in",
+						"Subject place or organization is located in object place, and places nest "
+								+ "(a town in a canton in a country), so several current values are expected.",
 						List.of("place", "organization"), List.of("place"), false, null, false, "low",
 						List.of("located", "headquartered", "headquarters", "based"),
 						"{subject} is located in {object}", List.of()));
 	}
 
 	private static Predicate seed(
-			String name, String description, List<String> domain, List<String> range, boolean functional, String scope,
-			boolean symmetric, String volatility, List<String> lexicon, String render, List<String> qualifiers) {
+		String name, String description, List<String> domain, List<String> range, boolean functional, String scope,
+		boolean symmetric, String volatility, List<String> lexicon, String render, List<String> qualifiers) {
 		return seed(name, description, domain, range, functional, scope, symmetric, volatility, lexicon, render,
 				qualifiers, List.of());
 	}
 
 	private static Predicate seed(
-			String name, String description, List<String> domain, List<String> range, boolean functional, String scope,
-			boolean symmetric, String volatility, List<String> lexicon, String render, List<String> qualifiers,
-			List<String> inverseLexicon) {
+		String name, String description, List<String> domain, List<String> range, boolean functional, String scope,
+		boolean symmetric, String volatility, List<String> lexicon, String render, List<String> qualifiers,
+		List<String> inverseLexicon) {
 		return new Predicate(name, description, domain, range, functional, scope, symmetric, null, volatility, lexicon,
 				render, qualifiers, List.of(), inverseLexicon, null, true);
 	}
@@ -569,7 +583,8 @@ public final class PredicateRegistry {
 			negated.clear();
 			if (lang != Lang.EN) {
 				// The store's language: its template replaces the base rendering, its cue words join the base ones.
-				for (Row r : db.read(tx -> tx.query("SELECT * FROM predicate_render WHERE language = ?", lang.code()))) {
+				for (Row r : db
+						.read(tx -> tx.query("SELECT * FROM predicate_render WHERE language = ?", lang.code()))) {
 					Predicate p = map.get(r.str("name"));
 					if (p == null) {
 						continue;
@@ -586,9 +601,10 @@ public final class PredicateRegistry {
 							inverse.add(t);
 						}
 					}
-					map.put(p.name(), new Predicate(p.name(), p.description(), p.domain(), p.range(), p.functional(),
-							p.functionalScope(), p.symmetric(), p.inverse(), p.volatility(), lexicon, r.str("render"),
-							p.qualifiers(), p.aliases(), inverse, p.definedBy(), p.seed()));
+					map.put(p.name(),
+							new Predicate(p.name(), p.description(), p.domain(), p.range(), p.functional(),
+									p.functionalScope(), p.symmetric(), p.inverse(), p.volatility(), lexicon,
+									r.str("render"), p.qualifiers(), p.aliases(), inverse, p.definedBy(), p.seed()));
 					if (r.str("negated") != null) {
 						negated.put(p.name(), r.str("negated"));
 					}
@@ -606,10 +622,10 @@ public final class PredicateRegistry {
 
 	private static Object insert(Tx tx, Predicate p) {
 		tx.insert("""
-		          INSERT INTO predicate(name, description, domain, range, functional, functional_scope, symmetric,
-		                                inverse, volatility, lexicon, render, qualifiers, aliases, inverse_lexicon,
-		                                defined_by, seed, created_at)
-		          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", p.name(), p.description(), json(p.domain()),
+				INSERT INTO predicate(name, description, domain, range, functional, functional_scope, symmetric,
+				                      inverse, volatility, lexicon, render, qualifiers, aliases, inverse_lexicon,
+				                      defined_by, seed, created_at)
+				VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", p.name(), p.description(), json(p.domain()),
 				json(p.range()), p.functional() ? 1 : 0, p.functionalScope(), p.symmetric() ? 1 : 0, p.inverse(),
 				p.volatility(), json(p.lexicon()), p.render(), json(p.qualifiers()), json(p.aliases()),
 				json(p.inverseLexicon()), p.definedBy(), p.seed() ? 1 : 0, Instant.now().toString());

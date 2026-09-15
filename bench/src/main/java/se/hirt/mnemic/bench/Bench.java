@@ -51,12 +51,13 @@ import java.time.Instant;
 import java.util.*;
 
 /**
- * The benchmark CLI. A run directory holds {@code config.json}, {@code retrieval.jsonl}
- * (one line per question: ranked sessions, recall@k, latency, context tokens, facts), {@code hypotheses.jsonl} in
- * LongMemEval's official format when a reader is set, {@code judged.jsonl} after {@code judge}, {@code errors.jsonl}
- * for questions that failed, and {@code metrics.json} after {@code metrics}. Models are named as
- * {@code provider:model[@endpoint]} and resolved through the {@link ModelProvider} SPI. A run is resumable: questions
- * already in {@code retrieval.jsonl} are skipped, so a killed run with a paid proposer does not repeat its work.
+ * The benchmark CLI. A run directory holds {@code config.json}, {@code retrieval.jsonl} (one line per question: ranked
+ * sessions, recall@k, latency, context tokens, facts), {@code hypotheses.jsonl} in LongMemEval's official format when a
+ * reader is set, {@code judged.jsonl} after {@code judge}, {@code errors.jsonl} for questions that failed, and
+ * {@code metrics.json} after {@code metrics}. Models are named as {@code provider:model[@endpoint]} and resolved
+ * through the {@link ModelProvider} SPI. A run is resumable: questions already in {@code retrieval.jsonl} are skipped,
+ * so a killed run with a paid proposer does not repeat its work.
+ *
  * <pre>
  * bench run     --data longmemeval_s.json --out results/m1-facts [--granularity session|turn] [--k 10]
  *               [--budget 4000] [--proposer anthropic:claude-haiku-4-5] [--reader lmstudio:qwen3-4b]
@@ -108,14 +109,15 @@ public final class Bench {
 		boolean onlyAbstention = "true".equals(o.get("abstention")); // the 30 questions whose answer is "not known"
 		Embedder embedder = embedder(o);
 		String keyEnv = o.get("api-key-env");
-		Reader reader = o.containsKey("reader") && !"none".equals(o.get("reader")) ? new Reader(
-				ModelProvider.resolve(o.get("reader"), keyEnv)) : null;
+		Reader reader = o.containsKey("reader") && !"none".equals(o.get("reader"))
+				? new Reader(ModelProvider.resolve(o.get("reader"), keyEnv)) : null;
 		int workers = Integer.parseInt(o.getOrDefault("workers", "8"));
 		Path cacheDir = Path.of(o.getOrDefault("cache", "cache/proposals"));
 		boolean refreshFailed = "true".equals(o.get("refresh-failed"));
 		reasoningEffort(o);
-		ApiProposer proposer = o.containsKey("proposer") && !"none".equals(o.get("proposer")) ? new ApiProposer(
-				ModelProvider.resolve(o.get("proposer"), keyEnv), new ProposalCache(cacheDir), workers, refreshFailed)
+		ApiProposer proposer = o.containsKey("proposer") && !"none".equals(o.get("proposer"))
+				? new ApiProposer(ModelProvider.resolve(o.get("proposer"), keyEnv), new ProposalCache(cacheDir),
+						workers, refreshFailed)
 				: null;
 
 		Files.createDirectories(out);
@@ -142,9 +144,8 @@ public final class Bench {
 		int errors = 0;
 		try (BufferedWriter retrieval = Files.newBufferedWriter(out.resolve("retrieval.jsonl"), StandardCharsets.UTF_8,
 				StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-				BufferedWriter hyps = reader == null ? null
-						: Files.newBufferedWriter(out.resolve("hypotheses.jsonl"), StandardCharsets.UTF_8,
-								StandardOpenOption.CREATE, StandardOpenOption.APPEND)) {
+				BufferedWriter hyps = reader == null ? null : Files.newBufferedWriter(out.resolve("hypotheses.jsonl"),
+						StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND)) {
 			for (Question q : questions) {
 				if (!types.isEmpty() && !types.contains(q.type())) {
 					continue;
@@ -172,8 +173,9 @@ public final class Bench {
 						writeLine(retrieval, retrievalLine(q, ing, r, ingestNs, recallNs));
 					} catch (RuntimeException | IOException ex) {
 						// One bad question must not void the other 499: record it and move on.
-						Files.writeString(out.resolve("errors.jsonl"), LINE.writeValueAsString(
-										Map.of("question_id", q.id(), "error", String.valueOf(ex))) + "\n",
+						Files.writeString(out.resolve("errors.jsonl"),
+								LINE.writeValueAsString(Map.of("question_id", q.id(), "error", String.valueOf(ex)))
+										+ "\n",
 								StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
 						System.err.println("  error on " + q.id() + ": " + ex);
 						deleteTree(home);
@@ -187,8 +189,9 @@ public final class Bench {
 				}
 				done++;
 				if (done % (proposer == null ? 25 : 5) == 0) {
-					System.err.println("  " + done + " questions" + (proposer == null ? ""
-							: " (proposals: " + proposer.attempted() + ", cached " + proposer.cached() + ", failed " + proposer.failed() + ")"));
+					System.err.println(
+							"  " + done + " questions" + (proposer == null ? "" : " (proposals: " + proposer.attempted()
+									+ ", cached " + proposer.cached() + ", failed " + proposer.failed() + ")"));
 				}
 				deleteTree(home);
 			}
@@ -197,15 +200,18 @@ public final class Bench {
 				proposer.close();
 			}
 		}
-		System.out.println(
-				"run complete: " + done + " questions" + (errors > 0 ? " (" + errors + " errored, see errors.jsonl)"
-						: "") + " -> " + out.toAbsolutePath() + (proposer == null ? ""
-						: " (proposals: " + proposer.attempted() + ", cached " + proposer.cached() + ", refreshed " + proposer.refreshed() + ", failed " + proposer.failed() + ", endpoint errors " + proposer.errors() + ")"));
+		System.out.println("run complete: " + done + " questions"
+				+ (errors > 0 ? " (" + errors + " errored, see errors.jsonl)" : "") + " -> " + out.toAbsolutePath()
+				+ (proposer == null ? ""
+						: " (proposals: " + proposer.attempted() + ", cached " + proposer.cached() + ", refreshed "
+								+ proposer.refreshed() + ", failed " + proposer.failed() + ", endpoint errors "
+								+ proposer.errors() + ")"));
 		metrics(Map.of("run", out.toString()));
 	}
 
 	/** One question's retrieval result: what was ingested, how the sessions ranked, and the recall figures. */
-	private static Map<String, Object> retrievalLine(Question q, Ingested ing, RecallResult r, long ingestNs, long recallNs) {
+	private static Map<String, Object> retrievalLine(
+		Question q, Ingested ing, RecallResult r, long ingestNs, long recallNs) {
 		List<String> ranked = Ingestor.rankedSessions(r);
 		Set<String> answers = new HashSet<>(q.answerSessionIds());
 		var line = new LinkedHashMap<String, Object>();
@@ -256,9 +262,10 @@ public final class Bench {
 		int budget = Integer.parseInt(o.getOrDefault("budget", "4000"));
 		Path cacheDir = Path.of(o.getOrDefault("cache", "cache/proposals"));
 		reasoningEffort(o);
-		ApiProposer proposer = o.containsKey("proposer") && !"none".equals(o.get("proposer")) ? new ApiProposer(
-				ModelProvider.resolve(o.get("proposer"), o.get("api-key-env")), new ProposalCache(cacheDir),
-				Integer.parseInt(o.getOrDefault("workers", "8"))) : null;
+		ApiProposer proposer = o.containsKey("proposer") && !"none".equals(o.get("proposer"))
+				? new ApiProposer(ModelProvider.resolve(o.get("proposer"), o.get("api-key-env")),
+						new ProposalCache(cacheDir), Integer.parseInt(o.getOrDefault("workers", "8")))
+				: null;
 		Question q = LongMemEval.load(data).stream().filter(x -> x.id().startsWith(id)).findFirst()
 				.orElseThrow(() -> new IllegalArgumentException("No question " + id));
 		Path home = Files.createTempDirectory("mnemic-show");
@@ -268,16 +275,14 @@ public final class Bench {
 			List<String> ranked = Ingestor.rankedSessions(r);
 			System.out.println("question " + q.id() + " [" + q.type() + "] " + q.dateText() + ": " + q.question());
 			System.out.println("answer: " + q.answer());
-			System.out.println(
-					"answer sessions: " + q.answerSessionIds() + " ranked at " + q.answerSessionIds().stream()
-							.map(a -> String.valueOf(ranked.indexOf(a)))
-							.toList() + " of " + ranked.size() + " (observations " + ing.observations() + ", facts " + ing.facts() + ")");
+			System.out.println("answer sessions: " + q.answerSessionIds() + " ranked at "
+					+ q.answerSessionIds().stream().map(a -> String.valueOf(ranked.indexOf(a))).toList() + " of "
+					+ ranked.size() + " (observations " + ing.observations() + ", facts " + ing.facts() + ")");
 			for (String a : q.answerSessionIds()) {
 				q.haystack().stream().filter(sess -> sess.id().equals(a)).findFirst().ifPresent(sess -> {
 					String text = Ingestor.render(sess.turns());
-					System.out.println(
-							"answer session " + a + " begins: \"" + text.substring(0, Math.min(300, text.length()))
-									.replace('\n', ' ') + "\"");
+					System.out.println("answer session " + a + " begins: \""
+							+ text.substring(0, Math.min(300, text.length())).replace('\n', ' ') + "\"");
 				});
 			}
 			System.out.println();
@@ -342,8 +347,8 @@ public final class Bench {
 				copied++;
 			}
 		}
-		System.out.println(
-				"rekey " + from + " -> " + to + ": prompts " + seen + ", copied " + copied + ", already present " + present + ", not cached under the old id " + missing);
+		System.out.println("rekey " + from + " -> " + to + ": prompts " + seen + ", copied " + copied
+				+ ", already present " + present + ", not cached under the old id " + missing);
 	}
 
 	// ── judge ───────────────────────────────────────────────────────────
@@ -493,7 +498,9 @@ public final class Bench {
 		return ids;
 	}
 
-	/** One JSON object per line is what the harness writes; a reformatted stream of pretty-printed objects reads too. */
+	/**
+	 * One JSON object per line is what the harness writes; a reformatted stream of pretty-printed objects reads too.
+	 */
 	static List<JsonNode> readLines(Path file) throws IOException {
 		var out = new ArrayList<JsonNode>();
 		if (!Files.exists(file)) {
@@ -519,7 +526,12 @@ public final class Bench {
 		return out;
 	}
 
-	/** The shared in-process embedder for a run, or null: {@code --embed-model <dir> --ort-library <lib>}. */
+	/**
+	 * The shared in-process embedder for a run, or null: {@code --embed-model
+	 *
+	<dir>
+	 *  --ort-library <lib>}.
+	 */
 	static Embedder embedder(Map<String, String> o) throws IOException {
 		if (!o.containsKey("embed-model")) {
 			return null;
@@ -557,13 +569,14 @@ public final class Bench {
 	}
 
 	private static void usage() {
-		System.out.println("""
-		                   bench run     --data <longmemeval.json> --out <dir> [--granularity session|turn] [--k 10] [--budget 4000]
-		                                 [--proposer provider:model] [--reader provider:model] [--api-key-env NAME] [--limit N] [--types a,b]
-		                                 [--workers 8] [--cache cache/proposals] [--refresh-failed] [--reasoning-effort none|low|medium|high]
-		                   bench judge   --run <dir> --judge provider:model [--api-key-env NAME]
-		                   bench metrics --run <dir>
-		                   bench compare --a <dir> --b <dir>
-		                   providers: anthropic:<model>  openai:<model>  lmstudio:<model>  ollama:<model>  openai-compatible:<model>@<url>""");
+		System.out.println(
+				"""
+						bench run     --data <longmemeval.json> --out <dir> [--granularity session|turn] [--k 10] [--budget 4000]
+						              [--proposer provider:model] [--reader provider:model] [--api-key-env NAME] [--limit N] [--types a,b]
+						              [--workers 8] [--cache cache/proposals] [--refresh-failed] [--reasoning-effort none|low|medium|high]
+						bench judge   --run <dir> --judge provider:model [--api-key-env NAME]
+						bench metrics --run <dir>
+						bench compare --a <dir> --b <dir>
+						providers: anthropic:<model>  openai:<model>  lmstudio:<model>  ollama:<model>  openai-compatible:<model>@<url>""");
 	}
 }

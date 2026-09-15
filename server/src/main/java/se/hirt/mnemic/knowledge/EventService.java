@@ -99,8 +99,8 @@ public final class EventService {
 
 	/** The event type a question names, registered or merely stored. */
 	public Optional<String> cue(List<String> tokens) {
-		List<String> stored = db.read(tx -> tx.query("SELECT DISTINCT type FROM event").stream()
-				.map(r -> r.str("type")).toList());
+		List<String> stored = db
+				.read(tx -> tx.query("SELECT DISTINCT type FROM event").stream().map(r -> r.str("type")).toList());
 		return types.cue(tokens, stored);
 	}
 
@@ -112,8 +112,9 @@ public final class EventService {
 	static List<Event> events(Tx tx, List<Row> rows) {
 		var out = new ArrayList<Event>();
 		for (Row r : rows) {
-			List<Long> parts = tx.query("SELECT entity_id FROM event_participant WHERE event_id = ? ORDER BY entity_id",
-					r.lng("id")).stream().map(x -> x.lng("entity_id")).toList();
+			List<Long> parts = tx
+					.query("SELECT entity_id FROM event_participant WHERE event_id = ? ORDER BY entity_id", r.lng("id"))
+					.stream().map(x -> x.lng("entity_id")).toList();
 			out.add(Event.from(r, parts));
 		}
 		return out;
@@ -138,8 +139,8 @@ public final class EventService {
 	}
 
 	/**
-	 * Stores an event, unless the same event is on record: the same type and participants, undated or dated the
-	 * same, is one event, and a date the record lacked is filled in. A different date is a different event.
+	 * Stores an event, unless the same event is on record: the same type and participants, undated or dated the same,
+	 * is one event, and a date the record lacked is filled in. A different date is a different event.
 	 */
 	Stored store(String type, List<Entity> participants, Bounds b, String rendering, Observation obs) {
 		Optional<Event> same = sameEvent(type, participants, b.start());
@@ -147,10 +148,11 @@ public final class EventService {
 			Event e = same.get();
 			boolean dating = e.validStart() == null && b.start() != null;
 			if (dating) {
-				db.write(tx -> tx.update("""
-						UPDATE event SET valid_start = ?, valid_start_precision = ?, valid_end = ?, valid_end_precision = ?,
-						                 rendering = ? WHERE id = ?""", b.start(), b.startPrecision(), b.end(),
-						b.endPrecision(), rendering, e.id()));
+				db.write(tx -> tx.update(
+						"""
+								UPDATE event SET valid_start = ?, valid_start_precision = ?, valid_end = ?, valid_end_precision = ?,
+								                 rendering = ? WHERE id = ?""",
+						b.start(), b.startPrecision(), b.end(), b.endPrecision(), rendering, e.id()));
 			}
 			return new Stored(e.id(), dating);
 		}
@@ -175,7 +177,8 @@ public final class EventService {
 				type, start, start)).stream().map(r -> r.lng("id")).toList();
 		for (long id : candidates) {
 			Optional<Event> e = get(id);
-			if (e.isPresent() && e.get().participants().size() == ids.size() && e.get().participants().containsAll(ids)) {
+			if (e.isPresent() && e.get().participants().size() == ids.size()
+					&& e.get().participants().containsAll(ids)) {
 				return e;
 			}
 		}
@@ -183,13 +186,13 @@ public final class EventService {
 	}
 
 	/**
-	 * What an event does to the facts on record: closes the facts of the predicates its type closes between the
-	 * first participant and each other one, and ends every open fact of the first participant when the type ends
-	 * an entity. Only a fact whose interval the event falls inside is closed; each closure is reported.
+	 * What an event does to the facts on record: closes the facts of the predicates its type closes between the first
+	 * participant and each other one, and ends every open fact of the first participant when the type ends an entity.
+	 * Only a fact whose interval the event falls inside is closed; each closure is reported.
 	 */
 	void applyEffects(
-			long eventId, String type, List<Entity> participants, Bounds b, Observation obs,
-			List<Map<String, Object>> superseded) {
+		long eventId, String type, List<Entity> participants, Bounds b, Observation obs,
+		List<Map<String, Object>> superseded) {
 		Optional<EventType> et = types.get(type);
 		if (et.isEmpty() || participants.isEmpty()) {
 			return;
@@ -206,7 +209,8 @@ public final class EventService {
 						if (startsAfter(f, b)) {
 							continue;
 						}
-						ledger.close(tx, f, null, "event", null, eventId, obs.id(), b.start(), b.startPrecision(), "current");
+						ledger.close(tx, f, null, "event", null, eventId, obs.id(), b.start(), b.startPrecision(),
+								"current");
 						superseded.add(closedOut(f, eventId, b));
 					}
 				}

@@ -34,14 +34,13 @@ import java.time.Clock;
 import java.util.List;
 
 /**
- * The knowledge layer over one database, wired once: the registries, entities, events, the question queue, the
- * fact reads and writes, the resolver of answers, and consolidation. The write path ({@link FactService}) and the
- * read path ({@link FactQueries}) are separate so that recall and the tool surface depend on reads only.
+ * The knowledge layer over one database, wired once: the registries, entities, events, the question queue, the fact
+ * reads and writes, the resolver of answers, and consolidation. The write path ({@link FactService}) and the read path
+ * ({@link FactQueries}) are separate so that recall and the tool surface depend on reads only.
  */
 public record Knowledge(EntityService entities, PredicateRegistry predicates, EventTypeRegistry eventTypes,
-                        EventService events, QuestionService questions, FactQueries facts, FactService factService,
-                        QuestionResolver resolver, Consolidator consolidator, FactRenderer renderer,
-                        Containment containment) {
+		EventService events, QuestionService questions, FactQueries facts, FactService factService,
+		QuestionResolver resolver, Consolidator consolidator, FactRenderer renderer, Containment containment) {
 
 	public static Knowledge open(Database db, Lang lang, String ownerName, List<String> ownerIdentity, Clock clock) {
 		var predicates = new PredicateRegistry(db, lang);
@@ -53,8 +52,8 @@ public record Knowledge(EntityService entities, PredicateRegistry predicates, Ev
 		var events = new EventService(db, eventTypes, ledger);
 		var facts = new FactQueries(db, predicates, clock);
 		var asks = new FactQuestions(questions, entities, facts);
-		var factService = new FactService(db, entities, predicates, eventTypes, events, questions, facts, asks, renderer,
-				ledger);
+		var factService = new FactService(db, entities, predicates, eventTypes, events, questions, facts, asks,
+				renderer, ledger);
 		var resolver = new QuestionResolver(db, entities, predicates, questions, factService, ledger);
 		var consolidator = new Consolidator(db, entities, predicates, events, facts, resolver, ledger, renderer);
 		return new Knowledge(entities, predicates, eventTypes, events, questions, facts, factService, resolver,

@@ -41,12 +41,11 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 /**
- * The embedder's lifecycle, so a server starts in milliseconds whether or not the model is on disk. States:
- * {@code off} (disabled), {@code downloading} with a percentage and the bytes, {@code loading}, {@code ready}, and
- * {@code failed} with the reason. The engine and recall read {@link #get()} on every use and take whatever is
- * there; once the embedder arrives, {@code onReady} embeds what was stored before it, so an existing store catches
- * up on its own. The runtime library is never fetched: it comes from the build ({@link OrtLibrary}) or from
- * configuration.
+ * The embedder's lifecycle, so a server starts in milliseconds whether or not the model is on disk. States: {@code off}
+ * (disabled), {@code downloading} with a percentage and the bytes, {@code loading}, {@code ready}, and {@code failed}
+ * with the reason. The engine and recall read {@link #get()} on every use and take whatever is there; once the embedder
+ * arrives, {@code onReady} embeds what was stored before it, so an existing store catches up on its own. The runtime
+ * library is never fetched: it comes from the build ({@link OrtLibrary}) or from configuration.
  */
 public final class EmbedderHolder implements AutoCloseable {
 
@@ -106,7 +105,8 @@ public final class EmbedderHolder implements AutoCloseable {
 		worker.start();
 	}
 
-	private void run(Path modelsDir, List<ModelFetcher.Item> plan, LibrarySource library, Path modelDir, String modelId) {
+	private void run(
+		Path modelsDir, List<ModelFetcher.Item> plan, LibrarySource library, Path modelDir, String modelId) {
 		try {
 			this.library = library.resolve();
 			if (!ModelFetcher.complete(plan)) {
@@ -119,7 +119,8 @@ public final class EmbedderHolder implements AutoCloseable {
 			state = new State("loading", 100, modelId);
 			Embedder e = new Embedder(this.library, modelDir, modelId);
 			embedder.set(e);
-			state = new State("ready", 100, modelId + ", " + e.dims() + " dimensions, ONNX Runtime " + e.runtimeVersion());
+			state = new State("ready", 100,
+					modelId + ", " + e.dims() + " dimensions, ONNX Runtime " + e.runtimeVersion());
 			onReady.accept(e);
 		} catch (Throwable t) {
 			state = new State("failed", 0, t.getMessage() == null ? t.getClass().getSimpleName() : t.getMessage());
@@ -144,7 +145,8 @@ public final class EmbedderHolder implements AutoCloseable {
 	public Map<String, String> files() {
 		var out = new LinkedHashMap<String, String>();
 		for (ModelFetcher.Item item : plan) {
-			out.put(item.name(), Files.exists(item.target()) ? "done" : Files.exists(item.part()) ? "fetching" : "pending");
+			out.put(item.name(),
+					Files.exists(item.target()) ? "done" : Files.exists(item.part()) ? "fetching" : "pending");
 		}
 		return out;
 	}

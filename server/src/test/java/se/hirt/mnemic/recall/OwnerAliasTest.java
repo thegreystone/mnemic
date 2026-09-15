@@ -58,22 +58,31 @@ class OwnerAliasTest {
 
 	@Test
 	void aRenderingAboutTheOwnerCanBeSaidInTheFirstPerson() {
-		assertEquals("I work at Hooli (since 2018)", OwnerAlias.firstPerson("Mattias works at Hooli (since 2018)", "Mattias", Lang.EN));
-		assertEquals("I live in Rüschlikon", OwnerAlias.firstPerson("Alex Berg lives in Rüschlikon", "Alex Berg", Lang.EN));
-		assertEquals("I am considering a sabbatical", OwnerAlias.firstPerson("Mattias is considering a sabbatical", "Mattias", Lang.EN));
+		assertEquals("I work at Hooli (since 2018)",
+				OwnerAlias.firstPerson("Mattias works at Hooli (since 2018)", "Mattias", Lang.EN));
+		assertEquals("I live in Rüschlikon",
+				OwnerAlias.firstPerson("Alex Berg lives in Rüschlikon", "Alex Berg", Lang.EN));
+		assertEquals("I am considering a sabbatical",
+				OwnerAlias.firstPerson("Mattias is considering a sabbatical", "Mattias", Lang.EN));
 		assertEquals("I do not own a boat", OwnerAlias.firstPerson("Mattias does not own a boat", "Mattias", Lang.EN));
 		assertEquals("I use Neovim", OwnerAlias.firstPerson("Mattias uses Neovim", "Mattias", Lang.EN));
 		assertEquals("I dislike cilantro", OwnerAlias.firstPerson("Mattias dislikes cilantro", "Mattias", Lang.EN));
 		assertEquals("I hold the role of Senior Staff Engineer at Hooli",
 				OwnerAlias.firstPerson("Mattias holds the role of Senior Staff Engineer at Hooli", "Mattias", Lang.EN));
 		assertEquals("I was born in Lund", OwnerAlias.firstPerson("Mattias was born in Lund", "Mattias", Lang.EN));
-		assertEquals("I only own property in Switzerland", OwnerAlias.firstPerson("Mattias only owns property in Switzerland", "Mattias", Lang.EN));
+		assertEquals("I only own property in Switzerland",
+				OwnerAlias.firstPerson("Mattias only owns property in Switzerland", "Mattias", Lang.EN));
 		assertEquals("Anna is my sister", OwnerAlias.firstPerson("Anna is Mattias's sister", "Mattias", Lang.EN));
-		assertEquals("Sofia is married to me", OwnerAlias.firstPerson("Sofia is married to Mattias", "Mattias", Lang.EN));
-		assertEquals("My birthday is on the 3rd of May", OwnerAlias.firstPerson("Mattias's birthday is on the 3rd of May", "Mattias", Lang.EN));
-		assertEquals("Ich arbeite bei Hooli (seit 2018)", OwnerAlias.firstPerson("Mattias arbeitet bei Hooli (seit 2018)", "Mattias", Lang.DE));
-		assertEquals("Ich wohne in Rüschlikon", OwnerAlias.firstPerson("Mattias wohnt in Rüschlikon", "Mattias", Lang.DE));
-		assertEquals("Anna ist mein Schwester", OwnerAlias.firstPerson("Anna ist Mattias' Schwester", "Mattias", Lang.DE));
+		assertEquals("Sofia is married to me",
+				OwnerAlias.firstPerson("Sofia is married to Mattias", "Mattias", Lang.EN));
+		assertEquals("My birthday is on the 3rd of May",
+				OwnerAlias.firstPerson("Mattias's birthday is on the 3rd of May", "Mattias", Lang.EN));
+		assertEquals("Ich arbeite bei Hooli (seit 2018)",
+				OwnerAlias.firstPerson("Mattias arbeitet bei Hooli (seit 2018)", "Mattias", Lang.DE));
+		assertEquals("Ich wohne in Rüschlikon",
+				OwnerAlias.firstPerson("Mattias wohnt in Rüschlikon", "Mattias", Lang.DE));
+		assertEquals("Anna ist mein Schwester",
+				OwnerAlias.firstPerson("Anna ist Mattias' Schwester", "Mattias", Lang.DE));
 		assertNull(OwnerAlias.firstPerson("Anna lives in Gothenburg", "Mattias", Lang.EN));
 		assertNull(OwnerAlias.firstPerson("Mattias works at Hooli", null, Lang.EN));
 	}

@@ -74,12 +74,15 @@ class LanguageTest {
 			assertEquals("Marit Nyberg ist Mutter von Oskar Nyberg", stored(e, mother, 0).rendering(),
 					"the qualifier is stored as the vocabulary's word and rendered in German");
 			assertEquals("mother", stored(e, mother, 0).qualifier());
-			RememberOutcome boat = remember(e, "Ich besitze kein Boot.", TestHomes.proposal().entity("e1", "Boot", "thing")
-					.fact(new se.hirt.mnemic.proposal.Proposal.FactRef("self", "owns", "e1", null, null, null, null, List.of(), null, null,
-							Boolean.TRUE, null)));
-			assertEquals("Mattias Sandell besitzt Boot nicht", stored(e, boat, 0).rendering(), "the language's negation template");
-			RememberOutcome believed = remember(e, "Ich glaube, ich wohne in Zug.", proposal().entity("e1", "Zug", "place")
-					.fact(new se.hirt.mnemic.proposal.Proposal.FactRef("self", "lives_in", "e1", null, null, null, null, List.of(), null, 0.5)));
+			RememberOutcome boat = remember(e, "Ich besitze kein Boot.",
+					TestHomes.proposal().entity("e1", "Boot", "thing")
+							.fact(new se.hirt.mnemic.proposal.Proposal.FactRef("self", "owns", "e1", null, null, null,
+									null, List.of(), null, null, Boolean.TRUE, null)));
+			assertEquals("Mattias Sandell besitzt Boot nicht", stored(e, boat, 0).rendering(),
+					"the language's negation template");
+			RememberOutcome believed = remember(e, "Ich glaube, ich wohne in Zug.",
+					proposal().entity("e1", "Zug", "place").fact(new se.hirt.mnemic.proposal.Proposal.FactRef("self",
+							"lives_in", "e1", null, null, null, null, List.of(), null, 0.5)));
 			assertEquals("Mattias Sandell wohnt in Zug (vermutet)", stored(e, believed, 0).rendering());
 			// A German question finds the predicate through the language's cue words.
 			RecallResult r = recall(e, "wo arbeitet Mattias");
@@ -103,13 +106,14 @@ class LanguageTest {
 			assertEquals("Mattias Sandell works at Initrode (2010 – 2018)", stored(e, job, 0).rendering());
 		}
 		try (Engine e = TestHomes.engine(home, Lang.DE)) {
-			assertEquals("Mattias Sandell arbeitet bei Initrode (2010 – 2018)", e.facts().get(factId).orElseThrow().rendering(),
+			assertEquals("Mattias Sandell arbeitet bei Initrode (2010 – 2018)",
+					e.facts().get(factId).orElseThrow().rendering(),
 					"re-rendered at open from the stored subject, object, and bounds");
 			assertEquals("de", e.database().meta("language"));
 		}
 		try (Engine e = TestHomes.engine(home, Lang.EN)) {
-			assertEquals("Mattias Sandell works at Initrode (2010 – 2018)", e.facts().get(factId).orElseThrow().rendering(),
-					"and back, losslessly");
+			assertEquals("Mattias Sandell works at Initrode (2010 – 2018)",
+					e.facts().get(factId).orElseThrow().rendering(), "and back, losslessly");
 		}
 	}
 

@@ -66,9 +66,11 @@ class GranularityAndForgettingTest {
 	@Scenario("D6")
 	void aFactSaidInTwoConversationsSurvivesForgettingOne() {
 		try (Engine e = engine("d6-rehome")) {
-			long a = remember(e, "I work at Hooli.", proposal().entity("e1", "Hooli", "organization").fact("works_at", "e1"))
-					.observation().observationId();
-			var second = remember(e, "As I said, I work at Hooli.", proposal().entity("e1", "Hooli", "organization").fact("works_at", "e1"));
+			long a = remember(e, "I work at Hooli.",
+					proposal().entity("e1", "Hooli", "organization").fact("works_at", "e1")).observation()
+					.observationId();
+			var second = remember(e, "As I said, I work at Hooli.",
+					proposal().entity("e1", "Hooli", "organization").fact("works_at", "e1"));
 			long b = second.observation().observationId();
 			assertTrue(second.applied().facts().getFirst().corroborated());
 			long factId = Long.parseLong(second.applied().facts().getFirst().id().substring(2));
@@ -92,7 +94,8 @@ class GranularityAndForgettingTest {
 		try (Engine e = engine("d4-reseed")) {
 			long obs = remember(e, "I own Bergstrasse 7 in Schübelbach.",
 					proposal().entity("e1", "Bergstrasse 7", "place").entity("e2", "Schübelbach", "place")
-							.fact("self", "owns", "e1").fact("e1", "located_in", "e2")).observation().observationId();
+							.fact("self", "owns", "e1").fact("e1", "located_in", "e2"))
+					.observation().observationId();
 			long town = e.entities().byRef("Schübelbach").orElseThrow().id();
 			assertTrue(e.forget(obs, true));
 			assertTrue(e.entities().get(town).isPresent(), "kept, with its id");
@@ -104,8 +107,9 @@ class GranularityAndForgettingTest {
 			assertTrue(again.applied().questions().isEmpty(), again.applied().questions().toString());
 			assertEquals(town, e.entities().byRef("Schübelbach").orElseThrow().id());
 			// The default still removes what nothing else references.
-			long obs2 = remember(e, "I once visited Zug.", proposal().entity("e1", "Zug", "place")
-					.fact("self", "x:visited", "e1")).observation().observationId();
+			long obs2 = remember(e, "I once visited Zug.",
+					proposal().entity("e1", "Zug", "place").fact("self", "x:visited", "e1")).observation()
+					.observationId();
 			long zug = e.entities().byRef("Zug").orElseThrow().id();
 			assertTrue(e.forget(obs2));
 			assertTrue(e.entities().get(zug).isEmpty(), "privacy default: gone");
@@ -136,8 +140,8 @@ class GranularityAndForgettingTest {
 	void connectorObservationsDoNotBecomeFactsOnTheirOwn() {
 		try (Engine e = engine("e5")) {
 			Source connector = new Source("connector", "msg-1", null, null, null);
-			Remembered r = e.observations()
-					.remember("Subject: lunch\n\nSee you at noon.", connector, null, null, null, null);
+			Remembered r = e.observations().remember("Subject: lunch\n\nSee you at noon.", connector, null, null, null,
+					null);
 			assertEquals(1, r.pendingProposals());
 			MnemicException ex = assertThrows(MnemicException.class,
 					() -> e.observations().remember("Another mail", connector, null, "{\"facts\":[]}", 1, null));

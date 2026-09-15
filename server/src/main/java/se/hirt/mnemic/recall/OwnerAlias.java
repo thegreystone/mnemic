@@ -39,16 +39,16 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * The owner alias for the vector channel. A first-person question sits
- * far from a third-person fact rendering ("which company employs me?" against "Mattias works at Hooli") and no
- * embedding model knows who "I" is; the other channels have the owner's alias table, the vectors did not.
- *
- * <p>Two directions were tried. {@link #withOwner} rewrites the question with the owner's name, and taking the
- * better of the two questions per item lowered recall on the bake-off's sample set for every model but one:
- * the name is a strong token, so every fact rendered with it drew close to every first-person question.
- * {@link #firstPerson} goes the other way: a fact about the owner is embedded a second time as the owner would
- * say it ("I work at Hooli"), a vector without a name in it, and the question stays as asked. The grammar is
- * heuristic (the verb after the name loses its third-person ending), which sentence embeddings forgive.
+ * The owner alias for the vector channel. A first-person question sits far from a third-person fact rendering ("which
+ * company employs me?" against "Mattias works at Hooli") and no embedding model knows who "I" is; the other channels
+ * have the owner's alias table, the vectors did not.
+ * <p>
+ * Two directions were tried. {@link #withOwner} rewrites the question with the owner's name, and taking the better of
+ * the two questions per item lowered recall on the bake-off's sample set for every model but one: the name is a strong
+ * token, so every fact rendered with it drew close to every first-person question. {@link #firstPerson} goes the other
+ * way: a fact about the owner is embedded a second time as the owner would say it ("I work at Hooli"), a vector without
+ * a name in it, and the question stays as asked. The grammar is heuristic (the verb after the name loses its
+ * third-person ending), which sentence embeddings forgive.
  */
 public final class OwnerAlias {
 
@@ -57,16 +57,16 @@ public final class OwnerAlias {
 
 	// ── question side ──
 
-	private static final Pattern PERSON = Pattern.compile(
-			"\\b(?:I|me|myself|ich|mich|mir|jag|mig)\\b", Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CHARACTER_CLASS);
+	private static final Pattern PERSON = Pattern.compile("\\b(?:I|me|myself|ich|mich|mir|jag|mig)\\b",
+			Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CHARACTER_CLASS);
 	private static final Pattern POSSESSIVE = Pattern.compile(
 			"\\b(?:my|mine|mein|meine|meinem|meinen|meiner|meines|min|mitt|mina)\\b",
 			Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CHARACTER_CLASS);
 	private static final Pattern CONTRACTION = Pattern.compile("\\bI'(m|ve|d|ll)\\b");
 
 	/**
-	 * The question with the owner's name in place of the first person, or null when the question has no first
-	 * person in it, or the owner has no name to give.
+	 * The question with the owner's name in place of the first person, or null when the question has no first person in
+	 * it, or the owner has no name to give.
 	 */
 	public static String withOwner(String query, String owner) {
 		if (query == null || owner == null || owner.isBlank()) {
@@ -74,10 +74,10 @@ public final class OwnerAlias {
 		}
 		String name = owner.strip();
 		String out = CONTRACTION.matcher(query).replaceAll(m -> name + switch (m.group(1)) {
-			case "m" -> " is";
-			case "ve" -> " has";
-			case "d" -> " would";
-			default -> " will";
+		case "m" -> " is";
+		case "ve" -> " has";
+		case "d" -> " would";
+		default -> " will";
 		});
 		out = POSSESSIVE.matcher(out).replaceAll(m -> Matcher.quoteReplacement(genitive(name, m.group())));
 		out = PERSON.matcher(out).replaceAll(m -> Matcher.quoteReplacement(name));
@@ -108,8 +108,8 @@ public final class OwnerAlias {
 			"mag", "mag", "wird", "werde", "muss", "muss", "will", "will");
 
 	/**
-	 * A fact rendering as the owner would say it: the owner's name as subject becomes "I" with the verb to
-	 * match, as possessive "my", as object "me"; null when the rendering does not mention the owner.
+	 * A fact rendering as the owner would say it: the owner's name as subject becomes "I" with the verb to match, as
+	 * possessive "my", as object "me"; null when the rendering does not mention the owner.
 	 */
 	public static String firstPerson(String rendering, String owner, Lang lang) {
 		if (rendering == null || owner == null || owner.isBlank() || !rendering.contains(owner.strip())) {
@@ -127,7 +127,8 @@ public final class OwnerAlias {
 			String rest = out.substring(name.length() + 1);
 			out = (de ? "ich " : "I ") + conjugate(rest, de);
 		}
-		out = out.replaceAll("(?<=\\s)" + q + "'s?(?=\\s)", de ? "mein" : "my").replaceAll("(?<=\\s)" + q + "s(?=\\s)", de ? "mein" : "my")
+		out = out.replaceAll("(?<=\\s)" + q + "'s?(?=\\s)", de ? "mein" : "my")
+				.replaceAll("(?<=\\s)" + q + "s(?=\\s)", de ? "mein" : "my")
 				.replaceAll("(?<=\\s)" + q + "(?=[\\s,.;:)]|$)", de ? "mich" : "me");
 		return out.equals(rendering) ? null : Character.toUpperCase(out.charAt(0)) + out.substring(1);
 	}
@@ -158,7 +159,8 @@ public final class OwnerAlias {
 		if (w.endsWith("ies")) {
 			return w.substring(0, w.length() - 3) + "y";
 		}
-		if (w.endsWith("sses") || w.endsWith("shes") || w.endsWith("ches") || w.endsWith("xes") || w.endsWith("zes") || w.endsWith("oes")) {
+		if (w.endsWith("sses") || w.endsWith("shes") || w.endsWith("ches") || w.endsWith("xes") || w.endsWith("zes")
+				|| w.endsWith("oes")) {
 			return w.substring(0, w.length() - 2);
 		}
 		return w.substring(0, w.length() - 1);

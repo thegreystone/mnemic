@@ -91,8 +91,8 @@ public final class OpenAiCompatibleProvider implements ModelProvider {
 			if (loaded.isEmpty() && serverAnswers(endpoint)) {
 				// The server is up but nothing is loaded under that name: LM Studio would load something on demand,
 				// and the cache key would be the bare alias rather than the weights behind it.
-				throw new IllegalStateException(
-						"LM Studio has no model loaded as '" + spec.model() + "'. Load one " + "first: lms load <model> --identifier " + spec.model());
+				throw new IllegalStateException("LM Studio has no model loaded as '" + spec.model() + "'. Load one "
+						+ "first: lms load <model> --identifier " + spec.model());
 			}
 			id += loaded;
 		}
@@ -115,9 +115,9 @@ public final class OpenAiCompatibleProvider implements ModelProvider {
 
 	/**
 	 * An LM Studio identifier ({@code lms load ... --identifier proposer}) is an alias: two different models loaded
-	 * under it in turn are indistinguishable by name. The model id therefore carries what the server reports about
-	 * the loaded model ({@code /api/v0/models}: publisher, architecture, quantization), so a cache key follows the
-	 * weights. Empty when the endpoint does not answer or the model is not loaded.
+	 * under it in turn are indistinguishable by name. The model id therefore carries what the server reports about the
+	 * loaded model ({@code /api/v0/models}: publisher, architecture, quantization), so a cache key follows the weights.
+	 * Empty when the endpoint does not answer or the model is not loaded.
 	 */
 	static String describeLoaded(String endpoint, String model) {
 		try {
@@ -131,8 +131,8 @@ public final class OpenAiCompatibleProvider implements ModelProvider {
 			}
 			for (JsonNode m : MAPPER.readTree(resp.body()).path("data")) {
 				if (model.equals(m.path("id").asText()) && "loaded".equals(m.path("state").asText())) {
-					return "[" + m.path("publisher").asText("?") + "/" + m.path("arch").asText("?") + "/" + m.path(
-							"quantization").asText("?") + "]";
+					return "[" + m.path("publisher").asText("?") + "/" + m.path("arch").asText("?") + "/"
+							+ m.path("quantization").asText("?") + "]";
 				}
 			}
 		} catch (IOException | RuntimeException e) {
@@ -155,8 +155,7 @@ public final class OpenAiCompatibleProvider implements ModelProvider {
 		return v == null || v.isBlank() ? "none" : v.trim();
 	}
 
-	private static final Pattern THINK = Pattern.compile(
-			"(?s)<think>.*?</think>\\s*|(?s)<thinking>.*?</thinking>\\s*");
+	private static final Pattern THINK = Pattern.compile("(?s)<think>.*?</think>\\s*|(?s)<thinking>.*?</thinking>\\s*");
 
 	/** Removes a thinking block a model may put in front of its answer when the server does not separate it. */
 	static String stripThinking(String content) {
@@ -204,8 +203,8 @@ public final class OpenAiCompatibleProvider implements ModelProvider {
 			String content = stripThinking(message.path("content").asText());
 			String finish = root.path("choices").path(0).path("finish_reason").asText("");
 			if (content.isEmpty() && "length".equals(finish)) {
-				throw new IOException(
-						"Model ran out of tokens before answering (finish_reason=length); the reply was " + "all reasoning. Lower mnemic.reasoning_effort or raise the context length.");
+				throw new IOException("Model ran out of tokens before answering (finish_reason=length); the reply was "
+						+ "all reasoning. Lower mnemic.reasoning_effort or raise the context length.");
 			}
 			return content;
 		}

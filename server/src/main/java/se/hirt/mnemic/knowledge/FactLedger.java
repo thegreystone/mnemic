@@ -38,8 +38,8 @@ import java.util.Optional;
 
 /**
  * The record kept beside a fact row: which observations stated or corroborated it ({@code fact_source}) and every
- * change of its status ({@code supersession}). Nothing here deletes; a fact that stops holding is closed and the
- * reason written down, so history can always say what replaced what and why.
+ * change of its status ({@code supersession}). Nothing here deletes; a fact that stops holding is closed and the reason
+ * written down, so history can always say what replaced what and why.
  */
 final class FactLedger {
 
@@ -61,7 +61,8 @@ final class FactLedger {
 		Optional<Long> home = tx.queryOne("SELECT observation_id FROM fact WHERE id = ?", factId)
 				.map(r -> r.lng("observation_id"));
 		home.ifPresent(out::add);
-		for (Row r : tx.query("SELECT observation_id FROM fact_source WHERE fact_id = ? ORDER BY recorded_at, observation_id",
+		for (Row r : tx.query(
+				"SELECT observation_id FROM fact_source WHERE fact_id = ? ORDER BY recorded_at, observation_id",
 				factId)) {
 			long id = r.lng("observation_id");
 			if (!out.contains(id)) {
@@ -81,19 +82,20 @@ final class FactLedger {
 	}
 
 	/**
-	 * Closes a fact: the end bound when one is known, the new status, the supersession record, and a fresh
-	 * rendering. {@code kind} names what closed it: {@code event}, {@code supersession}, {@code entity_ended}.
+	 * Closes a fact: the end bound when one is known, the new status, the supersession record, and a fresh rendering.
+	 * {@code kind} names what closed it: {@code event}, {@code supersession}, {@code entity_ended}.
 	 */
 	void close(
-			Tx tx, Fact fact, Long byId, String kind, String reason, Long eventId, Long obsId, String end,
-			String endPrecision, String newStatus) {
+		Tx tx, Fact fact, Long byId, String kind, String reason, Long eventId, Long obsId, String end,
+		String endPrecision, String newStatus) {
 		Bounds b = Bounds.of(fact);
 		if (end != null) {
 			b = b.withEnd(end, endPrecision, kind);
 		}
 		tx.update("""
 				UPDATE fact SET status = ?, superseded_by = ?, valid_end = ?, valid_end_precision = ?, end_source = ?,
-				                ended = 1 WHERE id = ?""", newStatus, byId, b.end(), b.endPrecision(), b.endSource(), fact.id());
+				                ended = 1 WHERE id = ?""", newStatus, byId, b.end(), b.endPrecision(), b.endSource(),
+				fact.id());
 		renderer.rerender(tx, fact.id());
 		supersession(tx, fact.id(), byId, kind, reason, eventId, obsId, b.end());
 	}
@@ -103,7 +105,7 @@ final class FactLedger {
 	 * {@code retraction}, {@code invalidation}, {@code duplicate}, or {@code entity_ended}.
 	 */
 	static void supersession(
-			Tx tx, long factId, Long byId, String kind, String reason, Long eventId, Long obsId, String closedAt) {
+		Tx tx, long factId, Long byId, String kind, String reason, Long eventId, Long obsId, String closedAt) {
 		tx.insert("""
 				INSERT INTO supersession(fact_id, superseded_by_id, kind, reason, event_id, observation_id, closed_at,
 				                         recorded_at) VALUES (?,?,?,?,?,?,?,?)""", factId, byId, kind, reason, eventId,

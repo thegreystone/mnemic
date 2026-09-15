@@ -43,11 +43,11 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * The ONNX Runtime shared library, carried inside the build. Code is never downloaded at run time: the library
- * for the platform the binary was built on is unpacked from the runtime's Maven Central artifact when the server
- * is built, pinned here by SHA-256 (a test fails the build when the artifact and the pin disagree), and written
- * to the models directory on first start because a shared library has to be a file before the loader can open
- * it. What is fetched at run time is the model, which is data.
+ * The ONNX Runtime shared library, carried inside the build. Code is never downloaded at run time: the library for the
+ * platform the binary was built on is unpacked from the runtime's Maven Central artifact when the server is built,
+ * pinned here by SHA-256 (a test fails the build when the artifact and the pin disagree), and written to the models
+ * directory on first start because a shared library has to be a file before the loader can open it. What is fetched at
+ * run time is the model, which is data.
  */
 public final class OrtLibrary {
 
@@ -59,9 +59,12 @@ public final class OrtLibrary {
 	/** The four builds the artifact ships, hashed from onnxruntime-1.29.0.jar as published on Maven Central. */
 	private static final List<Build> BUILDS = List.of(
 			new Build("win-x64", "onnxruntime.dll", "c1bae2b15344db7e27ad4ec07d1408630d290700d0db031d973e954e46eabf48"),
-			new Build("linux-x64", "libonnxruntime.so", "5715f06d8992ca8eeeddcce43df3a7d38f97d537052126f558e912cb312460ca"),
-			new Build("linux-aarch64", "libonnxruntime.so", "a27d21126db312aa8f02f3d5eaebe466e991f51f469882e6d0407d5a8b64afda"),
-			new Build("osx-aarch64", "libonnxruntime.dylib", "07c5a23fecedb27d9325b1b2ba0c87830173f87b64edf2b294e32931af5c09cb"));
+			new Build("linux-x64", "libonnxruntime.so",
+					"5715f06d8992ca8eeeddcce43df3a7d38f97d537052126f558e912cb312460ca"),
+			new Build("linux-aarch64", "libonnxruntime.so",
+					"a27d21126db312aa8f02f3d5eaebe466e991f51f469882e6d0407d5a8b64afda"),
+			new Build("osx-aarch64", "libonnxruntime.dylib",
+					"07c5a23fecedb27d9325b1b2ba0c87830173f87b64edf2b294e32931af5c09cb"));
 
 	private OrtLibrary() {
 	}
@@ -85,7 +88,8 @@ public final class OrtLibrary {
 
 	private static Build build() {
 		String platform = platform();
-		return platform == null ? null : BUILDS.stream().filter(b -> b.platform().equals(platform)).findFirst().orElse(null);
+		return platform == null ? null
+				: BUILDS.stream().filter(b -> b.platform().equals(platform)).findFirst().orElse(null);
 	}
 
 	/** The classpath resource holding the library for this machine, or null. */
@@ -118,7 +122,8 @@ public final class OrtLibrary {
 		if (platform == null) {
 			return "no ONNX Runtime build for " + System.getProperty("os.name") + " " + System.getProperty("os.arch");
 		}
-		return "ONNX Runtime " + VERSION + " for " + platform + (bundled() ? ", bundled" : ", not bundled in this build");
+		return "ONNX Runtime " + VERSION + " for " + platform
+				+ (bundled() ? ", bundled" : ", not bundled in this build");
 	}
 
 	/**
@@ -138,8 +143,8 @@ public final class OrtLibrary {
 			return target;
 		}
 		Files.createDirectories(modelsDir);
-		try (FileChannel channel = FileChannel.open(modelsDir.resolve(".lock"), StandardOpenOption.CREATE, StandardOpenOption.WRITE);
-				FileLock lock = channel.lock()) {
+		try (FileChannel channel = FileChannel.open(modelsDir.resolve(".lock"), StandardOpenOption.CREATE,
+				StandardOpenOption.WRITE); FileLock lock = channel.lock()) {
 			if (Files.exists(target) && b.sha256().equalsIgnoreCase(ModelFetcher.sha256(target))) {
 				return target; // another process wrote it while we waited
 			}
@@ -151,7 +156,8 @@ public final class OrtLibrary {
 			String actual = ModelFetcher.sha256(part);
 			if (!b.sha256().equalsIgnoreCase(actual)) {
 				Files.deleteIfExists(part);
-				throw new IOException("The bundled " + b.file() + " does not match its pin (got " + actual + "); refusing to use it.");
+				throw new IOException("The bundled " + b.file() + " does not match its pin (got " + actual
+						+ "); refusing to use it.");
 			}
 			Files.move(part, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
 			return target;

@@ -41,15 +41,15 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * The in-process embedder: a sentence-embedding model run through ONNX Runtime, the tokenizer read from the
- * model's own {@code tokenizer.json}. One instance per store, one session, used from one thread at a time (the
- * engine serialises its work). {@link #id()} names the model so vectors are keyed by what made them.
- *
- * <p>Pooling, prefixes, and normalisation follow the model card through a {@link Spec}: the granite embedders
- * take the first token (CLS) of the last hidden state, the e5 and MiniLM families the mean over the tokens, e5
- * wants {@code query: } and {@code passage: } in front of its texts, arctic {@code query: } on questions only.
- * Every vector is L2-normalised, so cosine similarity is a dot product. Texts stored go through {@link #embed};
- * questions through {@link #embedQuery}, which differ only by the prefix.
+ * The in-process embedder: a sentence-embedding model run through ONNX Runtime, the tokenizer read from the model's own
+ * {@code tokenizer.json}. One instance per store, one session, used from one thread at a time (the engine serialises
+ * its work). {@link #id()} names the model so vectors are keyed by what made them.
+ * <p>
+ * Pooling, prefixes, and normalisation follow the model card through a {@link Spec}: the granite embedders take the
+ * first token (CLS) of the last hidden state, the e5 and MiniLM families the mean over the tokens, e5 wants
+ * {@code query: } and {@code passage: } in front of its texts, arctic {@code query: } on questions only. Every vector
+ * is L2-normalised, so cosine similarity is a dot product. Texts stored go through {@link #embed}; questions through
+ * {@link #embedQuery}, which differ only by the prefix.
  */
 public final class Embedder implements AutoCloseable {
 
@@ -89,12 +89,12 @@ public final class Embedder implements AutoCloseable {
 
 	/**
 	 * @param library
-	 * 		the ONNX Runtime shared library
+	 *            the ONNX Runtime shared library
 	 * @param modelDir
-	 * 		a directory holding {@code model.onnx} and {@code tokenizer.json}
+	 *            a directory holding {@code model.onnx} and {@code tokenizer.json}
 	 * @param modelId
-	 * 		the name the vectors are keyed by, e.g. {@code granite-embedding-107m-multilingual}; it also picks the
-	 * 		{@link Spec}
+	 *            the name the vectors are keyed by, e.g. {@code granite-embedding-107m-multilingual}; it also picks the
+	 *            {@link Spec}
 	 */
 	public Embedder(Path library, Path modelDir, String modelId) throws IOException {
 		this(library, modelDir, modelId, Spec.forModel(modelId));
@@ -110,7 +110,8 @@ public final class Embedder implements AutoCloseable {
 		this.tokenizer = Tokenizer.load(tok);
 		this.runtime = new OrtRuntime(library);
 		this.env = runtime.createEnv("mnemic");
-		this.session = runtime.createSession(env, model, Math.max(1, Math.min(4, Runtime.getRuntime().availableProcessors() / 2)));
+		this.session = runtime.createSession(env, model,
+				Math.max(1, Math.min(4, Runtime.getRuntime().availableProcessors() / 2)));
 		this.inputNames = runtime.inputNames(session);
 		String[] outputs = runtime.outputNames(session);
 		// A sentence-transformers export pools for us; a plain export gives the token rows.
@@ -123,7 +124,8 @@ public final class Embedder implements AutoCloseable {
 			}
 		}
 		this.pooledOutput = pooled != null;
-		this.outputName = pooled != null ? pooled : tokens != null ? tokens : outputs.length > 0 ? outputs[0] : "last_hidden_state";
+		this.outputName = pooled != null ? pooled
+				: tokens != null ? tokens : outputs.length > 0 ? outputs[0] : "last_hidden_state";
 		this.id = modelId;
 		this.dims = embed("dimension probe").length;
 	}
@@ -165,9 +167,9 @@ public final class Embedder implements AutoCloseable {
 		var inputs = new long[inputNames.length][];
 		for (int i = 0; i < inputNames.length; i++) {
 			inputs[i] = switch (inputNames[i]) {
-				case "input_ids" -> ids;
-				case "attention_mask" -> mask;
-				default -> new long[tokens.length]; // token_type_ids: zeros
+			case "input_ids" -> ids;
+			case "attention_mask" -> mask;
+			default -> new long[tokens.length]; // token_type_ids: zeros
 			};
 		}
 		OrtRuntime.Result r = runtime.run(session, inputNames, inputs, outputName);

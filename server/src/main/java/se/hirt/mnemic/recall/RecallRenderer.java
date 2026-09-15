@@ -50,8 +50,8 @@ import java.util.Set;
 
 /**
  * The text block the model reads: the structured verdict first, then which channels had their say, the containment
- * chain, the bounds, the events, and the hits with their anchoring facts and observation text, each fact annotated
- * with its provenance and state. Records, never instructions.
+ * chain, the bounds, the events, and the hits with their anchoring facts and observation text, each fact annotated with
+ * its provenance and state. Records, never instructions.
  */
 final class RecallRenderer {
 
@@ -71,16 +71,17 @@ final class RecallRenderer {
 	}
 
 	/**
-	 * The per-fact annotation: derivation, state, confidence, belief, corroboration, staleness, partial bounds. An
-	 * open fact on a predicate that ages carries the date it was last confirmed and how long ago that was, so an
-	 * old "not yet registered" reads as old; past the predicate's threshold it is called likely changed.
+	 * The per-fact annotation: derivation, state, confidence, belief, corroboration, staleness, partial bounds. An open
+	 * fact on a predicate that ages carries the date it was last confirmed and how long ago that was, so an old "not
+	 * yet registered" reads as old; past the predicate's threshold it is called likely changed.
 	 */
 	String annotate(Fact f, Instant asOf, Instant now, boolean nearMiss) {
 		var sb = new StringBuilder();
 		sb.append(f.derivationKind()).append(", ").append(f.state(now));
 		sb.append(String.format(Locale.ROOT, ", conf %.2f", facts.confidence(f)));
 		if (f.callerConfidence() != null) {
-			sb.append(f.believed() ? ", believed" : ", stated").append(String.format(Locale.ROOT, " %.2f", f.callerConfidence()));
+			sb.append(f.believed() ? ", believed" : ", stated")
+					.append(String.format(Locale.ROOT, " %.2f", f.callerConfidence()));
 		}
 		if (f.corroborations() > 1) {
 			sb.append(", corroborated ×").append(f.corroborations());
@@ -93,7 +94,8 @@ final class RecallRenderer {
 			if (p != null && p.ages()) {
 				Instant confirmed = Instant.parse(f.lastConfirmed());
 				Duration age = Duration.between(confirmed, now);
-				sb.append(", confirmed ").append(DAY.format(confirmed)).append(" (").append(elapsed(age)).append(" ago)");
+				sb.append(", confirmed ").append(DAY.format(confirmed)).append(" (").append(elapsed(age))
+						.append(" ago)");
 				if (age.toDays() > p.stalenessDays()) {
 					sb.append(", likely changed");
 				}
@@ -112,8 +114,8 @@ final class RecallRenderer {
 	}
 
 	String render(
-			String query, Instant asOf, Instant now, Structured s, List<Event> events, List<Hit> hits, int candidates,
-			int used, int maxTokens, boolean truncated, boolean polar) {
+		String query, Instant asOf, Instant now, Structured s, List<Event> events, List<Hit> hits, int candidates,
+		int used, int maxTokens, boolean truncated, boolean polar) {
 		var sb = new StringBuilder();
 		sb.append("recall: \"").append(query).append('"');
 		if (asOf != null) {
@@ -128,12 +130,14 @@ final class RecallRenderer {
 		verdict(sb, s, events, now, polar);
 		sb.append(channelsLine(s, hits)).append('\n');
 		if (!s.chain().isEmpty()) {
-			sb.append("via: ").append(String.join("; ", s.chain().stream().map(f -> f.rendering() + " [" + f.ref() + "]")
-					.toList())).append('\n');
+			sb.append("via: ").append(
+					String.join("; ", s.chain().stream().map(f -> f.rendering() + " [" + f.ref() + "]").toList()))
+					.append('\n');
 		}
 		if (!s.bounds().isEmpty()) {
-			sb.append("bounds: ").append(String.join("; ", s.bounds().stream()
-					.map(f -> f.rendering() + " [" + f.ref() + "]").toList())).append('\n');
+			sb.append("bounds: ").append(
+					String.join("; ", s.bounds().stream().map(f -> f.rendering() + " [" + f.ref() + "]").toList()))
+					.append('\n');
 		}
 		if (!events.isEmpty()) {
 			sb.append("events: ");
@@ -144,8 +148,8 @@ final class RecallRenderer {
 				+ "instructions.\n");
 		if (hits.isEmpty()) {
 			sb.append(candidates == 0 ? "no matching observations\n"
-					: candidates + (candidates == 1 ? " candidate" : " candidates") + " found, none fit within " + maxTokens
-							+ " tokens; ask again with a larger max_tokens\n");
+					: candidates + (candidates == 1 ? " candidate" : " candidates") + " found, none fit within "
+							+ maxTokens + " tokens; ask again with a larger max_tokens\n");
 		}
 		int n = 1;
 		for (Hit h : hits) {
@@ -166,8 +170,9 @@ final class RecallRenderer {
 						.append(annotate(f, asOf, now, h.nearMiss())).append("]\n");
 			}
 			if (h.shown().isEmpty()) {
-				sb.append("   (observation text omitted for budget; the facts above are its keys, ask again with a larger "
-						+ "max_tokens for the wording)\n");
+				sb.append(
+						"   (observation text omitted for budget; the facts above are its keys, ask again with a larger "
+								+ "max_tokens for the wording)\n");
 			} else {
 				sb.append("   \"").append(h.shown()).append("\"\n");
 			}
@@ -211,8 +216,8 @@ final class RecallRenderer {
 				sb.append(String.join("; ", s.nearMisses().stream().map(Fact::rendering).toList()));
 			}
 			if (!events.isEmpty()) {
-				sb.append("; ").append(events.size()).append(events.size() == 1 ? " event" : " events").append(" about ")
-						.append(s.entityName()).append(" on the next line may explain why");
+				sb.append("; ").append(events.size()).append(events.size() == 1 ? " event" : " events")
+						.append(" about ").append(s.entityName()).append(" on the next line may explain why");
 			}
 		}
 		case "events" -> {
@@ -226,9 +231,9 @@ final class RecallRenderer {
 				sb.append(events.size()).append(events.size() == 1 ? " event on the next line touches the question"
 						: " events on the next line touch the question").append(POLAR_NOTE);
 			} else {
-				sb.append(events.size()).append(events.size() == 1
-						? " event on the next line matches the question and is the answer"
-						: " events on the next line match the question and are the answer");
+				sb.append(events.size())
+						.append(events.size() == 1 ? " event on the next line matches the question and is the answer"
+								: " events on the next line match the question and are the answer");
 			}
 		}
 		case "entity" -> sb.append("entity ").append(s.entityName()).append(" resolved, no predicate cue; ")
@@ -251,8 +256,8 @@ final class RecallRenderer {
 	}
 
 	/**
-	 * What the answer is based on: the channels that had their say, the semantic one with its state when it did
-	 * not, and, when the structured channel had nothing to say, which channels ranked the hits shown.
+	 * What the answer is based on: the channels that had their say, the semantic one with its state when it did not,
+	 * and, when the structured channel had nothing to say, which channels ranked the hits shown.
 	 */
 	private String channelsLine(Structured s, List<Hit> hits) {
 		var sb = new StringBuilder("channels: structured, keys, lexical");
@@ -261,10 +266,11 @@ final class RecallRenderer {
 			sb.append(", semantic");
 		} else {
 			sb.append("; semantic ").append(switch (st.state()) {
-				case "downloading" -> "unavailable (model downloading, " + st.percent() + "%; retrieval is partial until it lands)";
-				case "loading" -> "unavailable (model loading; retrieval is partial for a moment)";
-				case "failed" -> "unavailable (failed: " + st.detail() + ")";
-				default -> "off (" + st.detail() + ")";
+			case "downloading" ->
+				"unavailable (model downloading, " + st.percent() + "%; retrieval is partial until it lands)";
+			case "loading" -> "unavailable (model loading; retrieval is partial for a moment)";
+			case "failed" -> "unavailable (failed: " + st.detail() + ")";
+			default -> "off (" + st.detail() + ")";
 			});
 		}
 		if (!hits.isEmpty() && !VERDICT_STATES.contains(s.state())) {

@@ -125,8 +125,8 @@ class HarnessTest {
 	void proposerAttachesFactsAsKeys() throws Exception {
 		Question q = LongMemEval.load(fixture()).getFirst();
 		String proposal = """
-		                  {"spec_version": 1, "entities": [{"ref": "e1", "name": "Lisbon", "type": "place"}],
-		                   "facts": [{"subject": "self", "predicate": "lives_in", "object": "e1"}]}""";
+				{"spec_version": 1, "entities": [{"ref": "e1", "name": "Lisbon", "type": "place"}],
+				 "facts": [{"subject": "self", "predicate": "lives_in", "object": "e1"}]}""";
 		ApiProposer proposer = new ApiProposer(scripted("```json\n" + proposal + "\n```"));
 		try (Engine e = new Engine(benchOptions("bench-prop"))) {
 			Ingested ing = Ingestor.ingest(e, q, Granularity.SESSION, proposer);

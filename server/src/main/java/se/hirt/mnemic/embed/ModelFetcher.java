@@ -53,11 +53,11 @@ import java.util.function.LongConsumer;
 
 /**
  * Fetches the embedding model on first use: the model graph and its tokenizer from the publisher's Hugging Face
- * repository. Data only; the runtime library that executes it is part of the build ({@link OrtLibrary}). Every
- * file is pinned by SHA-256 and written beside its target under a {@code .part} name until the hash checks, so a
- * partial or tampered download never becomes a model. One lock file per models directory keeps two servers on
- * one machine from fetching the same files twice. Nothing here blocks a server's start: {@link EmbedderHolder}
- * runs it in the background.
+ * repository. Data only; the runtime library that executes it is part of the build ({@link OrtLibrary}). Every file is
+ * pinned by SHA-256 and written beside its target under a {@code .part} name until the hash checks, so a partial or
+ * tampered download never becomes a model. One lock file per models directory keeps two servers on one machine from
+ * fetching the same files twice. Nothing here blocks a server's start: {@link EmbedderHolder} runs it in the
+ * background.
  */
 public final class ModelFetcher {
 
@@ -85,9 +85,9 @@ public final class ModelFetcher {
 
 	/**
 	 * The two files, pinned: what IBM publishes on Hugging Face (the hashes are the ones Hugging Face records for
-	 * them). On x86 the graph is the 8-bit AVX2 build (313 MB, the same recall as the full-precision one on both
-	 * the sample set and LongMemEval); on ARM the full-precision build (1.25 GB). {@code modelBase} lets a mirror
-	 * laid out like the repository stand in; the hashes stay.
+	 * them). On x86 the graph is the 8-bit AVX2 build (313 MB, the same recall as the full-precision one on both the
+	 * sample set and LongMemEval); on ARM the full-precision build (1.25 GB). {@code modelBase} lets a mirror laid out
+	 * like the repository stand in; the hashes stay.
 	 */
 	public static List<Item> plan(Path modelsDir, String modelBase) {
 		Path modelDir = modelsDir.resolve(MODEL_ID);
@@ -143,7 +143,8 @@ public final class ModelFetcher {
 						throw new IOException(item.name() + " did not match its published hash (got " + actual
 								+ ", expected " + item.sha256() + "); the download was discarded.");
 					}
-					Files.move(part, item.target(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+					Files.move(part, item.target(), StandardCopyOption.ATOMIC_MOVE,
+							StandardCopyOption.REPLACE_EXISTING);
 				} catch (IOException | RuntimeException e) {
 					Files.deleteIfExists(part);
 					throw e;
@@ -163,7 +164,8 @@ public final class ModelFetcher {
 			HttpResponse<InputStream> resp = http.send(HttpRequest.newBuilder(item.url()).GET().build(),
 					HttpResponse.BodyHandlers.ofInputStream());
 			if (resp.statusCode() / 100 != 2) {
-				throw new IOException("Fetching " + item.name() + " from " + item.url() + " returned " + resp.statusCode());
+				throw new IOException(
+						"Fetching " + item.name() + " from " + item.url() + " returned " + resp.statusCode());
 			}
 			long received = 0;
 			try (InputStream in = resp.body(); OutputStream out = Files.newOutputStream(to)) {

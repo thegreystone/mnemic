@@ -58,10 +58,10 @@ public final class FactRenderer {
 	public String sentence(Predicate pred, String mode, String subject, String object, String scope, String qualifier) {
 		String q = lang.qualifier(qualifier);
 		return switch (mode == null ? "asserted" : mode) {
-			case "negated" -> pred.renderNegated(lang, predicates.negatedTemplate(pred.name()), subject, object, scope, q);
-			case "only" -> pred.renderOnly(lang, subject, object, scope, q);
-			case "closure" -> pred.renderClosure(lang, subject, object);
-			default -> pred.render(subject, object, scope, q);
+		case "negated" -> pred.renderNegated(lang, predicates.negatedTemplate(pred.name()), subject, object, scope, q);
+		case "only" -> pred.renderOnly(lang, subject, object, scope, q);
+		case "closure" -> pred.renderClosure(lang, subject, object);
+		default -> pred.render(subject, object, scope, q);
 		};
 	}
 
@@ -79,8 +79,8 @@ public final class FactRenderer {
 	private String rerender(Tx tx, Fact f, Predicate p) {
 		String objectName = f.objectId() != null ? nameIn(tx, f.objectId()) : f.objectText();
 		String rendering = sentence(p, f.mode(), nameIn(tx, f.subjectId()), objectName,
-				f.scopeId() == null ? null : nameIn(tx, f.scopeId()), f.qualifier())
-				+ believed(f.callerConfidence()) + Bounds.of(f).suffix(f.ended(), lang);
+				f.scopeId() == null ? null : nameIn(tx, f.scopeId()), f.qualifier()) + believed(f.callerConfidence())
+				+ Bounds.of(f).suffix(f.ended(), lang);
 		tx.update("UPDATE fact SET rendering = ? WHERE id = ?", rendering, f.id());
 		return rendering;
 	}
@@ -99,7 +99,9 @@ public final class FactRenderer {
 		});
 	}
 
-	/** Every fact under every predicate: after a migration or a language change, so no rendering predates its template. */
+	/**
+	 * Every fact under every predicate: after a migration or a language change, so no rendering predates its template.
+	 */
 	public int rerenderAll() {
 		int n = 0;
 		for (Predicate p : predicates.all()) {

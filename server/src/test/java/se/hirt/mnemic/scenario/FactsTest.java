@@ -69,14 +69,15 @@ class FactsTest {
 			List<Fact> facts = e.facts().factsOfObservation(obs);
 			assertEquals(4, facts.size());
 			assertTrue(facts.stream().allMatch(f -> f.observationId() == obs), "shared derived_from");
-			Fact schubelbach = facts.stream().filter(f -> f.rendering().contains("Schübelbach")).findFirst().orElseThrow();
+			Fact schubelbach = facts.stream().filter(f -> f.rendering().contains("Schübelbach")).findFirst()
+					.orElseThrow();
 			assertEquals("2014-01-01", schubelbach.validStart());
 			assertEquals("year", schubelbach.validStartPrecision());
 			assertNotNull(schubelbach.eventId(), "linked to the moved event");
 			assertTrue(schubelbach.rendering().endsWith("(since 2014)"), schubelbach.rendering());
 			assertNotNull(schubelbach.spanStart(), "anchored in the observation");
-			String span = "My wife is Marit. My father is Konrad. We moved from Sweden to Schübelbach in 2014.".substring(
-					schubelbach.spanStart(), schubelbach.spanEnd());
+			String span = "My wife is Marit. My father is Konrad. We moved from Sweden to Schübelbach in 2014."
+					.substring(schubelbach.spanStart(), schubelbach.spanEnd());
 			assertTrue(span.startsWith("We moved"), span);
 			Fact father = facts.stream().filter(f -> f.predicate().equals("parent_of")).findFirst().orElseThrow();
 			assertEquals("Konrad is Mattias Sandell's father", father.rendering());
@@ -123,9 +124,8 @@ class FactsTest {
 			assertEquals("explicit", f1.derivationKind());
 
 			RememberOutcome second = remember(e, "Org chart: Mattias Sandell, Director of Engineering.",
-					new Source("document", "orgchart.pdf", null, null, null), proposal().fact(
-							fact("self", "holds_role", "Director of Engineering", null, "Hooli", null, null, null,
-									null, "explicit")));
+					new Source("document", "orgchart.pdf", null, null, null), proposal().fact(fact("self", "holds_role",
+							"Director of Engineering", null, "Hooli", null, null, null, null, "explicit")));
 			Fact f2 = e.facts().get(id(second.applied().facts().getFirst().id())).orElseThrow();
 			assertEquals("extracted", f2.derivationKind(), "explicit rejected for a document source");
 			assertTrue(second.applied().warnings().stream().anyMatch(w -> w.contains("explicit")),
@@ -138,8 +138,8 @@ class FactsTest {
 	@Scenario("E3")
 	void callerConfidenceIsEvidenceNotTruth() {
 		try (Engine e = engine("e3")) {
-			var fr = new se.hirt.mnemic.proposal.Proposal.FactRef("self", "born_in", "Uppsala", null, null, null,
-					null, null, null, 0.99);
+			var fr = new se.hirt.mnemic.proposal.Proposal.FactRef("self", "born_in", "Uppsala", null, null, null, null,
+					null, null, 0.99);
 			RememberOutcome o = remember(e, "Mattias was born in Uppsala.", proposal().fact(fr));
 			assertEquals(1, o.applied().facts().size());
 			// The caller's number is stored as evidence about the caller, on the fact row, never as the confidence.
@@ -193,12 +193,15 @@ class FactsTest {
 	@Scenario("J1")
 	void callerDefinesANewPredicateOnTheFly() {
 		try (Engine e = engine("j1")) {
-			RememberOutcome o = remember(e, "My godmother is Hedvig.", proposal().predicate(
-							new PredicateDef("godparent_of", "Subject sponsored object at baptism or equivalent.", "person",
-									"person", false, null, null, null, "low", List.of("godparent", "godmother", "godfather"),
+			RememberOutcome o = remember(e, "My godmother is Hedvig.",
+					proposal()
+							.predicate(new PredicateDef("godparent_of",
+									"Subject sponsored object at baptism or equivalent.", "person", "person", false,
+									null, null, null, "low", List.of("godparent", "godmother", "godfather"),
 									"{subject} is {object}'s {qualifier|godparent}", List.of("godmother", "godfather"),
-									List.of())).entity("e1", "Hedvig", "person")
-					.fact(fact("e1", "godparent_of", "self", "godmother", null, null, null, null, null, null)));
+									List.of()))
+							.entity("e1", "Hedvig", "person")
+							.fact(fact("e1", "godparent_of", "self", "godmother", null, null, null, null, null, null)));
 			assertEquals("registered", o.applied().predicates().getFirst().resolution());
 			Predicate p = e.predicates().get("godparent_of").orElseThrow();
 			assertEquals(o.observation().observationId(), p.definedBy());
@@ -217,9 +220,9 @@ class FactsTest {
 	void synonymPredicateResolvesToAnExistingOne() {
 		try (Engine e = engine("j2")) {
 			remember(e, "I work at Hooli.", proposal().fact("works_at", "Hooli"));
-			RememberOutcome o = remember(e, "Mattias is employed by Hooli.", proposal().predicate(
-							new PredicateDef("employed_by", "Subject works for object organization.", "person", "organization",
-									true, null, null, null, null, List.of(), null, List.of(), List.of()))
+			RememberOutcome o = remember(e, "Mattias is employed by Hooli.", proposal()
+					.predicate(new PredicateDef("employed_by", "Subject works for object organization.", "person",
+							"organization", true, null, null, null, null, List.of(), null, List.of(), List.of()))
 					.fact("self", "employed_by", "Hooli"));
 			// Similar is asked, never applied (2026-09-10): the candidate is named, the fact is held.
 			assertEquals("similar", o.applied().predicates().getFirst().resolution());
@@ -232,14 +235,14 @@ class FactsTest {
 					"both descriptions are shown so meaning can be compared: " + q);
 			assertTrue(e.predicates().get("employed_by").isEmpty(), "no alias before the answer");
 
-			RememberOutcome yes = remember(e, "Yes, same thing.", null,
-					new Resolve((String) q.get("id"), "works_at"));
+			RememberOutcome yes = remember(e, "Yes, same thing.", null, new Resolve((String) q.get("id"), "works_at"));
 			assertTrue(e.predicates().get("employed_by").isPresent(), "confirmed: recorded as an alias");
 			assertEquals("works_at", e.predicates().get("employed_by").orElseThrow().name());
 			assertEquals(1, e.facts().count(), "one works_at fact, confirmed again");
 			assertEquals(1, ((List<?>) yes.resolved().getFirst().get("facts")).size());
 			// Asked once: the alias resolves the next use without a question.
-			RememberOutcome again = remember(e, "Still employed by Hooli.", proposal().fact("self", "employed_by", "Hooli"));
+			RememberOutcome again = remember(e, "Still employed by Hooli.",
+					proposal().fact("self", "employed_by", "Hooli"));
 			assertTrue(again.applied().questions().isEmpty());
 			assertEquals(1, e.facts().count());
 		}
@@ -251,11 +254,14 @@ class FactsTest {
 		try (Engine e = engine("e4-believed")) {
 			RememberOutcome believed = remember(e, "I think the HB became the AB in 1998.",
 					proposal().entity("e1", "Nordvik HB", "organization").entity("e2", "Nordvik AB", "organization")
-							.fact(new FactRef("e1", "related_to", "e2", "believed to be the same company, converted from HB to AB",
-									null, null, null, List.of(), null, 0.5)));
+							.fact(new FactRef("e1", "related_to", "e2",
+									"believed to be the same company, converted from HB to AB", null, null, null,
+									List.of(), null, 0.5)));
 			assertTrue(believed.applied().warnings().isEmpty(), believed.applied().warnings().toString());
-			Fact f = e.facts().get(Long.parseLong(believed.applied().facts().getFirst().id().substring(2))).orElseThrow();
-			assertEquals("Nordvik HB is related to Nordvik AB (believed to be the same company, converted from HB to AB) (believed)",
+			Fact f = e.facts().get(Long.parseLong(believed.applied().facts().getFirst().id().substring(2)))
+					.orElseThrow();
+			assertEquals(
+					"Nordvik HB is related to Nordvik AB (believed to be the same company, converted from HB to AB) (believed)",
 					f.rendering(), "the qualifier and the belief both survive");
 			assertTrue(f.believed());
 			assertEquals(0.5, e.facts().confidence(f), 1e-9, "the caller's number floors the computed 0.80");
@@ -267,8 +273,8 @@ class FactsTest {
 			assertEquals(0.80, e.facts().confidence(c.replacement()), 1e-9);
 			// A qualifier on a template without a slot is stored and reported, never dropped silently.
 			RememberOutcome noSlot = remember(e, "I lead Kestrel as its steward.",
-					proposal().entity("e3", "Kestrel", "project")
-							.fact(new FactRef("self", "leads", "e3", "steward", null, null, null, List.of(), null, null)));
+					proposal().entity("e3", "Kestrel", "project").fact(
+							new FactRef("self", "leads", "e3", "steward", null, null, null, List.of(), null, null)));
 			assertTrue(noSlot.applied().warnings().stream().anyMatch(w -> w.contains("no slot")),
 					noSlot.applied().warnings().toString());
 		}
@@ -286,11 +292,11 @@ class FactsTest {
 			// The definition an assistant wrote on 2026-09-10, verbatim in meaning: a closure, not ownership.
 			var def = new PredicateDef("real_estate_confined_to",
 					"All of the subject's real estate lies within the object; the subject owns no property anywhere else.",
-					"person", "place", false, null, null, null, "medium", List.of("real estate", "property", "owns", "own", "confined"),
+					"person", "place", false, null, null, null, "medium",
+					List.of("real estate", "property", "owns", "own", "confined"),
 					"{subject}'s real estate is confined to {object}", List.of(), List.of());
-			RememberOutcome o = remember(e, "Mattias only owns properties in Switzerland.",
-					proposal().predicate(def).entity("e1", "Switzerland", "country")
-							.fact("self", "real_estate_confined_to", "e1"));
+			RememberOutcome o = remember(e, "Mattias only owns properties in Switzerland.", proposal().predicate(def)
+					.entity("e1", "Switzerland", "country").fact("self", "real_estate_confined_to", "e1"));
 			assertTrue(o.applied().facts().isEmpty(), "nothing asserted: " + o.applied().facts());
 			assertEquals(1, o.applied().questions().size(), o.applied().toString());
 			Map<String, Object> q = o.applied().questions().getFirst();
@@ -322,7 +328,9 @@ class FactsTest {
 			RememberOutcome o = remember(e, "Mattias only owns properties in Switzerland.",
 					proposal().entity("e1", "Switzerland", "country").fact("self", "owns", "e1"));
 			assertEquals(1, o.applied().facts().size(), "stored, the caller said so, but flagged");
-			assertTrue(o.applied().warnings().stream().anyMatch(w -> w.contains("Switzerland contains Lindenhof apartment")),
+			assertTrue(
+					o.applied().warnings().stream()
+							.anyMatch(w -> w.contains("Switzerland contains Lindenhof apartment")),
 					o.applied().warnings().toString());
 			assertTrue(o.applied().warnings().stream().anyMatch(w -> w.contains("restriction")),
 					o.applied().warnings().toString());
@@ -339,10 +347,10 @@ class FactsTest {
 		try (Engine e = engine("j4")) {
 			remember(e, "I work at Hooli.",
 					proposal().entity("e1", "Hooli", "organization").fact("self", "works_at", "e1"));
-			RememberOutcome o = remember(e, "Hooli is my godmother.", proposal().predicate(
-							new PredicateDef("godparent_of", "Sponsor at baptism.", "person", "person", false, null, null, null,
-									null, List.of("godparent"), null, List.of("godmother"), List.of()))
-					.fact("Hooli", "godparent_of", "self"));
+			RememberOutcome o = remember(e, "Hooli is my godmother.",
+					proposal().predicate(new PredicateDef("godparent_of", "Sponsor at baptism.", "person", "person",
+							false, null, null, null, null, List.of("godparent"), null, List.of("godmother"), List.of()))
+							.fact("Hooli", "godparent_of", "self"));
 			assertEquals(0, o.applied().facts().size());
 			assertEquals("type_mismatch", o.applied().questions().getFirst().get("kind"));
 			assertEquals("organization", o.applied().questions().getFirst().get("entity_type"));
@@ -363,29 +371,41 @@ class FactsTest {
 	private static long id(String ref) {
 		return Long.parseLong(ref.substring(ref.indexOf('-') + 1));
 	}
+
 	/** J9: a free-text qualifier is wording, not identity: the same relation said twice is one fact, corroborated. */
 	@Test
 	@Scenario("J9")
 	void aFreeTextQualifierDoesNotMakeASecondFact() {
 		try (Engine e = engine("j9-free-qualifier")) {
 			remember(e, "Nordvik HB became Nordvik Software Solutions AB, I believe.",
-					proposal().entity("e1", "Nordvik HB", "organization").entity("e2", "Nordvik Software Solutions AB", "organization")
-							.fact(fact("e1", "related_to", "e2", "believed to be the same company, converted from HB to AB", null, null, null, null, null, null)));
+					proposal().entity("e1", "Nordvik HB", "organization")
+							.entity("e2", "Nordvik Software Solutions AB", "organization")
+							.fact(fact("e1", "related_to", "e2",
+									"believed to be the same company, converted from HB to AB", null, null, null, null,
+									null, null)));
 			RememberOutcome again = remember(e, "As I said, Nordvik HB turned into Nordvik Software Solutions AB.",
-					proposal().entity("e1", "Nordvik HB", "organization").entity("e2", "Nordvik Software Solutions AB", "organization")
-							.fact(fact("e1", "related_to", "e2", "believed to be the same company, HB converted to AB, unconfirmed", null, null, null, null, null, null)));
-			assertTrue(again.applied().facts().getFirst().corroborated(), "the second wording corroborates: " + again.applied().facts());
+					proposal().entity("e1", "Nordvik HB", "organization")
+							.entity("e2", "Nordvik Software Solutions AB", "organization")
+							.fact(fact("e1", "related_to", "e2",
+									"believed to be the same company, HB converted to AB, unconfirmed", null, null,
+									null, null, null, null)));
+			assertTrue(again.applied().facts().getFirst().corroborated(),
+					"the second wording corroborates: " + again.applied().facts());
 			long hb = e.entities().byRef("Nordvik HB").orElseThrow().id();
-			List<Fact> related = e.facts().factsOf(hb).stream().filter(f -> "related_to".equals(f.predicate()) && f.current()).toList();
+			List<Fact> related = e.facts().factsOf(hb).stream()
+					.filter(f -> "related_to".equals(f.predicate()) && f.current()).toList();
 			assertEquals(1, related.size(), related.toString());
 			assertEquals(2, related.getFirst().corroborations());
 			// The restatement said more, so the fact took its wording; the older wording stays in obs-1.
 			assertTrue(related.getFirst().qualifier().endsWith("unconfirmed"), related.getFirst().qualifier());
 			assertTrue(related.getFirst().rendering().contains("unconfirmed"), related.getFirst().rendering());
-			assertTrue(again.applied().facts().getFirst().rendering().contains("unconfirmed"), "the reply shows the wording taken");
+			assertTrue(again.applied().facts().getFirst().rendering().contains("unconfirmed"),
+					"the reply shows the wording taken");
 			// A qualifier from a vocabulary stays identity: a mother and a father are two facts.
-			remember(e, "Anna is my mother.", proposal().entity("e3", "Anna", "person").fact(fact("e3", "parent_of", "self", "mother", null, null, null, null, null, null)));
-			remember(e, "Erik is my father.", proposal().entity("e4", "Erik", "person").fact(fact("e4", "parent_of", "self", "father", null, null, null, null, null, null)));
+			remember(e, "Anna is my mother.", proposal().entity("e3", "Anna", "person")
+					.fact(fact("e3", "parent_of", "self", "mother", null, null, null, null, null, null)));
+			remember(e, "Erik is my father.", proposal().entity("e4", "Erik", "person")
+					.fact(fact("e4", "parent_of", "self", "father", null, null, null, null, null, null)));
 			long owner = e.entities().owner().id();
 			assertEquals(2, e.facts().factsOf(owner).stream().filter(f -> "parent_of".equals(f.predicate())).count());
 		}
@@ -397,21 +417,28 @@ class FactsTest {
 	void anUndatedEventIsTheDatedOneOnRecord() {
 		try (Engine e = engine("j10-event-identity")) {
 			RememberOutcome dated = remember(e, "I co-founded Nordvik Virtual Machines in 1998.",
-					proposal().entity("e1", "Nordvik Virtual Machines", "organization").event("ev1", "co-founded", "1998", "self", "e1"));
-			RememberOutcome undated = remember(e, "Back when I co-founded Nordvik Virtual Machines, we were four people.",
-					proposal().entity("e1", "Nordvik Virtual Machines", "organization").event("ev1", "co-founded", null, "self", "e1"));
-			assertEquals(dated.applied().events().getFirst().id(), undated.applied().events().getFirst().id(), "one event on record");
+					proposal().entity("e1", "Nordvik Virtual Machines", "organization").event("ev1", "co-founded",
+							"1998", "self", "e1"));
+			RememberOutcome undated = remember(e,
+					"Back when I co-founded Nordvik Virtual Machines, we were four people.",
+					proposal().entity("e1", "Nordvik Virtual Machines", "organization").event("ev1", "co-founded", null,
+							"self", "e1"));
+			assertEquals(dated.applied().events().getFirst().id(), undated.applied().events().getFirst().id(),
+					"one event on record");
 			// The other way round: an undated event first, the date arrives later and fills in.
-			remember(e, "I left the company at some point.", proposal().entity("e1", "Nordvik Virtual Machines", "organization").event("ev2", "left", null, "self", "e1"));
+			remember(e, "I left the company at some point.", proposal()
+					.entity("e1", "Nordvik Virtual Machines", "organization").event("ev2", "left", null, "self", "e1"));
 			RememberOutcome later = remember(e, "I left Nordvik Virtual Machines in 2002.",
-					proposal().entity("e1", "Nordvik Virtual Machines", "organization").event("ev2", "left", "2002", "self", "e1"));
+					proposal().entity("e1", "Nordvik Virtual Machines", "organization").event("ev2", "left", "2002",
+							"self", "e1"));
 			long id = Long.parseLong(later.applied().events().getFirst().id().substring(4));
 			var ev = e.events().get(id).orElseThrow();
 			assertEquals("2002-01-01", ev.validStart(), ev.toString());
 			assertTrue(ev.rendering().contains("2002"), ev.rendering());
 			// A different date is a different event.
 			RememberOutcome other = remember(e, "I co-founded Nordvik Virtual Machines again in 2005, as a joke.",
-					proposal().entity("e1", "Nordvik Virtual Machines", "organization").event("ev3", "co-founded", "2005", "self", "e1"));
+					proposal().entity("e1", "Nordvik Virtual Machines", "organization").event("ev3", "co-founded",
+							"2005", "self", "e1"));
 			assertNotEquals(dated.applied().events().getFirst().id(), other.applied().events().getFirst().id());
 		}
 	}
@@ -424,10 +451,13 @@ class FactsTest {
 			RememberOutcome o = remember(e, "I think Nordvik Virtual Machines was created around September 1998.",
 					proposal().fact("self", "considering", "that Nordvik Virtual Machines was created around 1998-09"));
 			assertTrue(o.applied().facts().isEmpty(), "not stored: " + o.applied().facts());
-			assertTrue(o.applied().warnings().stream().anyMatch(w -> w.contains("recollection") && w.contains("caller_confidence")),
+			assertTrue(
+					o.applied().warnings().stream()
+							.anyMatch(w -> w.contains("recollection") && w.contains("caller_confidence")),
 					o.applied().warnings().toString());
 			// A plan is still a plan.
-			RememberOutcome plan = remember(e, "I'm considering a sabbatical in 2027.", proposal().fact("self", "considering", "a sabbatical in 2027"));
+			RememberOutcome plan = remember(e, "I'm considering a sabbatical in 2027.",
+					proposal().fact("self", "considering", "a sabbatical in 2027"));
 			assertEquals(1, plan.applied().facts().size());
 		}
 	}

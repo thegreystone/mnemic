@@ -83,7 +83,8 @@ class TemporalTest {
 			assertEquals(List.of(hooli.id()), now.structured().facts().stream().map(Fact::id).toList());
 
 			RecallResult then = recall(e, "where did Mattias work", Instant.parse("2015-06-01T00:00:00Z"));
-			assertEquals(List.of(initrode.id()), then.structured().facts().stream().map(Fact::id).toList(), then.text());
+			assertEquals(List.of(initrode.id()), then.structured().facts().stream().map(Fact::id).toList(),
+					then.text());
 		}
 	}
 
@@ -160,7 +161,8 @@ class TemporalTest {
 			assertTrue(work.structured().matched(), work.text());
 			Fact f = work.structured().facts().getFirst();
 			assertEquals("current", f.state(later), "still returned as current");
-			assertTrue(work.text().contains("(3y ago), likely changed"), "staleness annotation present: " + work.text());
+			assertTrue(work.text().contains("(3y ago), likely changed"),
+					"staleness annotation present: " + work.text());
 			double confidenceLater = e.facts().confidence(f);
 
 			RecallResult born = recall(e, "where was Mattias born");
@@ -198,7 +200,8 @@ class TemporalTest {
 	void sequentialHistoryWithUnknownBoundsDoesNotConflict() {
 		try (Engine e = engine("c9")) {
 			RememberOutcome o = remember(e,
-					"I co-founded Nordvik Virtual Machines in 1998. I later worked in the Runtime " + "Platform Group at Initrode. I work at Hooli now.",
+					"I co-founded Nordvik Virtual Machines in 1998. I later worked in the Runtime "
+							+ "Platform Group at Initrode. I work at Hooli now.",
 					proposal().entity("e1", "Nordvik Virtual Machines", "organization")
 							.entity("e2", "Initrode", "organization").entity("e3", "Runtime Platform Group", "team")
 							.entity("e4", "Hooli", "organization").event("ev1", "founded", "1998", "self", "e1")
@@ -235,20 +238,21 @@ class TemporalTest {
 			RememberOutcome hooli = remember(e, "I joined Hooli in March 2019.",
 					proposal().entity("e1", "Hooli", "organization").event("ev1", "joined", "2019-03", "self", "e1"));
 			RememberOutcome hb = remember(e, "I founded Nordvik Data Consulting & Multimedia HB in 1996.",
-					proposal().entity("e2", "Nordvik Data Consulting & Multimedia HB", "organization")
-							.event("ev1", "founded", "1996", "self", "e2"));
+					proposal().entity("e2", "Nordvik Data Consulting & Multimedia HB", "organization").event("ev1",
+							"founded", "1996", "self", "e2"));
 			assertTrue(hb.applied().questions().isEmpty(), hb.applied().questions().toString());
 			Fact hooliFact = stored(e, hooli, 0);
 			assertEquals("current", hooliFact.status(), "the later job is untouched: " + hooliFact);
 			assertNull(hooliFact.validEnd(), "no end 23 years before its start: " + hooliFact);
 			Fact nordvik = stored(e, hb, 0);
 			assertEquals("1996-01-01", nordvik.validStart());
-			assertEquals("2019-03-01", nordvik.validEnd(), "ended at the nearest later job, as C1 would have: " + nordvik);
+			assertEquals("2019-03-01", nordvik.validEnd(),
+					"ended at the nearest later job, as C1 would have: " + nordvik);
 			assertEquals("sequence", nordvik.endSource());
 			assertTrue(nordvik.ended());
 			RememberOutcome ab = remember(e, "I founded Nordvik Software Solutions AB in September 1998.",
-					proposal().entity("e3", "Nordvik Software Solutions AB", "organization")
-							.event("ev1", "founded", "1998-09", "self", "e3"));
+					proposal().entity("e3", "Nordvik Software Solutions AB", "organization").event("ev1", "founded",
+							"1998-09", "self", "e3"));
 			assertTrue(ab.applied().questions().isEmpty(), ab.applied().questions().toString());
 			assertEquals("2019-03-01", stored(e, ab, 0).validEnd(), "the AB ends at Hooli");
 			assertEquals("current", stored(e, hooli, 0).status(), "still untouched");
@@ -258,11 +262,11 @@ class TemporalTest {
 		// The same three in chronological order: every interval the sequence rule would draw.
 		try (Engine e = engine("c14-chrono")) {
 			RememberOutcome hb = remember(e, "I founded Nordvik Data Consulting & Multimedia HB in 1996.",
-					proposal().entity("e2", "Nordvik Data Consulting & Multimedia HB", "organization")
-							.event("ev1", "founded", "1996", "self", "e2"));
+					proposal().entity("e2", "Nordvik Data Consulting & Multimedia HB", "organization").event("ev1",
+							"founded", "1996", "self", "e2"));
 			RememberOutcome ab = remember(e, "I founded Nordvik Software Solutions AB in September 1998.",
-					proposal().entity("e3", "Nordvik Software Solutions AB", "organization")
-							.event("ev1", "founded", "1998-09", "self", "e3"));
+					proposal().entity("e3", "Nordvik Software Solutions AB", "organization").event("ev1", "founded",
+							"1998-09", "self", "e3"));
 			RememberOutcome hooli = remember(e, "I joined Hooli in March 2019.",
 					proposal().entity("e1", "Hooli", "organization").event("ev1", "joined", "2019-03", "self", "e1"));
 			assertEquals("1998-09-01", stored(e, hb, 0).validEnd());
@@ -276,8 +280,8 @@ class TemporalTest {
 	void anEventOpensTheFactsItsTypeDeclares() {
 		try (Engine e = engine("c13-opens")) {
 			// The event alone: the registry says purchased opens owns, so the fact is supplied, dated by the event.
-			RememberOutcome bought = remember(e, "I bought Bergstrasse 7 in November 2025.",
-					proposal().entity("e1", "Bergstrasse 7", "place").event("ev1", "purchased", "2025-11", "self", "e1"));
+			RememberOutcome bought = remember(e, "I bought Bergstrasse 7 in November 2025.", proposal()
+					.entity("e1", "Bergstrasse 7", "place").event("ev1", "purchased", "2025-11", "self", "e1"));
 			assertEquals(1, bought.applied().facts().size(), bought.applied().toString());
 			Fact owns = stored(e, bought, 0);
 			assertEquals("owns", owns.predicate());
@@ -305,9 +309,8 @@ class TemporalTest {
 	void aFactStatedBesideItsEventByNameIsOneRowAndNoCorroboration() {
 		try (Engine e = engine("c13-byname")) {
 			// The stated fact names Hooli by name, not by ref: the opened twin must still find it.
-			RememberOutcome o = remember(e, "I joined Hooli in 2018.",
-					proposal().entity("e2", "Hooli", "organization").event("ev1", "joined", "2018", "self", "e2")
-							.fact("self", "works_at", "Hooli"));
+			RememberOutcome o = remember(e, "I joined Hooli in 2018.", proposal().entity("e2", "Hooli", "organization")
+					.event("ev1", "joined", "2018", "self", "e2").fact("self", "works_at", "Hooli"));
 			assertEquals(1, o.applied().facts().size(), o.applied().toString());
 			assertFalse(o.applied().facts().getFirst().corroborated(), "said once, in one breath");
 			Fact f = stored(e, o, 0);
@@ -387,13 +390,11 @@ class TemporalTest {
 	void multipleRolesAreNotAConflict() {
 		try (Engine e = engine("c10")) {
 			RememberOutcome hooliFact = remember(e, "I'm Director of Engineering at Hooli.",
-					proposal().entity("e1", "Hooli", "organization")
-							.fact(fact("self", "holds_role", "Director of Engineering", null, "e1", null, null, null,
-									null, null)));
+					proposal().entity("e1", "Hooli", "organization").fact(fact("self", "holds_role",
+							"Director of Engineering", null, "e1", null, null, null, null, null)));
 			RememberOutcome jmc = remember(e, "I'm the project lead for OpenJDK Kestrel.",
-					proposal().entity("e1", "OpenJDK Kestrel", "project")
-							.fact(fact("self", "holds_role", "project lead", null, "e1", null, null, null, null,
-									null)));
+					proposal().entity("e1", "OpenJDK Kestrel", "project").fact(
+							fact("self", "holds_role", "project lead", null, "e1", null, null, null, null, null)));
 			assertTrue(jmc.applied().questions().isEmpty(), "different scope: " + jmc.applied().questions());
 			assertEquals("current", stored(e, hooliFact, 0).status());
 			assertEquals("current", stored(e, jmc, 0).status());

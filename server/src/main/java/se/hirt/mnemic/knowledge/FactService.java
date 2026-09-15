@@ -57,19 +57,19 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * Turns a validated proposal into rows (EXTRACTION.md, Layer 2): predicates and entities are resolved, domain and
- * range checked, valid time normalised with its provenance, the rendering computed, the span anchored, a restatement
+ * Turns a validated proposal into rows (EXTRACTION.md, Layer 2): predicates and entities are resolved, domain and range
+ * checked, valid time normalised with its provenance, the rendering computed, the span anchored, a restatement
  * corroborated, a conflict detected, and an event's effects applied. What Mnemic cannot decide it asks: an ambiguous
  * entity or predicate keeps the whole fact in the question and nothing is stored until the caller answers
- * (EVALUATION.md B2, J3); an unexplained conflict stores the new fact as {@code pending}, linked to its question
- * (C2, D3). Corrections and retractions go through the same path so history reads the same either way.
+ * (EVALUATION.md B2, J3); an unexplained conflict stores the new fact as {@code pending}, linked to its question (C2,
+ * D3). Corrections and retractions go through the same path so history reads the same either way.
  */
 public final class FactService {
 
 	/** What a proposal produced. Every id is reported so the caller can refer to it later. */
 	public record Applied(List<EntityOut> entities, List<EventOut> events, List<FactOut> facts,
-	                      List<PredicateOut> predicates, List<Map<String, Object>> questions, List<String> warnings,
-	                      List<Map<String, Object>> superseded) {
+			List<PredicateOut> predicates, List<Map<String, Object>> questions, List<String> warnings,
+			List<Map<String, Object>> superseded) {
 		public static final Applied NOTHING = new Applied(List.of(), List.of(), List.of(), List.of(), List.of(),
 				List.of(), List.of());
 
@@ -98,7 +98,7 @@ public final class FactService {
 
 	/** The resolved parts of one fact to store. */
 	record Operands(Entity subject, Predicate predicate, Entity object, String objectText, String qualifier,
-	                Entity scope, String mode) {
+			Entity scope, String mode) {
 		long objectId() {
 			return object == null ? -1 : object.id();
 		}
@@ -186,8 +186,7 @@ public final class FactService {
 	 */
 	private Set<Long> declaredInProposal = Set.of();
 
-	FactService(
-			Database db, EntityService entities, PredicateRegistry predicates, EventTypeRegistry eventTypes,
+	FactService(Database db, EntityService entities, PredicateRegistry predicates, EventTypeRegistry eventTypes,
 			EventService events, QuestionService questions, FactQueries queries, FactQuestions asks,
 			FactRenderer renderer, FactLedger ledger) {
 		this.db = db;
@@ -230,7 +229,9 @@ public final class FactService {
 		}
 	}
 
-	/** Everything a name must not be confused with: the proposal's other declared entities and those already resolved. */
+	/**
+	 * Everything a name must not be confused with: the proposal's other declared entities and those already resolved.
+	 */
 	private Set<Long> distinctFrom(Map<String, Entity> refs, Set<Long> own) {
 		var out = new HashSet<>(declaredInProposal);
 		for (Entity e : refs.values()) {
@@ -246,8 +247,9 @@ public final class FactService {
 	private void resolveEntities(Application a) {
 		for (EntityRef er : a.p.entities()) {
 			if (er.name() == null || er.name().isBlank()) {
-				a.warnings.add("An entity without a 'name' was skipped" + (er.ref() != null ? " (ref " + er.ref() + ")" : "")
-						+ "; facts that refer to it are skipped too.");
+				a.warnings.add(
+						"An entity without a 'name' was skipped" + (er.ref() != null ? " (ref " + er.ref() + ")" : "")
+								+ "; facts that refer to it are skipped too.");
 				continue;
 			}
 			String key = er.ref() != null ? er.ref() : er.name();
@@ -285,7 +287,9 @@ public final class FactService {
 		}
 	}
 
-	/** Stores the events, applies their effects, and returns the facts their types open that the proposal did not state. */
+	/**
+	 * Stores the events, applies their effects, and returns the facts their types open that the proposal did not state.
+	 */
 	private List<FactRef> applyEvents(Application a) {
 		var opened = new ArrayList<FactRef>();
 		for (EventRef ev : a.p.events()) {
@@ -336,9 +340,9 @@ public final class FactService {
 	}
 
 	/**
-	 * The facts an event type opens (purchased → owns, joined → works_at) between the first participant and each
-	 * other one, unless the proposal stated one of them. A type that opens several predicates opens the first whose
-	 * types fit; a participant of the wrong type is left alone.
+	 * The facts an event type opens (purchased → owns, joined → works_at) between the first participant and each other
+	 * one, unless the proposal stated one of them. A type that opens several predicates opens the first whose types
+	 * fit; a participant of the wrong type is left alone.
 	 */
 	private List<FactRef> openedBy(Application a, EventRef ev, String type, List<Entity> participants, String key) {
 		Optional<EventType> et = eventTypes.get(type);
@@ -356,7 +360,8 @@ public final class FactService {
 			}
 			for (String pred : et.get().opens()) {
 				Predicate pr = predicates.get(pred).orElse(null);
-				if (pr == null || pr.literalRange() || !pr.acceptsSubject(subj.type()) || !pr.acceptsObject(obj.type())) {
+				if (pr == null || pr.literalRange() || !pr.acceptsSubject(subj.type())
+						|| !pr.acceptsObject(obj.type())) {
 					continue;
 				}
 				opened.add(new FactRef(ev.participants().getFirst(), pred, ev.participants().get(i), null, null,
@@ -449,7 +454,8 @@ public final class FactService {
 				ended = true;
 			}
 		}
-		Double callerConfidence = f.callerConfidence() == null ? null : Math.max(0.0, Math.min(1.0, f.callerConfidence()));
+		Double callerConfidence = f.callerConfidence() == null ? null
+				: Math.max(0.0, Math.min(1.0, f.callerConfidence()));
 		String base = renderer.sentence(op.predicate(), op.mode(), op.subject().name(), op.objectName(),
 				op.scope() == null ? null : op.scope().name(), op.qualifier()) + renderer.believed(callerConfidence);
 		String rendering = base + b.suffix(ended, lang);
@@ -470,12 +476,13 @@ public final class FactService {
 					                 spec_version, caller_confidence, corroborations, last_confirmed, created_at,
 					                 start_source, end_source, mode)
 					VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?,?)""", op.subject().id(),
-					op.predicate().name(), op.object() == null ? null : op.object().id(), op.objectText(), op.qualifier(),
-					op.scope() == null ? null : op.scope().id(), c.row().start(), c.row().startPrecision(), c.row().end(),
-					c.row().endPrecision(), c.rowEnded() ? 1 : 0, c.pending() ? "pending" : "current", kind, a.obs.id(),
-					eventId, span == null ? null : span[0], span == null ? null : span[1], rowRendering,
-					a.obs.specVersion(), callerConfidence, a.obs.observedAt().toString(), Instant.now().toString(),
-					c.row().startSource(), c.row().endSource(), op.mode());
+					op.predicate().name(), op.object() == null ? null : op.object().id(), op.objectText(),
+					op.qualifier(), op.scope() == null ? null : op.scope().id(), c.row().start(),
+					c.row().startPrecision(), c.row().end(), c.row().endPrecision(), c.rowEnded() ? 1 : 0,
+					c.pending() ? "pending" : "current", kind, a.obs.id(), eventId, span == null ? null : span[0],
+					span == null ? null : span[1], rowRendering, a.obs.specVersion(), callerConfidence,
+					a.obs.observedAt().toString(), Instant.now().toString(), c.row().startSource(), c.row().endSource(),
+					op.mode());
 			FactLedger.link(tx, id, a.obs.id(), "stated");
 			for (long[] ask : c.asks()) {
 				if (ask[2] < 0) {
@@ -491,7 +498,8 @@ public final class FactService {
 					c.pending() ? "pending" : "current", false), id, c.conflictWith(), c.why(), c.asks());
 		});
 		if (stored.conflictWith() != null) {
-			Question q = asks.conflict(a.obs, op.predicate(), stored.conflictWith(), stored.id(), rendering, stored.why());
+			Question q = asks.conflict(a.obs, op.predicate(), stored.conflictWith(), stored.id(), rendering,
+					stored.why());
 			questions.linkFact(q.id(), stored.id());
 			a.ask(questions.get(q.id()).orElseThrow());
 		}
@@ -501,14 +509,16 @@ public final class FactService {
 		return Optional.ofNullable(stored.out());
 	}
 
-	/** What the write of one fact produced; {@code out} is null when the row was the same proposal's own restatement. */
+	/**
+	 * What the write of one fact produced; {@code out} is null when the row was the same proposal's own restatement.
+	 */
 	private record Stored(FactOut out, long id, Fact conflictWith, String why, List<long[]> asks) {
 	}
 
 	/**
-	 * Resolves subject, object, and scope, and normalises the qualifier; null when a name is held behind a question
-	 * or a type mismatch was raised. A literal predicate keeps the object as text, and so does a negated class
-	 * ("I own nothing in Sweden") rather than minting an entity called "anything in Sweden".
+	 * Resolves subject, object, and scope, and normalises the qualifier; null when a name is held behind a question or
+	 * a type mismatch was raised. A literal predicate keeps the object as text, and so does a negated class ("I own
+	 * nothing in Sweden") rather than minting an entity called "anything in Sweden".
 	 */
 	private Operands operands(Application a, FactRef f, Predicate pred) {
 		Entity subject = f.subject() == null ? entities.owner() : resolveRef(a, f.subject());
@@ -526,7 +536,8 @@ public final class FactService {
 			if (("considering".equals(pred.name()) || "decided".equals(pred.name()))
 					&& RECOLLECTION.matcher(objectText).find()) {
 				a.warnings.add("'" + pred.name() + "' takes a plan or an option as its object, never a statement: \""
-						+ objectText + "\" reads as a recollection. Not stored; store what is recalled as the fact itself, "
+						+ objectText
+						+ "\" reads as a recollection. Not stored; store what is recalled as the fact itself, "
 						+ "with caller_confidence when unsure.");
 				return null;
 			}
@@ -567,7 +578,8 @@ public final class FactService {
 		}
 		String q = freeQualifier(pred) ? f.qualifier().trim() : f.qualifier().trim().toLowerCase(Locale.ROOT);
 		if (!freeQualifier(pred) && !pred.qualifiers().contains(q)) {
-			a.warnings.add("Qualifier '" + q + "' is not one of " + pred.qualifiers() + " for " + pred.name() + "; kept as given.");
+			a.warnings.add("Qualifier '" + q + "' is not one of " + pred.qualifiers() + " for " + pred.name()
+					+ "; kept as given.");
 		}
 		if (!pred.render().contains("{qualifier")) {
 			a.warnings.add("Qualifier '" + q + "' is stored but " + pred.name() + "'s template has no slot for it, "
@@ -578,8 +590,8 @@ public final class FactService {
 	}
 
 	/**
-	 * A new fact whose object contains, through {@code located_in}, the object of a current fact with the same
-	 * subject and predicate is almost certainly a restriction written as ownership ("owns Switzerland"): warn.
+	 * A new fact whose object contains, through {@code located_in}, the object of a current fact with the same subject
+	 * and predicate is almost certainly a restriction written as ownership ("owns Switzerland"): warn.
 	 */
 	private void warnIfContainsAnotherObject(Application a, Entity subject, Predicate pred, Entity object) {
 		if ("located_in".equals(pred.name()) || "part_of".equals(pred.name())) {
@@ -587,15 +599,16 @@ public final class FactService {
 		}
 		List<Long> siblings = db.read(tx -> tx.query("""
 				SELECT object_id FROM fact WHERE subject_id = ? AND predicate = ? AND status = 'current'
-				AND object_id IS NOT NULL AND object_id <> ?""", subject.id(), pred.name(), object.id()))
-				.stream().map(r -> r.lng("object_id")).toList();
+				AND object_id IS NOT NULL AND object_id <> ?""", subject.id(), pred.name(), object.id())).stream()
+				.map(r -> r.lng("object_id")).toList();
 		for (long sibling : siblings) {
 			if (db.read(tx -> Containment.ancestors(tx, sibling)).contains(object.id())) {
 				String inner = entities.nameOf(sibling);
 				a.warnings.add("'" + subject.name() + " " + pred.name() + " " + object.name() + "': " + object.name()
-						+ " contains " + inner + ", which " + subject.name() + " already " + pred.name() + ". A claim that "
-						+ "everything the subject " + pred.name() + " lies within a place is a restriction, not "
-						+ pred.name() + " of the place; if that was meant, keep it as text until restrictions are "
+						+ " contains " + inner + ", which " + subject.name() + " already " + pred.name()
+						+ ". A claim that " + "everything the subject " + pred.name()
+						+ " lies within a place is a restriction, not " + pred.name()
+						+ " of the place; if that was meant, keep it as text until restrictions are "
 						+ "representable.");
 				return;
 			}
@@ -609,12 +622,13 @@ public final class FactService {
 				AND COALESCE(object_id, -1) = ? AND COALESCE(lower(object_text), '') = ?
 				AND (? = 1 OR COALESCE(qualifier, '') = ?) AND COALESCE(scope_id, -1) = ? AND mode = ?
 				ORDER BY id LIMIT 1""", op.subject().id(), op.predicate().name(), op.objectId(), op.objectTextKey(),
-				freeQualifier(op.predicate()) ? 1 : 0, op.qualifier() == null ? "" : op.qualifier(), op.scopeId(), op.mode());
+				freeQualifier(op.predicate()) ? 1 : 0, op.qualifier() == null ? "" : op.qualifier(), op.scopeId(),
+				op.mode());
 	}
 
 	/**
-	 * A restatement of a fact on record: one row, one more corroboration. Said twice in the same observation
-	 * (stated, and opened by its event) it is neither. A fuller free-text qualifier replaces the wording on record.
+	 * A restatement of a fact on record: one row, one more corroboration. Said twice in the same observation (stated,
+	 * and opened by its event) it is neither. A fuller free-text qualifier replaces the wording on record.
 	 */
 	private Stored corroborate(Tx tx, Observation obs, Operands op, Fact e) {
 		if (e.observationId() == obs.id()) {
@@ -650,8 +664,8 @@ public final class FactService {
 		if (c.predicate() == null || c.predicate().isBlank()) {
 			throw MnemicException.invalidArgument("a closure needs a 'predicate'.");
 		}
-		Predicate pred = predicates.get(c.predicate()).orElseThrow(() -> MnemicException.invalidArgument(
-				"closure over unknown predicate '" + c.predicate() + "'."));
+		Predicate pred = predicates.get(c.predicate()).orElseThrow(
+				() -> MnemicException.invalidArgument("closure over unknown predicate '" + c.predicate() + "'."));
 		if (c.type() == null || c.type().isBlank()) {
 			throw MnemicException.invalidArgument("a closure needs a 'type' (the class it completes, e.g. place).");
 		}
@@ -661,12 +675,15 @@ public final class FactService {
 		}
 		String type = Names.type(c.type());
 		String rendering = renderer.sentence(pred, "closure", subject.name(), type, null, null);
-		String kind = derivationKind(new FactRef(c.subject(), c.predicate(), type, null, null, null, null, List.of(),
-				null, null), a.obs, a.warnings);
+		String kind = derivationKind(
+				new FactRef(c.subject(), c.predicate(), type, null, null, null, null, List.of(), null, null), a.obs,
+				a.warnings);
 		return Optional.of(db.write(tx -> {
-			Optional<Row> existing = tx.queryOne("""
-					SELECT * FROM fact WHERE subject_id = ? AND predicate = ? AND status = 'current' AND mode = 'closure'
-					AND lower(object_text) = ? ORDER BY id LIMIT 1""", subject.id(), pred.name(), type);
+			Optional<Row> existing = tx.queryOne(
+					"""
+							SELECT * FROM fact WHERE subject_id = ? AND predicate = ? AND status = 'current' AND mode = 'closure'
+							AND lower(object_text) = ? ORDER BY id LIMIT 1""",
+					subject.id(), pred.name(), type);
 			if (existing.isPresent()) {
 				Fact e = Fact.from(existing.get());
 				FactLedger.corroborate(tx, e.id(), a.obs.id(), a.obs.observedAt().toString());
@@ -732,11 +749,14 @@ public final class FactService {
 		if (ref == null || ref.isBlank()) {
 			return false;
 		}
-		return refs.containsKey(ref) || refs.containsKey(Names.norm(ref)) || EntityService.SELF.contains(Names.norm(ref))
-				|| REF_SHAPE.matcher(ref).matches() || !entities.exactIds(ref, List.of(), null).isEmpty();
+		return refs.containsKey(ref) || refs.containsKey(Names.norm(ref))
+				|| EntityService.SELF.contains(Names.norm(ref)) || REF_SHAPE.matcher(ref).matches()
+				|| !entities.exactIds(ref, List.of(), null).isEmpty();
 	}
 
-	/** Whether the qualifier is wording rather than identity: a predicate without a vocabulary does not key facts by it. */
+	/**
+	 * Whether the qualifier is wording rather than identity: a predicate without a vocabulary does not key facts by it.
+	 */
 	static boolean freeQualifier(Predicate p) {
 		return p.qualifiers() == null || p.qualifiers().isEmpty();
 	}
@@ -813,15 +833,15 @@ public final class FactService {
 
 	/**
 	 * Replaces a fact without destroying history (EVALUATION.md D1): the original is marked {@code corrected}, the
-	 * replacement is derived from the correction observation through the same path as any fact, and the two are
-	 * linked. A superseded fact can be corrected too, since an event may have closed it at the wrong date.
+	 * replacement is derived from the correction observation through the same path as any fact, and the two are linked.
+	 * A superseded fact can be corrected too, since an event may have closed it at the wrong date.
 	 */
 	public Corrected correct(long factId, Map<String, Object> replacement, String reason, Observation correction) {
 		Fact original = queries.get(factId).orElseThrow(() -> MnemicException.notFound("No fact f-" + factId));
 		if (!original.current() && !"superseded".equals(original.status())) {
 			throw MnemicException.conflict("f-" + factId + " is " + original.status() + ", not current; correct "
-					+ (original.supersededBy() != null ? "f-" + original.supersededBy() : "the current fact") + " instead.",
-					Map.of("status", original.status()));
+					+ (original.supersededBy() != null ? "f-" + original.supersededBy() : "the current fact")
+					+ " instead.", Map.of("status", original.status()));
 		}
 		db.write(tx -> tx.update("UPDATE fact SET status = 'corrected' WHERE id = ?", factId));
 		String subject = str(replacement, "subject",
@@ -829,19 +849,24 @@ public final class FactService {
 		String object = str(replacement, "object",
 				original.objectId() != null ? entities.nameOf(original.objectId()) : original.objectText());
 		String qualifier = str(replacement, "qualifier", original.qualifier());
-		String scope = str(replacement, "scope", original.scopeId() == null ? null : entities.nameOf(original.scopeId()));
+		String scope = str(replacement, "scope",
+				original.scopeId() == null ? null : entities.nameOf(original.scopeId()));
 		ValidTime vt = replacement.get("valid_time") instanceof Map<?, ?> m
 				? new ValidTime(str(m, "start", null), str(m, "end", null), str(m, "precision", null))
 				: (original.validStart() == null && original.validEnd() == null ? null
 						: new ValidTime(original.validStart(), original.validEnd(), original.validStartPrecision()));
-		Boolean ended = replacement.containsKey("ended") ? Boolean.TRUE.equals(replacement.get("ended")) : original.ended();
+		Boolean ended = replacement.containsKey("ended") ? Boolean.TRUE.equals(replacement.get("ended"))
+				: original.ended();
 		Double callerConfidence = replacement.containsKey("caller_confidence")
-				? (replacement.get("caller_confidence") == null ? null : ((Number) replacement.get("caller_confidence")).doubleValue())
+				? (replacement.get("caller_confidence") == null ? null
+						: ((Number) replacement.get("caller_confidence")).doubleValue())
 				: original.callerConfidence();
 		var ref = new FactRef(subject, original.predicate(), object, qualifier, scope, vt, ended, List.of(),
-				new Proposal.Derivation("explicit"), callerConfidence, "negated".equals(original.mode()) ? Boolean.TRUE : null,
+				new Proposal.Derivation("explicit"), callerConfidence,
+				"negated".equals(original.mode()) ? Boolean.TRUE : null,
 				"only".equals(original.mode()) ? Boolean.TRUE : null);
-		Applied a = apply(correction, new Proposal(Proposal.CURRENT_SPEC_VERSION, List.of(), List.of(), List.of(ref), List.of()));
+		Applied a = apply(correction,
+				new Proposal(Proposal.CURRENT_SPEC_VERSION, List.of(), List.of(), List.of(ref), List.of()));
 		if (a.facts().isEmpty()) {
 			db.write(tx -> tx.update("UPDATE fact SET status = 'current' WHERE id = ?", factId));
 			throw MnemicException.invalidArgument("The correction produced no fact: " + String.join("; ", a.warnings())
@@ -884,9 +909,8 @@ public final class FactService {
 
 	/**
 	 * Removes what an observation produced (EVALUATION.md D2, family O). A fact another observation also stated
-	 * survives, re-homed there with one corroboration fewer. {@code keepEntities} leaves the entities the
-	 * observation created in place, for a re-seed of the same text; forgetting for privacy removes those nothing
-	 * else references.
+	 * survives, re-homed there with one corroboration fewer. {@code keepEntities} leaves the entities the observation
+	 * created in place, for a re-seed of the same text; forgetting for privacy removes those nothing else references.
 	 */
 	public void forgetDerived(long observationId, boolean keepEntities) {
 		db.write(tx -> {
@@ -901,9 +925,11 @@ public final class FactService {
 					+ "AND status = 'open'", observationId);
 			for (Row r : tx.query("SELECT id FROM fact WHERE observation_id = ?", observationId)) {
 				long factId = r.lng("id");
-				List<Long> others = FactLedger.observationsOf(tx, factId).stream().filter(o -> o != observationId).toList();
+				List<Long> others = FactLedger.observationsOf(tx, factId).stream().filter(o -> o != observationId)
+						.toList();
 				if (!others.isEmpty()) {
-					tx.update("UPDATE fact SET observation_id = ?, corroborations = MAX(1, corroborations - 1) WHERE id = ?",
+					tx.update(
+							"UPDATE fact SET observation_id = ?, corroborations = MAX(1, corroborations - 1) WHERE id = ?",
 							others.getFirst(), factId);
 				}
 			}

@@ -33,8 +33,8 @@ import java.util.regex.Pattern;
 
 /**
  * Classifies a wrong answer: the reference answer was in the context the reader saw (ANSWER_ERROR) or it was not
- * (RETRIEVAL_MISS). Abstention items are ABSTENTION_MISS when the
- * reader answered instead of declining. The heuristic is a substring check, so treat it as a triage signal.
+ * (RETRIEVAL_MISS). Abstention items are ABSTENTION_MISS when the reader answered instead of declining. The heuristic
+ * is a substring check, so treat it as a triage signal.
  */
 public final class Diagnose {
 
@@ -43,7 +43,8 @@ public final class Diagnose {
 	}
 
 	private static final Pattern REFUSAL = Pattern.compile(
-			"(do not|don't|does not|doesn't|cannot|can't|no) (have|contain|find|include|know)|not (available|" + "mentioned|provided|enough|sufficient)|no information|unable to|insufficient",
+			"(do not|don't|does not|doesn't|cannot|can't|no) (have|contain|find|include|know)|not (available|"
+					+ "mentioned|provided|enough|sufficient)|no information|unable to|insufficient",
 			Pattern.CASE_INSENSITIVE);
 
 	private Diagnose() {

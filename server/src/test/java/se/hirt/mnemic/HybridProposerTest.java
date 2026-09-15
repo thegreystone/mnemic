@@ -37,7 +37,6 @@ import se.hirt.mnemic.observation.Source;
 import se.hirt.mnemic.proposal.ModelProposer;
 import se.hirt.mnemic.proposal.ModelProposer.Mode;
 
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -47,8 +46,8 @@ import static se.hirt.mnemic.TestHomes.fresh;
 import static se.hirt.mnemic.TestHomes.proposal;
 
 /**
- * The hybrid mode: a model the server is configured with proposes when the assistant did not (README, "Hybrid
- * mode"). The assistant's own proposal always wins; a failure is a warning, never a lost observation.
+ * The hybrid mode: a model the server is configured with proposes when the assistant did not (README, "Hybrid mode").
+ * The assistant's own proposal always wins; a failure is a warning, never a lost observation.
  */
 class HybridProposerTest {
 

@@ -44,14 +44,14 @@ import java.nio.file.Path;
 import java.util.Locale;
 
 /**
- * The ONNX Runtime C API over foreign-function downcalls, the entries of {@code OrtApi} the embedder uses and
- * nothing else. The API is a table of function pointers whose order is fixed by {@code onnxruntime_c_api.h}; the
- * indices below were read from the 1.30 header and hold for every later version, since the table is append-only.
- * Every distinct signature here is registered for the native image in {@code reachability-metadata.json}
- * ("foreign"); a new signature needs a new entry there, or the image throws at the first call.
- *
- * <p>Status handling: nearly every call returns an {@code OrtStatus*}, null on success. {@link #check} turns a
- * non-null status into an exception carrying the runtime's message and releases it.
+ * The ONNX Runtime C API over foreign-function downcalls, the entries of {@code OrtApi} the embedder uses and nothing
+ * else. The API is a table of function pointers whose order is fixed by {@code onnxruntime_c_api.h}; the indices below
+ * were read from the 1.30 header and hold for every later version, since the table is append-only. Every distinct
+ * signature here is registered for the native image in {@code reachability-metadata.json} ("foreign"); a new signature
+ * needs a new entry there, or the image throws at the first call.
+ * <p>
+ * Status handling: nearly every call returns an {@code OrtStatus*}, null on success. {@link #check} turns a non-null
+ * status into an exception carrying the runtime's message and releases it.
  */
 public final class OrtRuntime {
 
@@ -65,11 +65,11 @@ public final class OrtRuntime {
 
 	// OrtApi indices (onnxruntime_c_api.h, 1.30)
 	private static final int GET_ERROR_MESSAGE = 2, CREATE_ENV = 3, CREATE_SESSION = 7, RUN = 9,
-			CREATE_SESSION_OPTIONS = 10, SET_GRAPH_OPT = 23, SET_INTRA_THREADS = 24, INPUT_COUNT = 30, OUTPUT_COUNT = 31,
-			INPUT_NAME = 36, OUTPUT_NAME = 37, CREATE_TENSOR = 49, TENSOR_DATA = 51, DIMS_COUNT = 61, DIMS = 62,
-			TENSOR_INFO = 65, CPU_MEMINFO = 69, ALLOCATOR_FREE = 76, DEFAULT_ALLOCATOR = 78, RELEASE_ENV = 92,
-			RELEASE_STATUS = 93, RELEASE_MEMINFO = 94, RELEASE_SESSION = 95, RELEASE_VALUE = 96, RELEASE_TENSOR_INFO = 99,
-			RELEASE_SESSION_OPTIONS = 100;
+			CREATE_SESSION_OPTIONS = 10, SET_GRAPH_OPT = 23, SET_INTRA_THREADS = 24, INPUT_COUNT = 30,
+			OUTPUT_COUNT = 31, INPUT_NAME = 36, OUTPUT_NAME = 37, CREATE_TENSOR = 49, TENSOR_DATA = 51, DIMS_COUNT = 61,
+			DIMS = 62, TENSOR_INFO = 65, CPU_MEMINFO = 69, ALLOCATOR_FREE = 76, DEFAULT_ALLOCATOR = 78,
+			RELEASE_ENV = 92, RELEASE_STATUS = 93, RELEASE_MEMINFO = 94, RELEASE_SESSION = 95, RELEASE_VALUE = 96,
+			RELEASE_TENSOR_INFO = 99, RELEASE_SESSION_OPTIONS = 100;
 
 	/** ONNXTensorElementDataType */
 	static final int TYPE_FLOAT = 1, TYPE_INT64 = 7;
@@ -97,7 +97,8 @@ public final class OrtRuntime {
 			MethodHandle getApi = LINKER.downcallHandle(base.get(PTR, 0), FunctionDescriptor.of(PTR, I32));
 			MemorySegment table = (MemorySegment) getApi.invoke(API_VERSION);
 			if (table.address() == 0) {
-				throw new IllegalStateException("ONNX Runtime " + version + " does not serve API version " + API_VERSION);
+				throw new IllegalStateException(
+						"ONNX Runtime " + version + " does not serve API version " + API_VERSION);
 			}
 			api = table.reinterpret(512 * PTR.byteSize());
 		} catch (Throwable t) {
@@ -233,8 +234,8 @@ public final class OrtRuntime {
 	}
 
 	/**
-	 * Runs the session on int64 inputs of shape [1][n] and returns the first output as floats, with its
-	 * dimensions. Inputs and outputs live in the confined arena of the call; the returned array is Java's.
+	 * Runs the session on int64 inputs of shape [1][n] and returns the first output as floats, with its dimensions.
+	 * Inputs and outputs live in the confined arena of the call; the returned array is Java's.
 	 */
 	public Result run(MemorySegment session, String[] inputNames, long[][] inputs, String outputName) {
 		try (Arena a = Arena.ofConfined()) {
@@ -259,8 +260,8 @@ public final class OrtRuntime {
 				outNames.setAtIndex(PTR, 0, cstr(a, outputName));
 				MemorySegment outValues = a.allocate(PTR, 1);
 				outValues.setAtIndex(PTR, 0, MemorySegment.NULL);
-				check(run.invoke(session, MemorySegment.NULL, namesArr, valuesArr, (long) inputNames.length, outNames, 1L,
-						outValues));
+				check(run.invoke(session, MemorySegment.NULL, namesArr, valuesArr, (long) inputNames.length, outNames,
+						1L, outValues));
 				MemorySegment value = outValues.getAtIndex(PTR, 0);
 				try {
 					MemorySegment infoOut = a.allocate(PTR);

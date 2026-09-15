@@ -37,8 +37,8 @@ import java.time.Instant;
  * forgetting, and re-derivation).
  */
 public record Observation(long id, String text, Source source, Instant observedAt, Instant recordedAt,
-                          String proposalJson, Integer specVersion, boolean forgotten, String retiredAt,
-                          String retiredReason, Long supersededBy) {
+		String proposalJson, Integer specVersion, boolean forgotten, String retiredAt, String retiredReason,
+		Long supersededBy) {
 
 	public String ref() {
 		return "obs-" + id;
@@ -54,6 +54,7 @@ public record Observation(long id, String text, Source source, Instant observedA
 				r.str("assistant"), r.str("session"));
 		return new Observation(r.lng("id"), r.str("text"), source, Instant.parse(r.str("observed_at")),
 				Instant.parse(r.str("recorded_at")), r.str("proposal_json"), r.intOrNull("spec_version"),
-				r.str("forgotten_at") != null, r.str("retired_at"), r.str("retired_reason"), r.lngOrNull("superseded_by"));
+				r.str("forgotten_at") != null, r.str("retired_at"), r.str("retired_reason"),
+				r.lngOrNull("superseded_by"));
 	}
 }

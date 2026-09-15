@@ -47,13 +47,12 @@ public final class QuestionService {
 	}
 
 	public Question create(
-			String kind, Long observationId, Long factId, String subject, String predicate,
-			List<Map<String, Object>> candidates, String payload, String message) {
+		String kind, Long observationId, Long factId, String subject, String predicate,
+		List<Map<String, Object>> candidates, String payload, String message) {
 		long id = db.write(tx -> tx.insert("""
-		                                   INSERT INTO question(kind, status, observation_id, fact_id, subject, predicate, candidates, payload,
-		                                                        message, created_at) VALUES (?,'open',?,?,?,?,?,?,?,?)""",
-				kind, observationId, factId, subject, predicate, Json.write(candidates), payload, message,
-				Instant.now().toString()));
+				INSERT INTO question(kind, status, observation_id, fact_id, subject, predicate, candidates, payload,
+				                     message, created_at) VALUES (?,'open',?,?,?,?,?,?,?,?)""", kind, observationId,
+				factId, subject, predicate, Json.write(candidates), payload, message, Instant.now().toString()));
 		return get(id).orElseThrow();
 	}
 
@@ -72,9 +71,8 @@ public final class QuestionService {
 	}
 
 	public List<Question> open(int limit) {
-		return db.read(
-				tx -> tx.query("SELECT * FROM question WHERE status = 'open' ORDER BY id LIMIT ?", limit).stream()
-						.map(Question::from).toList());
+		return db.read(tx -> tx.query("SELECT * FROM question WHERE status = 'open' ORDER BY id LIMIT ?", limit)
+				.stream().map(Question::from).toList());
 	}
 
 	public long openCount() {

@@ -39,9 +39,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 /**
- * A text-to-ids tokenizer read from a model's own {@code tokenizer.json}. Two families cover every candidate
- * embedder: {@link Unigram} (sentencepiece, the XLM-R vocabulary most multilingual embedders share) and
- * {@link Bpe} (byte-level merges, the ModernBERT-based granite r2 models). The file says which.
+ * A text-to-ids tokenizer read from a model's own {@code tokenizer.json}. Two families cover every candidate embedder:
+ * {@link Unigram} (sentencepiece, the XLM-R vocabulary most multilingual embedders share) and {@link Bpe} (byte-level
+ * merges, the ModernBERT-based granite r2 models). The file says which.
  */
 public interface Tokenizer {
 
@@ -55,9 +55,9 @@ public interface Tokenizer {
 		JsonNode root = new ObjectMapper().readTree(Files.readString(tokenizerJson));
 		String type = root.path("model").path("type").asText();
 		return switch (type) {
-			case "Unigram" -> new Unigram(tokenizerJson);
-			case "BPE" -> new Bpe(root);
-			default -> throw new IOException("Unsupported tokenizer model '" + type + "' in " + tokenizerJson);
+		case "Unigram" -> new Unigram(tokenizerJson);
+		case "BPE" -> new Bpe(root);
+		default -> throw new IOException("Unsupported tokenizer model '" + type + "' in " + tokenizerJson);
 		};
 	}
 }

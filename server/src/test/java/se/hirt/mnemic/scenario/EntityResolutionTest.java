@@ -50,9 +50,8 @@ class EntityResolutionTest {
 					proposal().entity("e1", "Hooli", "organization").fact("self", "works_at", "e1"));
 			remember(e, "HooLi moved me to the platform org.",
 					proposal().entity("e1", "HooLi", "organization").fact("self", "works_at", "e1"));
-			remember(e, "HLI is headquartered in New York.",
-					proposal().entity("e1", "HLI", "organization", "Hooli").entity("e2", "New York", "place")
-							.fact("e1", "located_in", "e2"));
+			remember(e, "HLI is headquartered in New York.", proposal().entity("e1", "HLI", "organization", "Hooli")
+					.entity("e2", "New York", "place").fact("e1", "located_in", "e2"));
 			List<Entity> spotted = e.entities().spot("HLI");
 			assertEquals(1, spotted.size());
 			Entity hooliEntity = spotted.getFirst();
@@ -62,7 +61,8 @@ class EntityResolutionTest {
 			// Aliases are keyed on their normalised form, so "HooLi" folds into "Hooli" and still resolves.
 			assertTrue(aliases.contains("HLI"), aliases.toString());
 			assertEquals(1, e.entities().spot("hooli").size());
-			assertEquals(1, e.facts().factsOf(hooliEntity.id()).stream().filter(f -> f.predicate().equals("works_at")).count(),
+			assertEquals(1,
+					e.facts().factsOf(hooliEntity.id()).stream().filter(f -> f.predicate().equals("works_at")).count(),
 					"the repeated works_at corroborated, not duplicated");
 			assertTrue(e.facts().factsOf(hooliEntity.id()).stream().anyMatch(f -> f.predicate().equals("located_in")));
 		}
@@ -74,9 +74,8 @@ class EntityResolutionTest {
 		try (Engine e = engine("b3")) {
 			remember(e, "I'm reading Java Concurrency in Practice.",
 					proposal().entity("e1", "Java Concurrency in Practice", "book").fact("self", "prefers", "e1"));
-			remember(e, "Java is the language Mnemic is written in.",
-					proposal().entity("e1", "Mnemic", "project").entity("e2", "Java", "technology")
-							.fact("e1", "uses", "e2"));
+			remember(e, "Java is the language Mnemic is written in.", proposal().entity("e1", "Mnemic", "project")
+					.entity("e2", "Java", "technology").fact("e1", "uses", "e2"));
 			remember(e, "Java the island is beautiful.",
 					proposal().entity("e1", "Java", "place").fact("self", "prefers", "e1"));
 			Entity tech = e.entities().byRef("Java").orElseThrow();
@@ -107,9 +106,8 @@ class EntityResolutionTest {
 		try (Engine e = engine("b5")) {
 			remember(e, "I live in Schübelbach.",
 					proposal().entity("e1", "Schübelbach", "place").fact("self", "lives_in", "e1"));
-			remember(e, "Mattias moved there in 2014.",
-					proposal().entity("e1", "Mattias", "person").entity("e2", "Schübelbach", "place")
-							.fact("e1", "lives_in", "e2"));
+			remember(e, "Mattias moved there in 2014.", proposal().entity("e1", "Mattias", "person")
+					.entity("e2", "Schübelbach", "place").fact("e1", "lives_in", "e2"));
 			Entity owner = e.entities().owner();
 			assertEquals("Mattias Sandell", owner.name());
 			List<String> aliases = e.entities().aliases(owner.id());

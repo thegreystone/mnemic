@@ -39,29 +39,28 @@ import java.util.Set;
  * the name; they are reachable lexically only.
  *
  * @param functionalScope
- *        {@code null}, or {@code "scope"} meaning functional per (subject, scope entity)
+ *            {@code null}, or {@code "scope"} meaning functional per (subject, scope entity)
  * @param volatility
- * 		low | medium | high; drives the staleness annotation, never ranking
+ *            low | medium | high; drives the staleness annotation, never ranking
  * @param render
- * 		template with {@code {subject} {object} {scope} {qualifier|default}} and optional {@code [[ ... ]]} segments that
- * 		vanish when a placeholder inside them is empty
+ *            template with {@code {subject} {object} {scope} {qualifier|default}} and optional {@code [[ ... ]]}
+ *            segments that vanish when a placeholder inside them is empty
  */
 public record Predicate(String name, String description, List<String> domain, List<String> range, boolean functional,
-                        String functionalScope, boolean symmetric, String inverse, String volatility,
-                        List<String> lexicon, String render, List<String> qualifiers, List<String> aliases,
-                        List<String> inverseLexicon, Long definedBy, boolean seed) {
+		String functionalScope, boolean symmetric, String inverse, String volatility, List<String> lexicon,
+		String render, List<String> qualifiers, List<String> aliases, List<String> inverseLexicon, Long definedBy,
+		boolean seed) {
 
 	/**
-	 * Qualifiers that name the same relation from the two sides of it: brother and sister are one relation seen
-	 * from a male and a female subject. A symmetric fact is stored once, with the qualifier describing its
-	 * subject; asked from the other side ("Mattias's half-sister" against "Mattias is Clara's half-brother") the
-	 * question's qualifier must match the stored one's family, since the other person's gender is not on record.
+	 * Qualifiers that name the same relation from the two sides of it: brother and sister are one relation seen from a
+	 * male and a female subject. A symmetric fact is stored once, with the qualifier describing its subject; asked from
+	 * the other side ("Mattias's half-sister" against "Mattias is Clara's half-brother") the question's qualifier must
+	 * match the stored one's family, since the other person's gender is not on record.
 	 */
-	private static final List<Set<String>> QUALIFIER_FAMILIES = List.of(
-			Set.of("brother", "sister", "sibling"), Set.of("half-brother", "half-sister", "half-sibling"),
-			Set.of("stepbrother", "stepsister", "stepsibling"), Set.of("twin", "twin brother", "twin sister"),
-			Set.of("wife", "husband", "spouse", "partner"), Set.of("mother", "father", "parent", "mom", "dad"),
-			Set.of("stepmother", "stepfather", "stepparent"));
+	private static final List<Set<String>> QUALIFIER_FAMILIES = List.of(Set.of("brother", "sister", "sibling"),
+			Set.of("half-brother", "half-sister", "half-sibling"), Set.of("stepbrother", "stepsister", "stepsibling"),
+			Set.of("twin", "twin brother", "twin sister"), Set.of("wife", "husband", "spouse", "partner"),
+			Set.of("mother", "father", "parent", "mom", "dad"), Set.of("stepmother", "stepfather", "stepparent"));
 
 	/**
 	 * Days without confirmation after which an open fact on this predicate is called likely changed. A timeless
@@ -69,9 +68,9 @@ public record Predicate(String name, String description, List<String> domain, Li
 	 */
 	public int stalenessDays() {
 		return switch (volatility == null ? "medium" : volatility) {
-			case "high" -> 180;
-			case "medium" -> 365;
-			default -> Integer.MAX_VALUE;
+		case "high" -> 180;
+		case "medium" -> 365;
+		default -> Integer.MAX_VALUE;
 		};
 	}
 
@@ -115,8 +114,8 @@ public record Predicate(String name, String description, List<String> domain, Li
 				|| (Names.isPlace(type) && range.contains("place"));
 	}
 
-	private static final Set<String> AUXILIARY = Set.of("is", "are", "was", "were", "has", "had", "does", "did",
-			"can", "will", "would", "should");
+	private static final Set<String> AUXILIARY = Set.of("is", "are", "was", "were", "has", "had", "does", "did", "can",
+			"will", "would", "should");
 	private static final Map<String, String> IRREGULAR = Map.of("decided", "decide", "died", "die", "has", "have",
 			"moved", "move", "founded", "found", "married", "marry", "left", "leave");
 
@@ -124,11 +123,11 @@ public record Predicate(String name, String description, List<String> domain, Li
 	 * The negation of a rendered fact (EVALUATION.md, family Q): "{subject} owns {object}" → "{subject} does not own
 	 * {object}", "{subject} was born in" → "was not born in". {@code negatedTemplate} is the language's own template
 	 * when the registry has one; otherwise the English rule applies, and a template that does not start with the
-	 * subject, a verb the rule cannot lemmatise, or another language falls back to a "not:" prefix before the
-	 * positive rendering, so nothing reads as asserted.
+	 * subject, a verb the rule cannot lemmatise, or another language falls back to a "not:" prefix before the positive
+	 * rendering, so nothing reads as asserted.
 	 */
-	public String renderNegated(Lang lang, String negatedTemplate, String subject, String object, String scope,
-			String qualifier) {
+	public String renderNegated(
+		Lang lang, String negatedTemplate, String subject, String object, String scope, String qualifier) {
 		if (negatedTemplate != null && !negatedTemplate.isBlank()) {
 			return new Predicate(name, description, domain, range, functional, functionalScope, symmetric, inverse,
 					volatility, lexicon, negatedTemplate, qualifiers, aliases, inverseLexicon, definedBy, seed)
@@ -213,8 +212,9 @@ public record Predicate(String name, String description, List<String> domain, Li
 			}
 			sb.append(out, i, open);
 			String segment = out.substring(open + 2, close);
-			boolean empty = (segment.contains("{scope}") && isBlank(scope)) || (segment.contains("{object}") && isBlank(
-					object)) || (segment.contains("{qualifier}") && isBlank(qualifier));
+			boolean empty = (segment.contains("{scope}") && isBlank(scope))
+					|| (segment.contains("{object}") && isBlank(object))
+					|| (segment.contains("{qualifier}") && isBlank(qualifier));
 			if (!empty) {
 				sb.append(segment);
 			}

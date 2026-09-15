@@ -71,9 +71,9 @@ class ScenarioCoverageTest {
 
 		var tagged = new TreeMap<String, String>(); // id -> "implemented" | "pending"
 		try (Stream<Path> files = Files.walk(Path.of("src", "test", "java"))) {
-			for (Path f : files.filter(p -> p.toString().endsWith(".java") && !p.getFileName().toString()
-							.equals("ScenarioCoverageTest.java") && !p.getFileName().toString().equals("Scenario.java"))
-					.toList()) {
+			for (Path f : files.filter(p -> p.toString().endsWith(".java")
+					&& !p.getFileName().toString().equals("ScenarioCoverageTest.java")
+					&& !p.getFileName().toString().equals("Scenario.java")).toList()) {
 				String src = Files.readString(f, StandardCharsets.UTF_8);
 				for (String chunk : src.split("@Test")) {
 					Matcher t = TAG.matcher(chunk);

@@ -53,7 +53,7 @@ import java.util.*;
 public final class EventTypeRegistry {
 
 	public record EventType(String name, String description, List<String> opens, List<String> closes,
-	                        List<String> supersedes, boolean endsEntity, boolean seed, List<String> lexicon) {
+			List<String> supersedes, boolean endsEntity, boolean seed, List<String> lexicon) {
 	}
 
 	private static final ObjectMapper JSON = new ObjectMapper();
@@ -124,15 +124,15 @@ public final class EventTypeRegistry {
 	}
 
 	private static EventType type(
-			String name, String description, List<String> opens, List<String> closes,
-			List<String> supersedes, List<String> lexicon) {
+		String name, String description, List<String> opens, List<String> closes, List<String> supersedes,
+		List<String> lexicon) {
 		return new EventType(name, description, opens, closes, supersedes, false, true, lexicon);
 	}
 
 	/**
 	 * The event type a question names, if any: a registered type through its lexicon ("buy" → purchased), an
-	 * unregistered one through its own name, longest term first. {@code storedTypes} are the type names present
-	 * in the store, so an event a caller recorded under a type nobody registered is still reachable.
+	 * unregistered one through its own name, longest term first. {@code storedTypes} are the type names present in the
+	 * store, so an event a caller recorded under a type nobody registered is still reachable.
 	 */
 	public synchronized Optional<String> cue(List<String> tokens, List<String> storedTypes) {
 		String best = null;
@@ -175,10 +175,11 @@ public final class EventTypeRegistry {
 		Map<String, EventType> existing = load();
 		for (EventType t : seed()) {
 			if (!existing.containsKey(t.name())) {
-				db.write(tx -> tx.insert("INSERT INTO event_type(name, description, opens, closes, supersedes, ends_entity, "
-						+ "lexicon, seed, created_at) VALUES (?,?,?,?,?,?,?,1,?)", t.name(), t.description(), json(t.opens()),
-						json(t.closes()), json(t.supersedes()), t.endsEntity() ? 1 : 0, json(t.lexicon()),
-						Instant.now().toString()));
+				db.write(tx -> tx.insert(
+						"INSERT INTO event_type(name, description, opens, closes, supersedes, ends_entity, "
+								+ "lexicon, seed, created_at) VALUES (?,?,?,?,?,?,?,1,?)",
+						t.name(), t.description(), json(t.opens()), json(t.closes()), json(t.supersedes()),
+						t.endsEntity() ? 1 : 0, json(t.lexicon()), Instant.now().toString()));
 			}
 		}
 		cache = null;

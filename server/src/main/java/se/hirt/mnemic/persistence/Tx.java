@@ -47,7 +47,7 @@ public final class Tx {
 		this.writable = writable;
 	}
 
-	public List<Row> query(String sql, Object... args) {
+	public List<Row> query(String sql, Object ... args) {
 		try (PreparedStatement ps = conn.prepareStatement(sql)) {
 			bind(ps, args);
 			try (ResultSet rs = ps.executeQuery()) {
@@ -58,17 +58,17 @@ public final class Tx {
 		}
 	}
 
-	public Optional<Row> queryOne(String sql, Object... args) {
+	public Optional<Row> queryOne(String sql, Object ... args) {
 		List<Row> rows = query(sql, args);
 		return rows.isEmpty() ? Optional.empty() : Optional.of(rows.getFirst());
 	}
 
-	public long queryLong(String sql, Object... args) {
+	public long queryLong(String sql, Object ... args) {
 		return queryOne(sql, args).map(r -> ((Number) r.asMap().values().iterator().next()).longValue())
 				.orElseThrow(() -> MnemicException.internal("Scalar query returned no row", null));
 	}
 
-	public int update(String sql, Object... args) {
+	public int update(String sql, Object ... args) {
 		requireWritable();
 		try (PreparedStatement ps = conn.prepareStatement(sql)) {
 			bind(ps, args);
@@ -79,7 +79,7 @@ public final class Tx {
 	}
 
 	/** Executes an INSERT and returns the new rowid. */
-	public long insert(String sql, Object... args) {
+	public long insert(String sql, Object ... args) {
 		requireWritable();
 		try (PreparedStatement ps = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
 			bind(ps, args);
@@ -110,7 +110,7 @@ public final class Tx {
 		}
 	}
 
-	private static void bind(PreparedStatement ps, Object... args) throws SQLException {
+	private static void bind(PreparedStatement ps, Object ... args) throws SQLException {
 		for (int i = 0; i < args.length; i++) {
 			ps.setObject(i + 1, args[i]);
 		}

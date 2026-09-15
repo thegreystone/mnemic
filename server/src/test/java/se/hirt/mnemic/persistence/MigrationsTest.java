@@ -65,13 +65,13 @@ class MigrationsTest {
 	@Test
 	void triggerBodiesAreNotSplitOnInnerSemicolons() {
 		String sql = """
-		             CREATE TABLE t (id INTEGER);
-		             CREATE TRIGGER t_ai AFTER INSERT ON t BEGIN
-		                 INSERT INTO x VALUES (1);
-		                 INSERT INTO y VALUES (2);
-		             END;
-		             CREATE INDEX i ON t(id);
-		             """;
+				CREATE TABLE t (id INTEGER);
+				CREATE TRIGGER t_ai AFTER INSERT ON t BEGIN
+				    INSERT INTO x VALUES (1);
+				    INSERT INTO y VALUES (2);
+				END;
+				CREATE INDEX i ON t(id);
+				""";
 		List<String> statements = Migrations.splitStatements(sql);
 		assertEquals(3, statements.size(), statements.toString());
 		assertTrue(statements.get(1).startsWith("CREATE TRIGGER") && statements.get(1).endsWith("END"),
@@ -84,8 +84,8 @@ class MigrationsTest {
 		Path file = dir.resolve("mnemic.db");
 		try (Database db = new Database(file)) {
 			db.write(tx -> {
-				tx.update(
-						"INSERT INTO schema_version(version, description, checksum, applied_at) " + "VALUES (999, 'future', 'x', 'now')");
+				tx.update("INSERT INTO schema_version(version, description, checksum, applied_at) "
+						+ "VALUES (999, 'future', 'x', 'now')");
 				return null;
 			});
 		}

@@ -50,29 +50,28 @@ import static se.hirt.mnemic.TestHomes.engine;
 import static se.hirt.mnemic.TestHomes.recall;
 
 /**
- * EVALUATION.md family Q: known-false facts and exclusive restrictions (written 2026-09-10 from two probes
- * against a real store, built with the K family in M4). The proposals are written as JSON so that the two new
- * keys, {@code negated} and {@code only}, and the {@code closures} list are spelled the way a caller sends them.
- *
- * <p>The shapes:
+ * EVALUATION.md family Q: known-false facts and exclusive restrictions (written 2026-09-10 from two probes against a
+ * real store, built with the K family in M4). The proposals are written as JSON so that the two new keys,
+ * {@code negated} and {@code only}, and the {@code closures} list are spelled the way a caller sends them.
+ * <p>
+ * The shapes:
  * <ul>
- * <li>{@code "negated": true} on a fact: the subject does not stand in the relation to the object. The object is
- * an entity ("I do not own the Willisau apartment") or a literal class ("anything in Sweden").</li>
- * <li>{@code "only": true} on a fact whose object is a place: an exclusive restriction. Every asserted fact under
- * the predicate for the subject whose object can be located must be located, through the {@code located_in}
- * chain, within the bound. Objects that cannot be located (a domain, a printer) are outside the class and
- * untouched. Nothing else in the class is so.</li>
- * <li>{@code closures: [{subject, predicate, type}]}: a completeness marker. The recorded facts under the
- * predicate for the subject whose objects have that type are all of them, so an absent fact in the class is a
- * no.</li>
+ * <li>{@code "negated": true} on a fact: the subject does not stand in the relation to the object. The object is an
+ * entity ("I do not own the Willisau apartment") or a literal class ("anything in Sweden").</li>
+ * <li>{@code "only": true} on a fact whose object is a place: an exclusive restriction. Every asserted fact under the
+ * predicate for the subject whose object can be located must be located, through the {@code located_in} chain, within
+ * the bound. Objects that cannot be located (a domain, a printer) are outside the class and untouched. Nothing else in
+ * the class is so.</li>
+ * <li>{@code closures: [{subject, predicate, type}]}: a completeness marker. The recorded facts under the predicate for
+ * the subject whose objects have that type are all of them, so an absent fact in the class is a no.</li>
  * </ul>
- * Neither is listed among the subject's positive facts; both appear on a {@code bounds:} line. A contradiction
- * on the same key is a conflict question with the existing answers ({@code ended}, {@code wrong},
- * {@code reject}). Containment the chain cannot decide is a {@code containment} question, never an assertion.
+ * Neither is listed among the subject's positive facts; both appear on a {@code bounds:} line. A contradiction on the
+ * same key is a conflict question with the existing answers ({@code ended}, {@code wrong}, {@code reject}). Containment
+ * the chain cannot decide is a {@code containment} question, never an assertion.
  */
 class NegationTest {
 
-	private static RememberOutcome remember(Engine e, String text, String proposalJson, Resolve... resolves) {
+	private static RememberOutcome remember(Engine e, String text, String proposalJson, Resolve ... resolves) {
 		return e.remember(text, Source.user(), null, proposalJson == null ? null : Proposal.parse(proposalJson),
 				Proposal.CURRENT_SPEC_VERSION, null, List.of(resolves));
 	}
@@ -152,16 +151,18 @@ class NegationTest {
 	void aClassNegationAnswersThePolarQuestionOverTheClass() {
 		try (Engine e = engine("q3-class")) {
 			swissProperties(e);
-			remember(e, "I relocated from Sweden to Switzerland in 2014. I own nothing in Sweden.", """
-					{"entities": [{"ref": "e1", "name": "Sweden", "type": "country"},
-					              {"ref": "e2", "name": "Switzerland", "type": "country"}],
-					 "events": [{"ref": "ev1", "type": "relocated", "participants": ["self", "e1", "e2"],
-					             "valid_time": {"start": "2014"}}],
-					 "facts": [{"subject": "self", "predicate": "owns", "object": "anything in Sweden", "negated": true}]}""");
+			remember(e, "I relocated from Sweden to Switzerland in 2014. I own nothing in Sweden.",
+					"""
+							{"entities": [{"ref": "e1", "name": "Sweden", "type": "country"},
+							              {"ref": "e2", "name": "Switzerland", "type": "country"}],
+							 "events": [{"ref": "ev1", "type": "relocated", "participants": ["self", "e1", "e2"],
+							             "valid_time": {"start": "2014"}}],
+							 "facts": [{"subject": "self", "predicate": "owns", "object": "anything in Sweden", "negated": true}]}""");
 			RecallResult r = recall(e, "does Mattias own any property in Sweden");
 			assertEquals("known_false", r.structured().state(), r.text());
 			assertTrue(r.text().contains("does not own anything in Sweden"), r.text());
-			assertFalse(r.text().contains("are the answer"), "the Swiss purchase and the move are context: " + r.text());
+			assertFalse(r.text().contains("are the answer"),
+					"the Swiss purchase and the move are context: " + r.text());
 		}
 	}
 
@@ -223,7 +224,8 @@ class NegationTest {
 			// Kanton Schwyz: not a conflict (K7), a containment question.
 			assertEquals(1, o.applied().questions().size(), o.applied().questions().toString());
 			assertEquals("containment", firstQuestion(o).get("kind"));
-			assertTrue(String.valueOf(firstQuestion(o).get("message")).contains("Kanton Schwyz"), firstQuestion(o).toString());
+			assertTrue(String.valueOf(firstQuestion(o).get("message")).contains("Kanton Schwyz"),
+					firstQuestion(o).toString());
 			assertEquals("current", o.applied().facts().getFirst().status(),
 					"an undecided chain holds nothing back; the restriction is what the user said");
 
@@ -238,15 +240,19 @@ class NegationTest {
 			// The canton's containment is not known, so the question about it is neither yes nor no.
 			RecallResult schwyz = recall(e, "does Mattias own property in Kanton Schwyz");
 			assertTrue(schwyz.structured().matched(), schwyz.text());
-			assertTrue(schwyz.text().contains("not known"), "whether Kanton Schwyz is within Switzerland: " + schwyz.text());
+			assertTrue(schwyz.text().contains("not known"),
+					"whether Kanton Schwyz is within Switzerland: " + schwyz.text());
 
 			// Answering the containment question stores the missing link and settles it.
 			remember(e, "Yes, Schwyz is a Swiss canton.", null, new Resolve(questionId(o), "yes"));
 			RecallResult after = recall(e, "does Mattias own property in Kanton Schwyz");
 			assertFalse(after.text().contains("not known"), after.text());
 			var canton = e.entities().byRef("Kanton Schwyz").orElseThrow();
-			assertTrue(e.facts().factsOf(canton.id()).stream().anyMatch(f -> "located_in".equals(f.predicate())
-					&& f.rendering().equals("Kanton Schwyz is located in Switzerland")), "the answer is stored as a fact");
+			assertTrue(
+					e.facts().factsOf(canton.id()).stream()
+							.anyMatch(f -> "located_in".equals(f.predicate())
+									&& f.rendering().equals("Kanton Schwyz is located in Switzerland")),
+					"the answer is stored as a fact");
 		}
 	}
 
@@ -331,11 +337,12 @@ class NegationTest {
 	@Scenario("Q11")
 	void aPastTenseQuestionIsAnsweredByHistoryAndNeverDecidedFalse() {
 		try (Engine e = engine("q11-past")) {
-			remember(e, "I worked at Initrode until 2018, then joined Hooli.", """
-					{"entities": [{"ref": "e1", "name": "Initrode", "type": "organization"},
-					              {"ref": "e2", "name": "Hooli", "type": "organization"}],
-					 "facts": [{"subject": "self", "predicate": "works_at", "object": "e1", "valid_time": {"end": "2018"}},
-					           {"subject": "self", "predicate": "works_at", "object": "e2", "valid_time": {"start": "2018"}}]}""");
+			remember(e, "I worked at Initrode until 2018, then joined Hooli.",
+					"""
+							{"entities": [{"ref": "e1", "name": "Initrode", "type": "organization"},
+							              {"ref": "e2", "name": "Hooli", "type": "organization"}],
+							 "facts": [{"subject": "self", "predicate": "works_at", "object": "e1", "valid_time": {"end": "2018"}},
+							           {"subject": "self", "predicate": "works_at", "object": "e2", "valid_time": {"start": "2018"}}]}""");
 			RecallResult initrode = recall(e, "did Mattias work at Initrode");
 			assertTrue(initrode.structured().matched(), initrode.text());
 			assertFalse(initrode.text().contains("KNOWN FALSE"), initrode.text());
@@ -399,7 +406,8 @@ class NegationTest {
 			assertFalse(lathe.text().contains("only within"), lathe.text());
 			// The whole predicate: everything.
 			RecallResult all = recall(e, "what does Mattias own");
-			assertTrue(all.text().contains("shop machines") && all.text().contains("only within Switzerland"), all.text());
+			assertTrue(all.text().contains("shop machines") && all.text().contains("only within Switzerland"),
+					all.text());
 		}
 	}
 

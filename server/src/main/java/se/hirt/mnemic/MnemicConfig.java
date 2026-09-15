@@ -46,9 +46,9 @@ public interface MnemicConfig {
 	Optional<String> owner();
 
 	/**
-	 * The owner's other names, seeded as aliases of the owner entity at init so that a nickname, a surname, an
-	 * e-mail address, or a code-hosting handle in a query or a proposal resolves to the owner. All optional; a
-	 * store used for code work wants the handle and the addresses commits and issues carry.
+	 * The owner's other names, seeded as aliases of the owner entity at init so that a nickname, a surname, an e-mail
+	 * address, or a code-hosting handle in a query or a proposal resolves to the owner. All optional; a store used for
+	 * code work wants the handle and the addresses commits and issues carry.
 	 */
 	Optional<List<String>> ownerAliases();
 
@@ -75,15 +75,17 @@ public interface MnemicConfig {
 	 */
 	Optional<String> vecLibrary();
 
-	/** The ONNX Runtime shared library; when set, {@code status} reports what the probe found. Env: MNEMIC_ORT_LIBRARY. */
+	/**
+	 * The ONNX Runtime shared library; when set, {@code status} reports what the probe found. Env: MNEMIC_ORT_LIBRARY.
+	 */
 	Optional<String> ortLibrary();
 
 	/** A directory holding the embedding model (model.onnx, tokenizer.json). Env: MNEMIC_EMBED_MODEL. */
 	Optional<String> embedModel();
 
 	/**
-	 * Semantic recall: {@code auto} (default) fetches the runtime and the model on first use into the models
-	 * directory and loads them in the background; {@code off} disables the channel; Env: MNEMIC_EMBED.
+	 * Semantic recall: {@code auto} (default) fetches the runtime and the model on first use into the models directory
+	 * and loads them in the background; {@code off} disables the channel; Env: MNEMIC_EMBED.
 	 */
 	@WithDefault("auto")
 	String embed();
@@ -91,7 +93,10 @@ public interface MnemicConfig {
 	/** Where fetched models live, shared by every data home: {@code ~/.mnemic/models}. Env: MNEMIC_MODELS_DIR. */
 	Optional<String> modelsDir();
 
-	/** A mirror laid out like the model's Hugging Face repository, in place of the published one. Env: MNEMIC_EMBED_MODEL_URL. */
+	/**
+	 * A mirror laid out like the model's Hugging Face repository, in place of the published one. Env:
+	 * MNEMIC_EMBED_MODEL_URL.
+	 */
 	Optional<String> embedModelUrl();
 
 	/** The language of the fact layer: en (default) or de. Observations stay verbatim. Env: MNEMIC_LANGUAGE. */

@@ -47,15 +47,17 @@ import java.util.Map;
 
 /**
  * The embedder bake-off: every candidate model over the same personal-note samples, three languages of questions
- * against English texts, through the same tokenizer and runtime the server uses. Reports recall at 1 and 3 and the
- * mean reciprocal rank per language, the share of group questions that rank their own item above the others
- * sharing its name, the mean similarity of a question to its own item (how far a language sits from the texts),
- * and the cost: dimensions, file size, load time, milliseconds per sentence.
+ * against English texts, through the same tokenizer and runtime the server uses. Reports recall at 1 and 3 and the mean
+ * reciprocal rank per language, the share of group questions that rank their own item above the others sharing its
+ * name, the mean similarity of a question to its own item (how far a language sits from the texts), and the cost:
+ * dimensions, file size, load time, milliseconds per sentence.
  *
- * <pre>bakeoff --models dir1,dir2,... --ort-library lib --samples bench/bakeoff/personal-notes.json --out results.json</pre>
+ * <pre>
+ * bakeoff --models dir1,dir2,... --ort-library lib --samples bench/bakeoff/personal-notes.json --out results.json
+ * </pre>
  *
- * A directory's name is the model's id; a suffix such as {@code -int8} names a variant of the same model and
- * keeps its pooling and prefixes.
+ * A directory's name is the model's id; a suffix such as {@code -int8} names a variant of the same model and keeps its
+ * pooling and prefixes.
  */
 final class Bakeoff {
 
@@ -81,8 +83,9 @@ final class Bakeoff {
 		ObjectMapper json = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
 		Samples samples = load(json.readTree(Files.readString(samplesFile)));
 		var results = new ArrayList<Map<String, Object>>();
-		System.out.printf(Locale.ROOT, "%d items, %d in groups, languages %s%n%n", samples.items().size(),
-				samples.items().stream().filter(i -> i.group() != null && samples.groupSize().get(i.group()) > 1).count(),
+		System.out.printf(
+				Locale.ROOT, "%d items, %d in groups, languages %s%n%n", samples.items().size(), samples.items()
+						.stream().filter(i -> i.group() != null && samples.groupSize().get(i.group()) > 1).count(),
 				samples.languages());
 		for (Path dir : models) {
 			Map<String, Object> row = evaluate(dir, library, samples, repeat);
@@ -256,12 +259,13 @@ final class Bakeoff {
 		var sb = new StringBuilder();
 		sb.append(String.format(Locale.ROOT, "%-42s dims %4s %5s MB  %6.2f ms  R@1 %.3f R@3 %.3f MRR %.3f group %s |",
 				row.get("model"), row.get("dims"), row.get("file_mb"), (Double) row.get("ms_per_sentence_p50"),
-				(Double) row.get("recall_at_1"), (Double) row.get("recall_at_3"), (Double) row.get("mrr"), row.get("group_accuracy")));
+				(Double) row.get("recall_at_1"), (Double) row.get("recall_at_3"), (Double) row.get("mrr"),
+				row.get("group_accuracy")));
 		var per = (Map<String, Map<String, Object>>) row.get("languages");
 		for (String lang : languages) {
 			var l = per.get(lang);
-			sb.append(String.format(Locale.ROOT, " %s R@1 %.3f MRR %.3f sim %.2f", lang, (Double) l.get("recall_at_1"), (Double) l.get("mrr"),
-					(Double) l.get("mean_similarity_to_own")));
+			sb.append(String.format(Locale.ROOT, " %s R@1 %.3f MRR %.3f sim %.2f", lang, (Double) l.get("recall_at_1"),
+					(Double) l.get("mrr"), (Double) l.get("mean_similarity_to_own")));
 		}
 		return sb.toString();
 	}
@@ -283,13 +287,15 @@ final class Bakeoff {
 				sb.append("| ").append(row.get("model")).append(" | error: ").append(row.get("error")).append(" |\n");
 				continue;
 			}
-			sb.append(String.format(Locale.ROOT, "| %s | %s | %s | %.1f | %.3f | %.3f | %.3f | %s |", row.get("model"), row.get("dims"),
-					row.get("file_mb"), (Double) row.get("ms_per_sentence_p50"), (Double) row.get("recall_at_1"),
-					(Double) row.get("recall_at_3"), (Double) row.get("mrr"), row.get("group_accuracy")));
+			sb.append(String.format(Locale.ROOT, "| %s | %s | %s | %.1f | %.3f | %.3f | %.3f | %s |", row.get("model"),
+					row.get("dims"), row.get("file_mb"), (Double) row.get("ms_per_sentence_p50"),
+					(Double) row.get("recall_at_1"), (Double) row.get("recall_at_3"), (Double) row.get("mrr"),
+					row.get("group_accuracy")));
 			var per = (Map<String, Map<String, Object>>) row.get("languages");
 			for (String lang : languages) {
 				var l = per.get(lang);
-				sb.append(String.format(Locale.ROOT, " %.3f | %.3f |", (Double) l.get("recall_at_1"), (Double) l.get("mrr")));
+				sb.append(String.format(Locale.ROOT, " %.3f | %.3f |", (Double) l.get("recall_at_1"),
+						(Double) l.get("mrr")));
 			}
 			sb.append("\n");
 		}

@@ -37,16 +37,16 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Housekeeping over stored knowledge (EXTRACTION.md, Layer 3; EVALUATION.md G2, G3, J6): merges entities that share
- * an alias, closes facts whose closing event arrived later, settles entity questions whose subject now exists, folds
+ * Housekeeping over stored knowledge (EXTRACTION.md, Layer 3; EVALUATION.md G2, G3, J6): merges entities that share an
+ * alias, closes facts whose closing event arrived later, settles entity questions whose subject now exists, folds
  * duplicate facts and events, and lists what a caller should look at. A dry run reports without changing anything.
  */
 public final class Consolidator {
 
 	/** What consolidation did or would do. */
-	public record Outcome(List<Map<String, Object>> merges, int reclosed, List<Map<String, Object>> suggestedRegistrations,
-	                      List<Map<String, Object>> resolvedQuestions, List<Map<String, Object>> review,
-	                      List<Map<String, Object>> duplicates) {
+	public record Outcome(List<Map<String, Object>> merges, int reclosed,
+			List<Map<String, Object>> suggestedRegistrations, List<Map<String, Object>> resolvedQuestions,
+			List<Map<String, Object>> review, List<Map<String, Object>> duplicates) {
 	}
 
 	private final Database db;
@@ -58,9 +58,8 @@ public final class Consolidator {
 	private final FactLedger ledger;
 	private final FactRenderer renderer;
 
-	Consolidator(
-			Database db, EntityService entities, PredicateRegistry predicates, EventService events, FactQueries facts,
-			QuestionResolver resolver, FactLedger ledger, FactRenderer renderer) {
+	Consolidator(Database db, EntityService entities, PredicateRegistry predicates, EventService events,
+			FactQueries facts, QuestionResolver resolver, FactLedger ledger, FactRenderer renderer) {
 		this.db = db;
 		this.entities = entities;
 		this.predicates = predicates;
@@ -110,8 +109,8 @@ public final class Consolidator {
 				if (!dryRun) {
 					Event ev = closing.get();
 					db.write(tx -> {
-						ledger.close(tx, f, null, "event", "consolidate: closing event found", ev.id(), ev.observationId(),
-								ev.validStart(), ev.validStartPrecision(), "current");
+						ledger.close(tx, f, null, "event", "consolidate: closing event found", ev.id(),
+								ev.observationId(), ev.validStart(), ev.validStartPrecision(), "current");
 						return null;
 					});
 				}
@@ -121,8 +120,8 @@ public final class Consolidator {
 	}
 
 	/**
-	 * The same fact stated twice with a differently worded free-text qualifier becomes one fact with a
-	 * corroboration, keeping the fuller wording.
+	 * The same fact stated twice with a differently worded free-text qualifier becomes one fact with a corroboration,
+	 * keeping the fuller wording.
 	 */
 	private void foldDuplicateFacts(boolean dryRun, List<Map<String, Object>> duplicates) {
 		for (Row r : db.read(tx -> tx.query("""
@@ -155,8 +154,8 @@ public final class Consolidator {
 						renderer.rerender(tx, keep);
 					}
 					FactLedger.corroborate(tx, keep, dropped.observationId(), null);
-					FactLedger.supersession(tx, drop, keep, "duplicate", "consolidate: the same fact worded twice", null,
-							dropped.observationId(), null);
+					FactLedger.supersession(tx, drop, keep, "duplicate", "consolidate: the same fact worded twice",
+							null, dropped.observationId(), null);
 					return null;
 				});
 			}
@@ -165,9 +164,10 @@ public final class Consolidator {
 
 	/** The same event with and without its date becomes the dated one; between two alike, the earlier stays. */
 	private void foldDuplicateEvents(boolean dryRun, List<Map<String, Object>> duplicates) {
-		for (Row r : db.read(tx -> tx.query("""
-				SELECT a.id AS first, b.id AS second FROM event a JOIN event b ON b.type = a.type AND b.id > a.id
-				WHERE a.valid_start IS NULL OR b.valid_start IS NULL OR a.valid_start = b.valid_start ORDER BY a.id, b.id"""))) {
+		for (Row r : db.read(tx -> tx
+				.query("""
+						SELECT a.id AS first, b.id AS second FROM event a JOIN event b ON b.type = a.type AND b.id > a.id
+						WHERE a.valid_start IS NULL OR b.valid_start IS NULL OR a.valid_start = b.valid_start ORDER BY a.id, b.id"""))) {
 			Optional<Event> a = events.get(r.lng("first"));
 			Optional<Event> b = events.get(r.lng("second"));
 			if (a.isEmpty() || b.isEmpty() || a.get().participants().size() != b.get().participants().size()

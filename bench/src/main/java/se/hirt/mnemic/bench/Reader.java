@@ -50,7 +50,10 @@ public final class Reader {
 
 	public String answer(String question, String questionDate, String context)
 			throws IOException, InterruptedException {
-		String system = "You are a helpful assistant with access to retrieved memory of earlier conversations " + "with the user. Answer the user's question using only the retrieved memory. If the memory does not " + "contain the information needed, say that you do not have that information. Be concise. " + "The current date is " + questionDate + ".";
+		String system = "You are a helpful assistant with access to retrieved memory of earlier conversations "
+				+ "with the user. Answer the user's question using only the retrieved memory. If the memory does not "
+				+ "contain the information needed, say that you do not have that information. Be concise. "
+				+ "The current date is " + questionDate + ".";
 		String user = "Retrieved memory:\n\n" + context + "\n\nQuestion: " + question;
 		return model.chat(system, user);
 	}

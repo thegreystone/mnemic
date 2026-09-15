@@ -43,27 +43,26 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * A question taken apart once for every channel: the entities it names, the predicate cues, its content terms
- * with the owner's names removed (they occur in nearly every rendering and carry no signal), the terms beyond the
- * entities, whether it is a yes/no question, in the past tense, or about what is coming, and what it names
- * specifically.
+ * A question taken apart once for every channel: the entities it names, the predicate cues, its content terms with the
+ * owner's names removed (they occur in nearly every rendering and carry no signal), the terms beyond the entities,
+ * whether it is a yes/no question, in the past tense, or about what is coming, and what it names specifically.
  *
  * @param terms
- * 		distinct content tokens minus the owner's aliases
+ *            distinct content tokens minus the owner's aliases
  * @param entityTokens
- * 		tokens of every spotted entity's aliases and the owner's
+ *            tokens of every spotted entity's aliases and the owner's
  * @param beyondEntities
- * 		terms that are not an entity token
+ *            terms that are not an entity token
  * @param residual
- * 		for a yes/no question, what it asks about beyond the entities, the cue, and filler ("any", "still")
+ *            for a yes/no question, what it asks about beyond the entities, the cue, and filler ("any", "still")
  * @param named
- * 		capitalised words that are not an entity: the specific things the question is about
+ *            capitalised words that are not an entity: the specific things the question is about
  * @param fts
- * 		the FTS5 match expression over the terms
+ *            the FTS5 match expression over the terms
  */
 public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<String> ownerTokens, List<String> terms,
-                    Set<String> entityTokens, List<String> beyondEntities, boolean polar, boolean past,
-                    boolean forward, Set<String> cueTokens, List<String> residual, List<String> named, String fts) {
+		Set<String> entityTokens, List<String> beyondEntities, boolean polar, boolean past, boolean forward,
+		Set<String> cueTokens, List<String> residual, List<String> named, String fts) {
 
 	private static final Set<String> POLAR = Set.of("does", "do", "did", "is", "are", "was", "were", "has", "have",
 			"had", "can", "could", "will", "would", "should");
@@ -73,8 +72,8 @@ public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<Strin
 			Pattern.CASE_INSENSITIVE);
 	/** Words that narrow nothing in a yes/no question. */
 	static final Set<String> POLAR_FILLER = Set.of("any", "anything", "anyone", "anywhere", "still", "yet", "ever",
-			"really", "actually", "currently", "now", "already", "also", "some", "something", "someone", "there", "here",
-			"just", "even", "own");
+			"really", "actually", "currently", "now", "already", "also", "some", "something", "someone", "there",
+			"here", "just", "even", "own");
 
 	public static Query analyse(String text, EntityService entities, PredicateRegistry predicates) {
 		List<Entity> spotted = entities.spot(text);
@@ -83,7 +82,8 @@ public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<Strin
 		for (String a : entities.aliases(entities.owner().id())) {
 			ownerTokens.addAll(Names.tokens(a));
 		}
-		List<String> terms = Names.contentTokens(text).stream().filter(t -> !ownerTokens.contains(t)).distinct().toList();
+		List<String> terms = Names.contentTokens(text).stream().filter(t -> !ownerTokens.contains(t)).distinct()
+				.toList();
 		var entityTokens = new HashSet<>(ownerTokens);
 		for (Entity e : spotted) {
 			for (String a : entities.aliases(e.id())) {
@@ -123,9 +123,9 @@ public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<Strin
 	}
 
 	/**
-	 * Capitalised words of the query that are not its first word and not an entity or owner name: the specific
-	 * things the question names ("my apartment in Shinjuku"), lowercased for matching against renderings. The cue
-	 * predicate's vocabulary is not excluded: "Software Engineer Manager" is a title whose every word counts.
+	 * Capitalised words of the query that are not its first word and not an entity or owner name: the specific things
+	 * the question names ("my apartment in Shinjuku"), lowercased for matching against renderings. The cue predicate's
+	 * vocabulary is not excluded: "Software Engineer Manager" is a title whose every word counts.
 	 */
 	static List<String> namedThings(String query, Set<String> entityTokens) {
 		var out = new ArrayList<String>();
@@ -146,8 +146,8 @@ public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<Strin
 				continue; // "I" and acronyms like "AI" are not named things
 			}
 			for (String t : Names.tokens(w)) {
-				if (t.length() >= 2 && !entityTokens.contains(t) && !Names.STOPWORDS.contains(t)
-						&& !Names.isTypeWord(t) && !out.contains(t)) {
+				if (t.length() >= 2 && !entityTokens.contains(t) && !Names.STOPWORDS.contains(t) && !Names.isTypeWord(t)
+						&& !out.contains(t)) {
 					out.add(t);
 				}
 			}

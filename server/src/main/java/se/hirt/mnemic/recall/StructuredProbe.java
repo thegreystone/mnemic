@@ -49,8 +49,8 @@ import java.util.Set;
 /**
  * The structured channel: the spotted entities and the first predicate cue looked up directly over valid time. The
  * verdict is {@code matched}, {@code miss} (entity and predicate understood, no such fact: never evidence of no),
- * {@code future}, {@code known_false} (decided by a negation, a restriction, a closure, or the one current value of
- * a functional predicate), {@code entity} (no cue), or {@code unresolved}.
+ * {@code future}, {@code known_false} (decided by a negation, a restriction, a closure, or the one current value of a
+ * functional predicate), {@code entity} (no cue), or {@code unresolved}.
  */
 final class StructuredProbe {
 
@@ -104,7 +104,8 @@ final class StructuredProbe {
 				// and the gender, which is not on record, is not invented.
 				boolean qualifierOk = cue.qualifier() == null || cue.qualifier().equalsIgnoreCase(f.qualifier())
 						|| (f.qualifier() == null && cue.predicate().qualifiers().isEmpty())
-						|| (cue.predicate().symmetric() && Predicate.sameQualifierFamily(cue.qualifier(), f.qualifier()));
+						|| (cue.predicate().symmetric()
+								&& Predicate.sameQualifierFamily(cue.qualifier(), f.qualifier()));
 				if (qualifierOk) {
 					if (matched.stream().noneMatch(m -> m.id() == f.id())) {
 						matched.add(f);
@@ -168,7 +169,8 @@ final class StructuredProbe {
 						for (Entity x : xs) {
 							if (Names.isPlace(x.type()) && x.id() != b.objectId()
 									&& containment.of(x.id(), b.objectId()).relation() == Relation.UNKNOWN) {
-								notes.add("whether " + x.name() + " is within " + entities.nameOf(b.objectId()) + " is not known");
+								notes.add("whether " + x.name() + " is within " + entities.nameOf(b.objectId())
+										+ " is not known");
 							}
 						}
 					}
@@ -179,7 +181,8 @@ final class StructuredProbe {
 			// The earlier positive fact on the same key, if any, is history the verdict should show.
 			for (Fact f : facts.probe(decidedBy.subjectId(), decidedBy.predicate(), null, now, true)) {
 				if (!"current".equals(f.state(now)) && !"pending".equals(f.status()) && !"corrected".equals(f.status())
-						&& f.subjectId() == decidedBy.subjectId() && Objects.equals(f.objectId(), decidedBy.objectId())) {
+						&& f.subjectId() == decidedBy.subjectId()
+						&& Objects.equals(f.objectId(), decidedBy.objectId())) {
 					notes.add("earlier: " + f.rendering() + " [" + f.ref() + ", " + f.state(now) + "]");
 				}
 			}
@@ -319,8 +322,8 @@ final class StructuredProbe {
 			}
 		}
 		if (xs.isEmpty() && b.objectText() != null) {
-			List<String> words = Names.contentTokens(b.objectText()).stream().filter(t -> !Query.POLAR_FILLER.contains(t))
-					.toList();
+			List<String> words = Names.contentTokens(b.objectText()).stream()
+					.filter(t -> !Query.POLAR_FILLER.contains(t)).toList();
 			return !words.isEmpty() && residual.containsAll(words);
 		}
 		return false;
@@ -347,8 +350,8 @@ final class StructuredProbe {
 	}
 
 	/**
-	 * Containment reached from the matched facts' objects: "where does Mattias live" → Schübelbach → Kanton Schwyz
-	 * → Switzerland, so "which canton" is answered from structure (EVALUATION.md F3, one to two hops).
+	 * Containment reached from the matched facts' objects: "where does Mattias live" → Schübelbach → Kanton Schwyz →
+	 * Switzerland, so "which canton" is answered from structure (EVALUATION.md F3, one to two hops).
 	 */
 	private List<Fact> chain(List<Fact> matched, Instant asOf, Instant now) {
 		var out = new ArrayList<Fact>();

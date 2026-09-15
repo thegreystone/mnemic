@@ -102,9 +102,8 @@ class CorrectionTest {
 	void correctingValidTimeAndEnded() {
 		try (Engine e = engine("d1c")) {
 			RememberOutcome o = remember(e, "I joined Hooli in 2017.",
-					proposal().entity("e1", "Hooli", "organization")
-							.fact(se.hirt.mnemic.TestHomes.fact("self", "works_at", "e1", null, null, "2017", null,
-									null, null, null)));
+					proposal().entity("e1", "Hooli", "organization").fact(se.hirt.mnemic.TestHomes.fact("self",
+							"works_at", "e1", null, null, "2017", null, null, null, null)));
 			long original = id(o.applied().facts().getFirst().id());
 			Corrected c = e.correct(original, Map.of("valid_time", Map.of("start", "2018")), "it was 2018");
 			assertEquals("2018-01-01", c.replacement().validStart());
@@ -123,14 +122,15 @@ class CorrectionTest {
 			RememberOutcome initrode = remember(e, "I worked at Initrode from 2010.",
 					proposal().entity("e1", "Initrode", "organization")
 							.fact(fact("self", "works_at", "e1", null, null, "2010", null, null, null, null)));
-			remember(e, "I joined Hooli in 2018.", proposal().entity("e2", "Hooli", "organization")
-					.event("ev1", "joined", "2018", "self", "e2"));
+			remember(e, "I joined Hooli in 2018.",
+					proposal().entity("e2", "Hooli", "organization").event("ev1", "joined", "2018", "self", "e2"));
 			Fact closed = e.facts().get(Long.parseLong(initrode.applied().facts().getFirst().id().substring(2)))
 					.orElseThrow();
 			assertEquals("superseded", closed.status());
 			assertEquals("2018-01-01", closed.validEnd());
 			// The event's date was wrong for this job: it really ended in 2016. History is corrected, not refused.
-			Corrected c = e.correct(closed.id(), Map.of("valid_time", Map.of("start", "2010", "end", "2016")), "left earlier");
+			Corrected c = e.correct(closed.id(), Map.of("valid_time", Map.of("start", "2010", "end", "2016")),
+					"left earlier");
 			Fact fixed = e.facts().get(c.replacement().id()).orElseThrow();
 			assertEquals("2016-01-01", fixed.validEnd());
 			assertEquals("current", fixed.status(), "history, accepted");
@@ -164,9 +164,9 @@ class CorrectionTest {
 	@Test
 	void historyShowsEventSupersession() {
 		try (Engine e = engine("hist")) {
-			remember(e, "I worked at Initrode from 2010.", proposal().entity("e1", "Initrode", "organization")
-					.fact(se.hirt.mnemic.TestHomes.fact("self", "works_at", "e1", null, null, "2010", null, null, null,
-							null)));
+			remember(e, "I worked at Initrode from 2010.",
+					proposal().entity("e1", "Initrode", "organization").fact(se.hirt.mnemic.TestHomes.fact("self",
+							"works_at", "e1", null, null, "2010", null, null, null, null)));
 			remember(e, "I joined Hooli in 2018.",
 					proposal().entity("e2", "Hooli", "organization").event("ev1", "joined", "2018", "self", "e2")
 							.fact(se.hirt.mnemic.TestHomes.fact("self", "works_at", "e2", null, null, null, null, null,
@@ -180,6 +180,7 @@ class CorrectionTest {
 			assertTrue(h.entries().get(1).supersessions().isEmpty());
 		}
 	}
+
 	/** D7: a fact that was never true is retracted: no replacement, out of recall, in history with its reason. */
 	@Test
 	@Scenario("D7")
@@ -188,7 +189,8 @@ class CorrectionTest {
 			remember(e, "I decided to replace the BCN3D Sigma, leaning toward the Bambu Lab H2D.",
 					proposal().fact("self", "decided", "replace the BCN3D Sigma"));
 			long owner = e.entities().owner().id();
-			Fact f = e.facts().factsOf(owner).stream().filter(x -> "decided".equals(x.predicate())).findFirst().orElseThrow();
+			Fact f = e.facts().factsOf(owner).stream().filter(x -> "decided".equals(x.predicate())).findFirst()
+					.orElseThrow();
 			var c = e.correct(f.id(), Map.of("wrong", true), "that was a leaning, never a decision");
 			assertNull(c.replacement(), "a retraction stores no replacement");
 			assertEquals("corrected", c.original().status());
@@ -207,21 +209,26 @@ class CorrectionTest {
 		}
 	}
 
-	/** D8: an observation recorded wrongly is retired, not forgotten: out of recall, flagged in history, its text kept. */
+	/**
+	 * D8: an observation recorded wrongly is retired, not forgotten: out of recall, flagged in history, its text kept.
+	 */
 	@Test
 	@Scenario("D8")
 	void aWrongObservationIsRetiredNotForgotten() {
 		try (Engine e = engine("d8-retire")) {
-			long wrong = e.remember("Dad is best reached on Slack these days.", se.hirt.mnemic.observation.Source.user(), null, null, null, null)
+			long wrong = e.remember("Dad is best reached on Slack these days.",
+					se.hirt.mnemic.observation.Source.user(), null, null, null, null).observation().observationId();
+			long right = e
+					.remember("Correction: Dad is on WhatsApp, not Slack; he never used Slack.",
+							se.hirt.mnemic.observation.Source.user(), null, null, null, null)
 					.observation().observationId();
-			long right = e.remember("Correction: Dad is on WhatsApp, not Slack; he never used Slack.", se.hirt.mnemic.observation.Source.user(),
-					null, null, null, null).observation().observationId();
 			assertEquals(2, e.observations().pendingProposals());
 			var retired = e.retireObservation(wrong, "said Slack; the later note says WhatsApp", right);
 			assertTrue(retired.retired());
 			assertEquals(Long.valueOf(right), retired.supersededBy());
 			assertEquals(1, e.observations().pendingProposals(), "it left the backlog");
-			assertEquals("Dad is best reached on Slack these days.", e.observations().get(wrong).orElseThrow().text(), "the text stays");
+			assertEquals("Dad is best reached on Slack these days.", e.observations().get(wrong).orElseThrow().text(),
+					"the text stays");
 			// Recall does not show it; recall with history does, flagged.
 			RecallResult r = recall(e, "how do I reach Dad");
 			assertTrue(r.hits().stream().noneMatch(h -> h.observation().id() == wrong), r.text());
@@ -229,9 +236,13 @@ class CorrectionTest {
 			RecallResult h = e.recall().recall("how do I reach Dad", null, 800, 10, true);
 			var shown = h.hits().stream().filter(x -> x.observation().id() == wrong).findFirst();
 			assertTrue(shown.isPresent(), h.text());
-			assertTrue(shown.get().shown().startsWith("[retired: said Slack; the later note says WhatsApp; superseded by obs-" + right + "]"), shown.get().shown());
+			assertTrue(
+					shown.get().shown().startsWith(
+							"[retired: said Slack; the later note says WhatsApp; superseded by obs-" + right + "]"),
+					shown.get().shown());
 			// Once retired, retiring again is refused; forgetting still works, as ever.
-			assertThrows(se.hirt.mnemic.protocol.MnemicException.class, () -> e.retireObservation(wrong, "again", null));
+			assertThrows(se.hirt.mnemic.protocol.MnemicException.class,
+					() -> e.retireObservation(wrong, "again", null));
 			assertEquals(1, e.observations().retiredCount());
 			// A retirement can be undone: the note is live again and, never having had a reading, back in the backlog.
 			var back = e.reinstateObservation(wrong);

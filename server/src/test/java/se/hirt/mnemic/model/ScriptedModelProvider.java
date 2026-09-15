@@ -33,8 +33,8 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * A test-only provider registered through {@code META-INF/services} in the test tree: {@code scripted:canned}
- * answers every observation with one fixed proposal, {@code scripted:broken} fails like an unreachable endpoint,
+ * A test-only provider registered through {@code META-INF/services} in the test tree: {@code scripted:canned} answers
+ * every observation with one fixed proposal, {@code scripted:broken} fails like an unreachable endpoint,
  * {@code scripted:garbage} returns prose. {@link #CALLS} counts requests so a test can prove the assistant's own
  * proposal took precedence.
  */
@@ -68,10 +68,10 @@ public final class ScriptedModelProvider implements ModelProvider {
 			public String chat(String system, String user) throws IOException {
 				CALLS.incrementAndGet();
 				return switch (kind) {
-					case "canned" -> "```json\n" + CANNED + "\n```";
-					case "garbage" -> "I am afraid I cannot produce that.";
-					case "broken" -> throw new IOException("Connection refused: localhost:1234");
-					default -> throw new IllegalArgumentException("unknown scripted model " + kind);
+				case "canned" -> "```json\n" + CANNED + "\n```";
+				case "garbage" -> "I am afraid I cannot produce that.";
+				case "broken" -> throw new IOException("Connection refused: localhost:1234");
+				default -> throw new IllegalArgumentException("unknown scripted model " + kind);
 				};
 			}
 		};

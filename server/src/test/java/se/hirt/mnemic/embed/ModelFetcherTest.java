@@ -104,15 +104,25 @@ class ModelFetcherTest {
 		Path models = Path.of("models");
 		List<ModelFetcher.Item> plan = ModelFetcher.plan(models, null);
 		assertEquals(2, plan.size(), "the model and its tokenizer; the runtime is part of the build");
-		assertTrue(plan.stream().allMatch(i -> i.url().toString().startsWith("https://huggingface.co/ibm-granite/" + ModelFetcher.MODEL_ID + "/")), plan.toString());
-		assertTrue(plan.get(0).url().toString().contains("/onnx/model"), "the graph lives under onnx/ in the repository: " + plan.get(0).url());
-		assertEquals("model.onnx", plan.get(0).target().getFileName().toString(), "whichever build, it is model.onnx on disk");
+		assertTrue(
+				plan.stream()
+						.allMatch(i -> i.url().toString()
+								.startsWith("https://huggingface.co/ibm-granite/" + ModelFetcher.MODEL_ID + "/")),
+				plan.toString());
+		assertTrue(plan.get(0).url().toString().contains("/onnx/model"),
+				"the graph lives under onnx/ in the repository: " + plan.get(0).url());
+		assertEquals("model.onnx", plan.get(0).target().getFileName().toString(),
+				"whichever build, it is model.onnx on disk");
 		assertTrue(plan.stream().allMatch(i -> i.sha256().length() == 64));
-		assertTrue(plan.stream().noneMatch(i -> i.name().endsWith(".jar") || i.name().endsWith(".dll")
-				|| i.name().endsWith(".so") || i.name().endsWith(".dylib")), "no executable code in the plan");
+		assertTrue(
+				plan.stream()
+						.noneMatch(i -> i.name().endsWith(".jar") || i.name().endsWith(".dll")
+								|| i.name().endsWith(".so") || i.name().endsWith(".dylib")),
+				"no executable code in the plan");
 		// A mirror replaces the host, never the hashes.
 		List<ModelFetcher.Item> mirrored = ModelFetcher.plan(models, "file:///m/model/");
-		assertTrue(mirrored.get(0).url().toString().startsWith("file:///m/model/onnx/model"), mirrored.get(0).url().toString());
+		assertTrue(mirrored.get(0).url().toString().startsWith("file:///m/model/onnx/model"),
+				mirrored.get(0).url().toString());
 		assertEquals(plan.get(0).sha256(), mirrored.get(0).sha256());
 	}
 }

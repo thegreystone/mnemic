@@ -45,10 +45,10 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * The questions the write path puts to the caller when it cannot decide alone: an ambiguous entity or predicate
- * (the fact is held in the question until answered), a conflict on a functional predicate (the new fact is stored
- * pending), a type mismatch, and a containment gap. Each carries numbered candidates so the model never has to
- * reproduce an internal id.
+ * The questions the write path puts to the caller when it cannot decide alone: an ambiguous entity or predicate (the
+ * fact is held in the question until answered), a conflict on a functional predicate (the new fact is stored pending),
+ * a type mismatch, and a containment gap. Each carries numbered candidates so the model never has to reproduce an
+ * internal id.
  */
 final class FactQuestions {
 
@@ -64,8 +64,9 @@ final class FactQuestions {
 
 	Question entity(Observation obs, String name, String type, List<Candidate> candidates, String payload) {
 		List<Map<String, Object>> c = numbered(candidates, "a new entity named " + name);
-		String message = "Is \"" + name + "\" " + String.join(" or ",
-				candidates.stream().map(x -> x.entity().name() + " (" + x.entity().type() + ")").toList())
+		String message = "Is \"" + name + "\" "
+				+ String.join(" or ",
+						candidates.stream().map(x -> x.entity().name() + " (" + x.entity().type() + ")").toList())
 				+ ", or someone else? The facts mentioning " + name + " are held until you answer with the "
 				+ "candidate id or \"new\".";
 		return questions.create("entity_resolution", obs.id(), null, name, null, c, payload, message);
@@ -77,11 +78,14 @@ final class FactQuestions {
 		c.add(choice(2, "new", "register '" + f.predicate() + "' as a new predicate", null));
 		String message = "Does '" + f.predicate() + "' (" + (def == null ? "" : def.description()) + ") mean the "
 				+ "same as '" + candidate.name() + "' (" + candidate.description() + ")? "
-				+ ("similar".equals(how) ? "They share several words, but a narrower or opposite meaning (a restriction, "
-						+ "a negation) would be lost. " : "")
+				+ ("similar".equals(how)
+						? "They share several words, but a narrower or opposite meaning (a restriction, "
+								+ "a negation) would be lost. "
+						: "")
 				+ "The fact is held until you answer with '" + candidate.name() + "' or \"new\"; '" + candidate.name()
 				+ "' also records '" + f.predicate() + "' as its alias when the match was similar.";
-		return questions.create("predicate_resolution", obs.id(), null, f.subject(), f.predicate(), c, payload, message);
+		return questions.create("predicate_resolution", obs.id(), null, f.subject(), f.predicate(), c, payload,
+				message);
 	}
 
 	/** {@code why} explains a conflict a bound raised; null for the plain one-current-value conflict. */
@@ -96,10 +100,10 @@ final class FactQuestions {
 		for (String[] ch : choices) {
 			c.add(choice(n++, ch[0], ch[1], null));
 		}
-		String message = why != null ? why + " The new fact is held pending."
-				: pred.name() + " allows one current value. \"" + existing.rendering() + "\" is current and \"" + proposed
-						+ "\" overlaps it with no event, end date, or 'ended' flag to explain the change. The new fact is "
-						+ "held pending. Ask the user which is right.";
+		String message = why != null ? why + " The new fact is held pending." : pred.name()
+				+ " allows one current value. \"" + existing.rendering() + "\" is current and \"" + proposed
+				+ "\" overlaps it with no event, end date, or 'ended' flag to explain the change. The new fact is "
+				+ "held pending. Ask the user which is right.";
 		String payload = Json.write(Map.of("existing", existing.ref(), "pending", "f-" + pendingId));
 		return questions.create("conflict", obs.id(), pendingId, entities.nameOf(existing.subjectId()), pred.name(), c,
 				payload, message);
@@ -109,8 +113,8 @@ final class FactQuestions {
 		String message = pred.name() + " expects a " + position + " of type " + allowed + "; " + e.name() + " is "
 				+ e.type() + ". Not stored. Correct the entity type or the predicate, then remember again.";
 		List<Map<String, Object>> c = List.of(choice(1, "dismiss", "dismiss", null));
-		String payload = Json.write(
-				Map.of("entity", e.ref(), "entity_type", e.type(), "position", position, "expected", allowed));
+		String payload = Json
+				.write(Map.of("entity", e.ref(), "entity_type", e.type(), "position", position, "expected", allowed));
 		return questions.create("type_mismatch", obs.id(), null, e.name(), pred.name(), c, payload, message);
 	}
 
@@ -125,8 +129,8 @@ final class FactQuestions {
 		String topName = entities.nameOf(top);
 		String boundName = entities.nameOf(bound);
 		String serves = facts.get(servesFactId).map(Fact::rendering).orElse("the restriction");
-		List<Map<String, Object>> c = List.of(
-				choice(1, "yes", topName + " is within " + boundName + " (stores " + topName + " located_in " + boundName + ")", null),
+		List<Map<String, Object>> c = List.of(choice(1, "yes",
+				topName + " is within " + boundName + " (stores " + topName + " located_in " + boundName + ")", null),
 				choice(2, "no", topName + " is not within " + boundName, null));
 		String message = "Is " + topName + " within " + boundName + "? The containment chain on record stops at "
 				+ topName + ", and \"" + serves + "\" holds only if it is. Answer yes or no.";
@@ -158,8 +162,8 @@ final class FactQuestions {
 
 	/**
 	 * The proposal fragment an entity question holds: the facts and events that mention the entity, with only the
-	 * declared entities those refer to. Carrying the whole proposal made every answer re-resolve every other held
-	 * name against the entities the earlier answers had just created.
+	 * declared entities those refer to. Carrying the whole proposal made every answer re-resolve every other held name
+	 * against the entities the earlier answers had just created.
 	 */
 	static String heldProposal(Proposal p, EntityRef er) {
 		var facts = p.facts().stream().filter(f -> mentions(f, er)).toList();
@@ -180,7 +184,8 @@ final class FactQuestions {
 			}
 		}
 		var entities = p.entities().stream().filter(e -> e == er
-				|| (e.ref() != null && used.contains(Names.norm(e.ref()))) || used.contains(Names.norm(e.name()))).toList();
+				|| (e.ref() != null && used.contains(Names.norm(e.ref()))) || used.contains(Names.norm(e.name())))
+				.toList();
 		return Json.write(new Proposal(p.specVersion(), entities, events, facts, p.predicates()));
 	}
 

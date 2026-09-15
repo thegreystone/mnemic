@@ -40,11 +40,11 @@ import java.time.Instant;
 import java.util.Locale;
 
 /**
- * The hybrid mode (README, "Hybrid mode"): a model the server is configured with reads an observation that
- * arrived without a proposal and proposes in the assistant's place, under the same extraction spec and the same
- * validation. Nothing here is trusted more than an assistant's proposal; it is provenance ({@code proposer} on
- * the observation) and a different origin, that is all. A failure is a warning on the observation, never an
- * error: the observation is stored regardless, as EXTRACTION.md requires.
+ * The hybrid mode (README, "Hybrid mode"): a model the server is configured with reads an observation that arrived
+ * without a proposal and proposes in the assistant's place, under the same extraction spec and the same validation.
+ * Nothing here is trusted more than an assistant's proposal; it is provenance ({@code proposer} on the observation) and
+ * a different origin, that is all. A failure is a warning on the observation, never an error: the observation is stored
+ * regardless, as EXTRACTION.md requires.
  */
 public final class ModelProposer {
 
@@ -57,10 +57,10 @@ public final class ModelProposer {
 				return SYNC;
 			}
 			return switch (s.trim().toLowerCase(Locale.ROOT)) {
-				case "sync" -> SYNC;
-				case "deferred", "async", "consolidate" -> DEFERRED;
-				default -> throw MnemicException.invalidArgument("mnemic.proposer.mode must be sync or deferred, not '"
-						+ s + "'.");
+			case "sync" -> SYNC;
+			case "deferred", "async", "consolidate" -> DEFERRED;
+			default -> throw MnemicException
+					.invalidArgument("mnemic.proposer.mode must be sync or deferred, not '" + s + "'.");
 			};
 		}
 	}
@@ -101,9 +101,9 @@ public final class ModelProposer {
 		try {
 			reply = model.chat(SPEC, user);
 		} catch (IOException e) {
-			return new Result(null, "The configured proposer " + model.id() + " could not be reached: "
-					+ firstLine(e.getMessage()) + ". The observation is stored without a proposal; consolidate will "
-					+ "try again.");
+			return new Result(null,
+					"The configured proposer " + model.id() + " could not be reached: " + firstLine(e.getMessage())
+							+ ". The observation is stored without a proposal; consolidate will " + "try again.");
 		} catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
 			return new Result(null, "Interrupted while waiting for the configured proposer " + model.id() + ".");
@@ -120,8 +120,8 @@ public final class ModelProposer {
 	}
 
 	/**
-	 * The user turn sent with the spec. The benchmark's proposal cache keys on it, so a change here invalidates
-	 * every cached reply.
+	 * The user turn sent with the spec. The benchmark's proposal cache keys on it, so a change here invalidates every
+	 * cached reply.
 	 */
 	public static String userMessage(String observation, String observedAt) {
 		return "Observation date: " + observedAt + "\n\nObservation:\n\"\"\"\n" + observation + "\n\"\"\"\n\n"

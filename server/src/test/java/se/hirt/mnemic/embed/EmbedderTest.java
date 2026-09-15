@@ -41,17 +41,19 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * The embedder against the real model and runtime. Runs when {@code MNEMIC_ORT_LIBRARY} and
- * {@code MNEMIC_EMBED_MODEL} (a directory with model.onnx and tokenizer.json) are set; skipped otherwise, so the
- * suite never depends on a 430 MB download.
+ * The embedder against the real model and runtime. Runs when {@code MNEMIC_ORT_LIBRARY} and {@code MNEMIC_EMBED_MODEL}
+ * (a directory with model.onnx and tokenizer.json) are set; skipped otherwise, so the suite never depends on a 430 MB
+ * download.
  */
 class EmbedderTest {
 
 	private static Embedder open() throws Exception {
 		String lib = System.getenv("MNEMIC_ORT_LIBRARY");
 		String model = System.getenv("MNEMIC_EMBED_MODEL");
-		Assumptions.assumeTrue(lib != null && Files.exists(Path.of(lib)) && model != null
-				&& Files.exists(Path.of(model, "model.onnx")), "MNEMIC_ORT_LIBRARY / MNEMIC_EMBED_MODEL not set");
+		Assumptions.assumeTrue(
+				lib != null && Files.exists(Path.of(lib)) && model != null
+						&& Files.exists(Path.of(model, "model.onnx")),
+				"MNEMIC_ORT_LIBRARY / MNEMIC_EMBED_MODEL not set");
 		return new Embedder(Path.of(lib), Path.of(model), Path.of(model).getFileName().toString());
 	}
 
@@ -84,7 +86,8 @@ class EmbedderTest {
 			float[] printer = e.embed("the 3D printer needs a new nozzle");
 			float sameTopic = Embedder.dot(bank, accounts);
 			float otherTopic = Embedder.dot(bank, printer);
-			assertTrue(sameTopic > otherTopic + 0.1, "bank vs accounts " + sameTopic + ", bank vs printer " + otherTopic);
+			assertTrue(sameTopic > otherTopic + 0.1,
+					"bank vs accounts " + sameTopic + ", bank vs printer " + otherTopic);
 			// Cross-language: a German or Swedish question lands nearer both English facts about the person than an
 			// unrelated English sentence. Which of the two facts wins is a coin toss on facts this short that share
 			// the name, which is what the bake-off is for; the numbers are printed.

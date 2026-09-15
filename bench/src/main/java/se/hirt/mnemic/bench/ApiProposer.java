@@ -191,17 +191,16 @@ public final class ApiProposer implements AutoCloseable {
 
 	/** Starts every proposal on the worker pool; results arrive in the order given. */
 	public List<CompletableFuture<Optional<Proposal>>> prefetch(List<String> observations, List<String> observedAt) {
-		return IntStream.range(0, observations.size())
-				.mapToObj(i -> CompletableFuture.supplyAsync(() -> {
-					try {
-						return propose(observations.get(i), observedAt.get(i));
-					} catch (IOException e) {
-						throw new UncheckedIOException(e);
-					} catch (InterruptedException e) {
-						Thread.currentThread().interrupt();
-						throw new IllegalStateException(e);
-					}
-				}, workers)).toList();
+		return IntStream.range(0, observations.size()).mapToObj(i -> CompletableFuture.supplyAsync(() -> {
+			try {
+				return propose(observations.get(i), observedAt.get(i));
+			} catch (IOException e) {
+				throw new UncheckedIOException(e);
+			} catch (InterruptedException e) {
+				Thread.currentThread().interrupt();
+				throw new IllegalStateException(e);
+			}
+		}, workers)).toList();
 	}
 
 	@Override

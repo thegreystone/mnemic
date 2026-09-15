@@ -37,15 +37,15 @@ import java.util.Set;
  * are validated against it (a {@code document} source cannot yield an {@code explicit} fact, EVALUATION.md E4).
  *
  * @param kind
- * 		user | assistant | conversation | document | connector | correction
+ *            user | assistant | conversation | document | connector | correction
  * @param ref
- * 		document path, message id, conversation/session id
+ *            document path, message id, conversation/session id
  * @param chunk
- * 		index within {@code ref} when the caller chunked a larger source
+ *            index within {@code ref} when the caller chunked a larger source
  * @param assistant
- * 		client name/version, when known
+ *            client name/version, when known
  * @param session
- * 		caller-supplied session id, when known
+ *            caller-supplied session id, when known
  */
 public record Source(String kind, String ref, Integer chunk, String assistant, String session) {
 
@@ -58,8 +58,8 @@ public record Source(String kind, String ref, Integer chunk, String assistant, S
 
 	public Source {
 		if (kind == null || !KINDS.contains(kind)) {
-			throw MnemicException.invalidArgument(
-					"source.kind must be one of " + KINDS + ", got '" + kind + "'. Example: {\"kind\": \"user\"} for something the user said.");
+			throw MnemicException.invalidArgument("source.kind must be one of " + KINDS + ", got '" + kind
+					+ "'. Example: {\"kind\": \"user\"} for something the user said.");
 		}
 	}
 }

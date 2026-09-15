@@ -47,8 +47,8 @@ import java.util.TreeSet;
 
 /**
  * The caller's structured reading of an observation, under extraction spec version 1 (EXTRACTION.md, Layer 1): flat
- * arrays with string refs, no unions. A proposal is a claim to be checked, never truth; every field is optional
- * except what a fact minimally needs.
+ * arrays with string refs, no unions. A proposal is a claim to be checked, never truth; every field is optional except
+ * what a fact minimally needs.
  * <p>
  * Subjects and objects are written as an entity ref ({@code "e1"}), an inline entity name ({@code "Anna Lindqvist"}),
  * or {@code "self"} / {@code "I"} / {@code "me"} for the owner. Objects of predicates whose range is {@code literal}
@@ -58,19 +58,19 @@ import java.util.TreeSet;
 // Jackson builds these records reflectively, which the native image only allows for registered types.
 @RegisterForReflection(targets = {Proposal.class, Proposal.EntityRef.class, Proposal.EventRef.class,
 		Proposal.FactRef.class, Proposal.ValidTime.class, Proposal.Derivation.class, Proposal.PredicateDef.class})
-public record Proposal(@JsonProperty("spec_version") Integer specVersion, List<EntityRef> entities,
-                       List<EventRef> events, List<FactRef> facts, List<PredicateDef> predicates,
-                       List<ClosureRef> closures) {
+public record Proposal(@JsonProperty("spec_version")
+Integer specVersion, List<EntityRef> entities, List<EventRef> events, List<FactRef> facts,
+		List<PredicateDef> predicates, List<ClosureRef> closures) {
 
 	public Proposal(Integer specVersion, List<EntityRef> entities, List<EventRef> events, List<FactRef> facts,
-	                List<PredicateDef> predicates) {
+			List<PredicateDef> predicates) {
 		this(specVersion, entities, events, facts, predicates, List.of());
 	}
 
 	public static final int CURRENT_SPEC_VERSION = 1;
 
-	private static final ObjectMapper MAPPER = new ObjectMapper().configure(
-					DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
+	private static final ObjectMapper MAPPER = new ObjectMapper()
+			.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
 			.configure(DeserializationFeature.ACCEPT_SINGLE_VALUE_AS_ARRAY, true);
 
 	public Proposal {
@@ -103,11 +103,11 @@ public record Proposal(@JsonProperty("spec_version") Integer specVersion, List<E
 					// fall through to the original error
 				}
 			}
-			throw MnemicException.invalidArgument(
-					"'proposal' is not a valid proposal: " + truncated.getMessage() + ". Example: {\"facts\": [{\"subject\": \"self\", \"predicate\": \"works_at\", \"object\": \"Hooli\"}]}");
+			throw MnemicException.invalidArgument("'proposal' is not a valid proposal: " + truncated.getMessage()
+					+ ". Example: {\"facts\": [{\"subject\": \"self\", \"predicate\": \"works_at\", \"object\": \"Hooli\"}]}");
 		} catch (Exception e) {
-			throw MnemicException.invalidArgument(
-					"'proposal' is not a valid proposal: " + e.getMessage() + ". Example: {\"facts\": [{\"subject\": \"self\", \"predicate\": \"works_at\", \"object\": \"Hooli\"}]}");
+			throw MnemicException.invalidArgument("'proposal' is not a valid proposal: " + e.getMessage()
+					+ ". Example: {\"facts\": [{\"subject\": \"self\", \"predicate\": \"works_at\", \"object\": \"Hooli\"}]}");
 		}
 	}
 
@@ -129,16 +129,16 @@ public record Proposal(@JsonProperty("spec_version") Integer specVersion, List<E
 		return new Parsed(MAPPER.treeToValue(tree, Proposal.class), warnings);
 	}
 
-	private static final Map<String, Set<String>> KNOWN = Map.of(
-			"", Set.of("spec_version", "entities", "events", "facts", "predicates", "closures"),
-			"entities", Set.of("ref", "name", "type", "aliases"),
-			"events", Set.of("ref", "type", "participants", "valid_time"),
-			"facts", Set.of("subject", "predicate", "object", "qualifier", "scope", "valid_time", "ended", "derived_from",
+	private static final Map<String, Set<String>> KNOWN = Map.of("",
+			Set.of("spec_version", "entities", "events", "facts", "predicates", "closures"), "entities",
+			Set.of("ref", "name", "type", "aliases"), "events", Set.of("ref", "type", "participants", "valid_time"),
+			"facts",
+			Set.of("subject", "predicate", "object", "qualifier", "scope", "valid_time", "ended", "derived_from",
 					"derivation", "caller_confidence", "negated", "only"),
-			"predicates", Set.of("name", "description", "domain", "range", "functional", "functional_scope", "symmetric",
-					"inverse", "volatility", "lexicon", "render", "qualifiers", "aliases"),
-			"closures", Set.of("subject", "predicate", "type"),
-			"valid_time", Set.of("start", "end", "precision"),
+			"predicates",
+			Set.of("name", "description", "domain", "range", "functional", "functional_scope", "symmetric", "inverse",
+					"volatility", "lexicon", "render", "qualifiers", "aliases"),
+			"closures", Set.of("subject", "predicate", "type"), "valid_time", Set.of("start", "end", "precision"),
 			"derivation", Set.of("kind"));
 
 	/**
@@ -173,8 +173,7 @@ public record Proposal(@JsonProperty("spec_version") Integer specVersion, List<E
 		return out;
 	}
 
-	private static void unknownIn(
-			JsonNode node, String kind, String where, List<String> out) {
+	private static void unknownIn(JsonNode node, String kind, String where, List<String> out) {
 		Set<String> known = KNOWN.get(kind);
 		var names = new ArrayList<String>();
 		node.fieldNames().forEachRemaining(names::add);
@@ -254,8 +253,7 @@ public record Proposal(@JsonProperty("spec_version") Integer specVersion, List<E
 		var expanded = MAPPER.createArrayNode();
 		for (JsonNode f : facts) {
 			if (f.isObject() && f.get("derivation") != null && f.get("derivation").isTextual()) {
-				((ObjectNode) f).set("derivation",
-						MAPPER.createObjectNode().put("kind", f.get("derivation").asText()));
+				((ObjectNode) f).set("derivation", MAPPER.createObjectNode().put("kind", f.get("derivation").asText()));
 			}
 			if (f.isObject()) {
 				var o = (ObjectNode) f;
@@ -287,16 +285,15 @@ public record Proposal(@JsonProperty("spec_version") Integer specVersion, List<E
 	/** Words a caller uses for how sure the user was, as a number the spec defines. */
 	static Double certainty(String word) {
 		return switch (word.trim().toLowerCase(Locale.ROOT)) {
-			case "stated", "firm", "certain", "sure", "confirmed", "known" -> 1.0;
-			case "believed", "belief", "thinks", "think", "unsure", "uncertain", "probable", "likely", "recollection" -> 0.5;
-			case "guess", "guessed", "maybe", "possible", "unlikely", "speculation" -> 0.3;
-			default -> null;
+		case "stated", "firm", "certain", "sure", "confirmed", "known" -> 1.0;
+		case "believed", "belief", "thinks", "think", "unsure", "uncertain", "probable", "likely", "recollection" ->
+			0.5;
+		case "guess", "guessed", "maybe", "possible", "unlikely", "speculation" -> 0.3;
+		default -> null;
 		};
 	}
 
-	private static List<JsonNode> expand(
-			JsonNode fact,
-			String field) {
+	private static List<JsonNode> expand(JsonNode fact, String field) {
 		JsonNode v = fact.get(field);
 		if (v == null || !v.isArray() || !fact.isObject()) {
 			return List.of(fact);
@@ -318,8 +315,8 @@ public record Proposal(@JsonProperty("spec_version") Integer specVersion, List<E
 	}
 
 	@JsonIgnoreProperties(ignoreUnknown = true)
-	public record EventRef(String ref, String type, List<String> participants,
-	                       @JsonProperty("valid_time") ValidTime validTime) {
+	public record EventRef(String ref, String type, List<String> participants, @JsonProperty("valid_time")
+	ValidTime validTime) {
 		public EventRef {
 			participants = participants == null ? List.of() : participants;
 		}
@@ -327,16 +324,17 @@ public record Proposal(@JsonProperty("spec_version") Integer specVersion, List<E
 
 	@JsonIgnoreProperties(ignoreUnknown = true)
 	public record FactRef(String subject, String predicate, String object, String qualifier, String scope,
-	                      @JsonProperty("valid_time") ValidTime validTime, Boolean ended,
-	                      @JsonProperty("derived_from") List<String> derivedFrom, Derivation derivation,
-	                      @JsonProperty("caller_confidence") Double callerConfidence, Boolean negated, Boolean only) {
+			@JsonProperty("valid_time")
+			ValidTime validTime, Boolean ended, @JsonProperty("derived_from")
+			List<String> derivedFrom, Derivation derivation, @JsonProperty("caller_confidence")
+			Double callerConfidence, Boolean negated, Boolean only) {
 		public FactRef {
 			derivedFrom = derivedFrom == null ? List.of() : derivedFrom;
 		}
 
 		public FactRef(String subject, String predicate, String object, String qualifier, String scope,
-		               ValidTime validTime, Boolean ended, List<String> derivedFrom, Derivation derivation,
-		               Double callerConfidence) {
+				ValidTime validTime, Boolean ended, List<String> derivedFrom, Derivation derivation,
+				Double callerConfidence) {
 			this(subject, predicate, object, qualifier, scope, validTime, ended, derivedFrom, derivation,
 					callerConfidence, null, null);
 		}
@@ -367,9 +365,9 @@ public record Proposal(@JsonProperty("spec_version") Integer specVersion, List<E
 	/** A caller-defined predicate (EXTRACTION.md, Predicate registry). */
 	@JsonIgnoreProperties(ignoreUnknown = true)
 	public record PredicateDef(String name, String description, String domain, String range, Boolean functional,
-	                           @JsonProperty("functional_scope") String functionalScope, Boolean symmetric,
-	                           String inverse, String volatility, List<String> lexicon, String render,
-	                           List<String> qualifiers, List<String> aliases) {
+			@JsonProperty("functional_scope")
+			String functionalScope, Boolean symmetric, String inverse, String volatility, List<String> lexicon,
+			String render, List<String> qualifiers, List<String> aliases) {
 		public PredicateDef {
 			lexicon = lexicon == null ? List.of() : lexicon;
 			qualifiers = qualifiers == null ? List.of() : qualifiers;

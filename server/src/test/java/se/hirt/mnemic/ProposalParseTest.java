@@ -42,8 +42,8 @@ class ProposalParseTest {
 	@Test
 	void listObjectBecomesOneFactPerElement() {
 		Proposal p = Proposal.parse("""
-		                            {"facts": [{"subject": "self", "predicate": "prefers", "object": ["e1", "e2", "e3"]},
-		                                       {"subject": ["e4", "e5"], "predicate": "knows", "object": "self"}]}""");
+				{"facts": [{"subject": "self", "predicate": "prefers", "object": ["e1", "e2", "e3"]},
+				           {"subject": ["e4", "e5"], "predicate": "knows", "object": "self"}]}""");
 		assertEquals(5, p.facts().size());
 		assertEquals("e2", p.facts().get(1).object());
 		assertEquals("e5", p.facts().get(4).subject());
@@ -56,11 +56,13 @@ class ProposalParseTest {
 				{"facts": [{"subject": "self", "predicate": "uses", "object": "Probe Target Alpha",
 				            "certainty": "believed", "confidence": 0.4, "mood": "tentative"}],
 				 "notes": "ignored", "entities": [{"ref": "e1", "name": "X", "type": "thing", "nickname": "x"}]}""");
-		assertEquals(0.4, p.proposal().facts().getFirst().callerConfidence(), 1e-9, "confidence wins when both are given");
+		assertEquals(0.4, p.proposal().facts().getFirst().callerConfidence(), 1e-9,
+				"confidence wins when both are given");
 		assertEquals(3, p.warnings().size(), p.warnings().toString());
 		assertTrue(p.warnings().stream().anyMatch(w -> w.contains("'mood' on facts[0]")), p.warnings().toString());
 		assertTrue(p.warnings().stream().anyMatch(w -> w.contains("'notes' on proposal")), p.warnings().toString());
-		assertTrue(p.warnings().stream().anyMatch(w -> w.contains("'nickname' on entities[0]")), p.warnings().toString());
+		assertTrue(p.warnings().stream().anyMatch(w -> w.contains("'nickname' on entities[0]")),
+				p.warnings().toString());
 		Proposal.Parsed word = Proposal.parseWithWarnings("""
 				{"facts": [{"subject": "self", "predicate": "uses", "object": "X", "certainty": "believed"}]}""");
 		assertEquals(0.5, word.proposal().facts().getFirst().callerConfidence(), 1e-9);
@@ -69,21 +71,22 @@ class ProposalParseTest {
 
 	@Test
 	void repeatedKeyKeepsTheLastValue() {
-		Proposal p = Proposal.parse("""
-		                            {"facts": [{"subject": "self", "predicate": "works_at", "object": "e1",
-		                                        "valid_time": {"start": "1980s", "end": "1998", "precision": "year", "precision": "year"}}]}""");
+		Proposal p = Proposal
+				.parse("""
+						{"facts": [{"subject": "self", "predicate": "works_at", "object": "e1",
+						            "valid_time": {"start": "1980s", "end": "1998", "precision": "year", "precision": "year"}}]}""");
 		assertEquals("year", p.facts().getFirst().validTime().precision());
 	}
 
 	@Test
 	void truncatedReplyKeepsTheCompleteFacts() {
 		Proposal p = Proposal.parse("""
-		                            {"spec_version": 1,
-		                             "entities": [{"ref": "e1", "name": "Anna", "type": "person"}],
-		                             "facts": [
-		                               {"subject": "self", "predicate": "knows", "object": "e1"},
-		                               {"subject": "self", "predicate": "prefers", "object": "yoga, \\"hot\\" style"},
-		                               {"subject": "self", "predicate": "prefers", "object": "push-u""");
+				{"spec_version": 1,
+				 "entities": [{"ref": "e1", "name": "Anna", "type": "person"}],
+				 "facts": [
+				   {"subject": "self", "predicate": "knows", "object": "e1"},
+				   {"subject": "self", "predicate": "prefers", "object": "yoga, \\"hot\\" style"},
+				   {"subject": "self", "predicate": "prefers", "object": "push-u""");
 		assertEquals(2, p.facts().size(), "the cut-off third fact is dropped");
 		assertEquals("yoga, \"hot\" style", p.facts().get(1).object());
 		assertEquals(1, p.entities().size());
@@ -92,16 +95,17 @@ class ProposalParseTest {
 	@Test
 	void truncationInsideTheFirstArrayStillYieldsTheEntities() {
 		Proposal p = Proposal.parse("""
-		                            {"entities": [{"ref": "e1", "name": "Anna", "type": "person"}, {"ref": "e2", "name": "Bo""");
+				{"entities": [{"ref": "e1", "name": "Anna", "type": "person"}, {"ref": "e2", "name": "Bo""");
 		assertEquals(1, p.entities().size());
 		assertEquals(0, p.facts().size());
 	}
 
 	@Test
 	void bareStringDerivationIsItsKind() {
-		Proposal p = Proposal.parse("""
-		                            {"facts": [{"subject": "self", "predicate": "prefers", "object": "tea", "derivation": "inferred"},
-		                                       {"subject": "self", "predicate": "prefers", "object": "milk", "derivation": {"kind": "explicit"}}]}""");
+		Proposal p = Proposal
+				.parse("""
+						{"facts": [{"subject": "self", "predicate": "prefers", "object": "tea", "derivation": "inferred"},
+						           {"subject": "self", "predicate": "prefers", "object": "milk", "derivation": {"kind": "explicit"}}]}""");
 		assertEquals("inferred", p.facts().get(0).derivation().kind());
 		assertEquals("explicit", p.facts().get(1).derivation().kind());
 	}

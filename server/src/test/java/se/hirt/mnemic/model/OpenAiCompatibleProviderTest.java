@@ -37,8 +37,8 @@ class OpenAiCompatibleProviderTest {
 
 	@Test
 	void thinkingBlocksAreStripped() {
-		assertEquals("{\"ok\": true}", OpenAiCompatibleProvider.stripThinking(
-				"<think>\nLet me consider the JSON.\n</think>\n\n{\"ok\": true}"));
+		assertEquals("{\"ok\": true}", OpenAiCompatibleProvider
+				.stripThinking("<think>\nLet me consider the JSON.\n</think>\n\n{\"ok\": true}"));
 		assertEquals("{\"ok\": true}", OpenAiCompatibleProvider.stripThinking("{\"ok\": true}"));
 		assertEquals("", OpenAiCompatibleProvider.stripThinking(null));
 		assertEquals("a b", OpenAiCompatibleProvider.stripThinking("<thinking>x</thinking>a <think>y</think>b"));

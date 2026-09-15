@@ -40,17 +40,17 @@ import java.util.Optional;
 /**
  * Whether a new fact can stand beside what is on record, decided before its row is written. A functional predicate
  * holds one current value: a second one is a conflict unless an event supersedes the old value, the intervals are
- * disjoint, or one of them has ended; a value that precedes a later one is history and ends where the later one
- * starts. Across modes (EVALUATION.md, family Q), an assertion against a negation, a negation against an assertion,
- * and a fact outside a restriction or beyond a closure are conflicts the user settles; a containment the chain cannot
- * decide is a question, never a contradiction.
+ * disjoint, or one of them has ended; a value that precedes a later one is history and ends where the later one starts.
+ * Across modes (EVALUATION.md, family Q), an assertion against a negation, a negation against an assertion, and a fact
+ * outside a restriction or beyond a closure are conflicts the user settles; a containment the chain cannot decide is a
+ * question, never a contradiction.
  */
 final class ConflictCheck {
 
 	/**
-	 * The outcome: the fact the new one conflicts with and why (null when it stands), containment gaps to ask
-	 * about ({@code top, bound, servedFactId}, the last -1 for the fact being stored), facts a superseding event
-	 * closes, and the bounds and ended flag the row takes.
+	 * The outcome: the fact the new one conflicts with and why (null when it stands), containment gaps to ask about
+	 * ({@code top, bound, servedFactId}, the last -1 for the fact being stored), facts a superseding event closes, and
+	 * the bounds and ended flag the row takes.
 	 */
 	record Outcome(Fact conflictWith, String why, List<long[]> asks, List<Fact> toClose, Bounds row, boolean rowEnded) {
 		boolean pending() {
@@ -111,12 +111,14 @@ final class ConflictCheck {
 							+ "negation wrong from the start (wrong), or is the new fact wrong (reject)?";
 				} else if (op.object() != null) {
 					for (Fact bound : boundsIn(tx, op.subject().id(), op.predicate().name())) {
-						if ("only".equals(bound.mode()) && bound.objectId() != null && Names.isPlace(op.object().type())) {
+						if ("only".equals(bound.mode()) && bound.objectId() != null
+								&& Names.isPlace(op.object().type())) {
 							Verdict c = Containment.of(tx, op.object().id(), bound.objectId());
 							if (c.relation() == Relation.DISJOINT) {
 								conflictWith = bound;
 								why = "\"" + bound.rendering() + "\" is on record and " + op.object().name()
-										+ " lies outside " + FactRenderer.nameIn(tx, bound.objectId()) + ". Did the restriction "
+										+ " lies outside " + FactRenderer.nameIn(tx, bound.objectId())
+										+ ". Did the restriction "
 										+ "end (ended), was it wrong from the start (wrong), or is the new fact wrong (reject)?";
 								break;
 							}
@@ -153,7 +155,8 @@ final class ConflictCheck {
 						if (c.relation() == Relation.DISJOINT) {
 							conflictWith = other;
 							why = "\"" + other.rendering() + "\" is on record and lies outside " + op.object().name()
-									+ ", which \"" + rendering + "\" excludes. Did the earlier fact end (ended), was it wrong "
+									+ ", which \"" + rendering
+									+ "\" excludes. Did the earlier fact end (ended), was it wrong "
 									+ "(wrong), or is the restriction wrong (reject)?";
 							break;
 						}
@@ -179,10 +182,11 @@ final class ConflictCheck {
 
 	/** The current open fact with the same key in another mode, if any. */
 	private static Optional<Fact> sameKey(Tx tx, Operands op, String mode) {
-		return tx.queryOne("""
-				SELECT * FROM fact WHERE subject_id = ? AND predicate = ? AND status = 'current' AND ended = 0
-				AND valid_end IS NULL AND COALESCE(object_id, -1) = ? AND COALESCE(lower(object_text), '') = ?
-				AND (? = 1 OR COALESCE(qualifier, '') = ?) AND COALESCE(scope_id, -1) = ? AND mode = ? ORDER BY id LIMIT 1""",
+		return tx.queryOne(
+				"""
+						SELECT * FROM fact WHERE subject_id = ? AND predicate = ? AND status = 'current' AND ended = 0
+						AND valid_end IS NULL AND COALESCE(object_id, -1) = ? AND COALESCE(lower(object_text), '') = ?
+						AND (? = 1 OR COALESCE(qualifier, '') = ?) AND COALESCE(scope_id, -1) = ? AND mode = ? ORDER BY id LIMIT 1""",
 				op.subject().id(), op.predicate().name(), op.objectId(), op.objectTextKey(),
 				FactService.freeQualifier(op.predicate()) ? 1 : 0, op.qualifier() == null ? "" : op.qualifier(),
 				op.scopeId(), mode).map(Fact::from);
@@ -199,14 +203,16 @@ final class ConflictCheck {
 	/** The other current asserted values of a functional predicate, per scope when the predicate is scoped. */
 	private static List<Fact> otherCurrentValues(Tx tx, Operands op) {
 		boolean scoped = "scope".equals(op.predicate().functionalScope());
-		var args = new ArrayList<Object>(List.of(op.subject().id(), op.predicate().name(), op.objectId(), op.objectTextKey()));
+		var args = new ArrayList<Object>(
+				List.of(op.subject().id(), op.predicate().name(), op.objectId(), op.objectTextKey()));
 		if (scoped) {
 			args.add(op.scopeId());
 		}
-		return tx.query("""
-				SELECT * FROM fact WHERE subject_id = ? AND predicate = ? AND status = 'current' AND valid_end IS NULL
-				AND mode = 'asserted' AND NOT (COALESCE(object_id, -1) = ? AND COALESCE(lower(object_text), '') = ?)"""
-				+ (scoped ? " AND COALESCE(scope_id, -1) = ?" : "") + " ORDER BY id", args.toArray()).stream()
-				.map(Fact::from).toList();
+		return tx
+				.query("""
+						SELECT * FROM fact WHERE subject_id = ? AND predicate = ? AND status = 'current' AND valid_end IS NULL
+						AND mode = 'asserted' AND NOT (COALESCE(object_id, -1) = ? AND COALESCE(lower(object_text), '') = ?)"""
+						+ (scoped ? " AND COALESCE(scope_id, -1) = ?" : "") + " ORDER BY id", args.toArray())
+				.stream().map(Fact::from).toList();
 	}
 }

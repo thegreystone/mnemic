@@ -34,10 +34,10 @@ import io.quarkiverse.mcp.server.runtime.SchemaGeneratorConfigCustomizer;
 import jakarta.enterprise.context.Dependent;
 
 /**
- * Tool input schemas must be self-contained. The generator turns any type that occurs twice in one tool's
- * parameters into a {@code $defs} entry referenced by {@code $ref} ({@code remember} has two {@code Map}
- * parameters), and at least one MCP client cannot resolve the reference and rejects the argument. Inlining every
- * schema removes the references; the native sanity IT asserts no {@code $ref} appears in any tool schema.
+ * Tool input schemas must be self-contained. The generator turns any type that occurs twice in one tool's parameters
+ * into a {@code $defs} entry referenced by {@code $ref} ({@code remember} has two {@code Map} parameters), and at least
+ * one MCP client cannot resolve the reference and rejects the argument. Inlining every schema removes the references;
+ * the native sanity IT asserts no {@code $ref} appears in any tool schema.
  */
 @Dependent
 public class InlineSchemas implements SchemaGeneratorConfigCustomizer {

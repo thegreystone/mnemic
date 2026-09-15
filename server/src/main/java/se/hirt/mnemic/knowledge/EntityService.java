@@ -40,13 +40,13 @@ import java.util.*;
 /**
  * Entities and their aliases: the owner, the resolution ladder, query-time spotting, and merges.
  * <p>
- * The ladder (EXTRACTION.md, Entity resolution): first-person references → the owner; exact
- * normalised match of the name or any proposed alias, with type compatibility; then a fuzzy step gated by name entropy
- * (nothing shorter than three letters, nothing made only of stopwords) scoring shared name tokens and character
- * trigrams. At or above {@value #MERGE} the entity is reused and the name added as an alias; between
- * {@value #AMBIGUOUS} and {@value #MERGE} the candidates are returned as a question (EVALUATION.md B2); below, a new
- * entity is created. When the name matches one entity and a proposed alias another, the two are merged (G2), with the
- * move recorded so it can be reviewed and undone.
+ * The ladder (EXTRACTION.md, Entity resolution): first-person references → the owner; exact normalised match of the
+ * name or any proposed alias, with type compatibility; then a fuzzy step gated by name entropy (nothing shorter than
+ * three letters, nothing made only of stopwords) scoring shared name tokens and character trigrams. At or above
+ * {@value #MERGE} the entity is reused and the name added as an alias; between {@value #AMBIGUOUS} and {@value #MERGE}
+ * the candidates are returned as a question (EVALUATION.md B2); below, a new entity is created. When the name matches
+ * one entity and a proposed alias another, the two are merged (G2), with the move recorded so it can be reviewed and
+ * undone.
  */
 public final class EntityService {
 
@@ -85,9 +85,9 @@ public final class EntityService {
 	}
 
 	/**
-	 * Ids of existing entities whose name or an alias equals one of the given names exactly. A proposal that
-	 * declares two entities asserts they are distinct; the caller passes the other one's ids as
-	 * {@code distinctFrom} so an alias like "the Willisau apartment" cannot make "Willisau" ambiguous.
+	 * Ids of existing entities whose name or an alias equals one of the given names exactly. A proposal that declares
+	 * two entities asserts they are distinct; the caller passes the other one's ids as {@code distinctFrom} so an alias
+	 * like "the Willisau apartment" cannot make "Willisau" ambiguous.
 	 */
 	public Set<Long> exactIds(String name, List<String> aliases, String type) {
 		var out = new HashSet<Long>();
@@ -107,8 +107,11 @@ public final class EntityService {
 		return out;
 	}
 
-	/** As {@link #resolve(String, String, List, Long)}, never proposing an entity in {@code distinctFrom} as ambiguous. */
-	public Resolved resolve(String name, String type, List<String> aliases, Long observationId, Set<Long> distinctFrom) {
+	/**
+	 * As {@link #resolve(String, String, List, Long)}, never proposing an entity in {@code distinctFrom} as ambiguous.
+	 */
+	public Resolved resolve(
+		String name, String type, List<String> aliases, Long observationId, Set<Long> distinctFrom) {
 		if (name == null || name.isBlank()) {
 			throw MnemicException.invalidArgument(
 					"An entity needs a 'name'. Example: {\"name\": \"Anna Lindqvist\", \"type\": \"person\"}");
@@ -180,8 +183,8 @@ public final class EntityService {
 
 	private Optional<Entity> byAlias(Tx tx, String norm, String type) {
 		List<Row> rows = tx.query("""
-		                          SELECT e.* FROM entity_alias a JOIN entity e ON e.id = a.entity_id
-		                          WHERE a.alias_norm = ? AND e.merged_into IS NULL ORDER BY e.id""", norm);
+				SELECT e.* FROM entity_alias a JOIN entity e ON e.id = a.entity_id
+				WHERE a.alias_norm = ? AND e.merged_into IS NULL ORDER BY e.id""", norm);
 		Entity typeless = null;
 		for (Row r : rows) {
 			Entity e = Entity.from(r);
@@ -224,7 +227,8 @@ public final class EntityService {
 				// "Oskar Nyberg" against "Konrad Nyberg": two full names whose leading tokens differ share a
 				// family name, not an identity. "Anna" against "Anna Lindqvist" stays ambiguous.
 				if (tokens.size() >= 2 && at.size() >= 2 && !tokens.getFirst().equals(at.getFirst())
-						&& !tokens.getFirst().startsWith(at.getFirst()) && !at.getFirst().startsWith(tokens.getFirst())) {
+						&& !tokens.getFirst().startsWith(at.getFirst())
+						&& !at.getFirst().startsWith(tokens.getFirst())) {
 					tokenScore = Math.min(tokenScore, AMBIGUOUS - 0.1);
 				}
 				double gramScore = an.length() >= 4 ? jaccard(grams, trigrams(an)) : 0;
@@ -260,16 +264,14 @@ public final class EntityService {
 			if (a == null || a.isBlank()) {
 				continue;
 			}
-			tx.update(
-					"INSERT OR IGNORE INTO entity_alias(entity_id, alias, alias_norm, source_observation) " + "VALUES (?,?,?,?)",
-					entityId, a.trim(), Names.norm(a), observationId);
+			tx.update("INSERT OR IGNORE INTO entity_alias(entity_id, alias, alias_norm, source_observation) "
+					+ "VALUES (?,?,?,?)", entityId, a.trim(), Names.norm(a), observationId);
 			// Queries are matched as word grams, so an address or a handle ("alice@example.com", "@alice_example")
 			// is also stored in its word form ("alice example com") and spotted when written in a question.
 			String words = String.join(" ", Names.tokens(a));
 			if (!words.isEmpty() && !words.equals(Names.norm(a))) {
-				tx.update(
-						"INSERT OR IGNORE INTO entity_alias(entity_id, alias, alias_norm, source_observation) " + "VALUES (?,?,?,?)",
-						entityId, a.trim(), words, observationId);
+				tx.update("INSERT OR IGNORE INTO entity_alias(entity_id, alias, alias_norm, source_observation) "
+						+ "VALUES (?,?,?,?)", entityId, a.trim(), words, observationId);
 			}
 		}
 	}
@@ -291,8 +293,8 @@ public final class EntityService {
 			return Map.of();
 		}
 		List<Long> facts = tx.query("""
-		                            SELECT id FROM fact WHERE subject_id = ? OR object_id = ? OR scope_id = ?""",
-				from.id(), from.id(), from.id()).stream().map(r -> r.lng("id")).toList();
+				SELECT id FROM fact WHERE subject_id = ? OR object_id = ? OR scope_id = ?""", from.id(), from.id(),
+				from.id()).stream().map(r -> r.lng("id")).toList();
 		tx.update("UPDATE fact SET subject_id = ? WHERE subject_id = ?", into.id(), from.id());
 		tx.update("UPDATE fact SET object_id = ? WHERE object_id = ?", into.id(), from.id());
 		tx.update("UPDATE fact SET scope_id = ? WHERE scope_id = ?", into.id(), from.id());
@@ -307,15 +309,17 @@ public final class EntityService {
 			tx.update("UPDATE entity SET type = ? WHERE id = ?", from.type(), into.id());
 		}
 		// Re-render facts that now name the surviving entity.
-		for (Row r : tx.query("SELECT id, rendering FROM fact WHERE id IN (" + String.join(",",
-				facts.stream().map(String::valueOf).toList()) + ")")) {
+		for (Row r : tx.query("SELECT id, rendering FROM fact WHERE id IN ("
+				+ String.join(",", facts.stream().map(String::valueOf).toList()) + ")")) {
 			tx.update("UPDATE fact SET rendering = ? WHERE id = ?",
 					r.str("rendering").replace(from.name(), into.name()), r.lng("id"));
 		}
-		long id = tx.insert("""
-		                    INSERT INTO entity_merge(from_id, into_id, from_name, moved_facts, moved_aliases, observation_id, reason,
-		                                             merged_at) VALUES (?,?,?,?,?,?,?,?)""", from.id(), into.id(),
-				from.name(), Json.write(facts), Json.write(aliases), observationId, reason, Instant.now().toString());
+		long id = tx.insert(
+				"""
+						INSERT INTO entity_merge(from_id, into_id, from_name, moved_facts, moved_aliases, observation_id, reason,
+						                         merged_at) VALUES (?,?,?,?,?,?,?,?)""",
+				from.id(), into.id(), from.name(), Json.write(facts), Json.write(aliases), observationId, reason,
+				Instant.now().toString());
 		var m = new LinkedHashMap<String, Object>();
 		m.put("merge", "merge-" + id);
 		m.put("from", from.ref());
@@ -343,11 +347,11 @@ public final class EntityService {
 	/** Pairs of distinct live entities sharing an alias with compatible types: consolidate merges them. */
 	public List<long[]> duplicateAliasPairs() {
 		return db.read(tx -> tx.query("""
-		                              SELECT a.entity_id AS x, b.entity_id AS y FROM entity_alias a JOIN entity_alias b
-		                              ON a.alias_norm = b.alias_norm AND a.entity_id < b.entity_id
-		                              JOIN entity ex ON ex.id = a.entity_id JOIN entity ey ON ey.id = b.entity_id
-		                              WHERE ex.merged_into IS NULL AND ey.merged_into IS NULL
-		                              AND (ex.type = ey.type OR ex.type = 'unknown' OR ey.type = 'unknown')""").stream()
+				SELECT a.entity_id AS x, b.entity_id AS y FROM entity_alias a JOIN entity_alias b
+				ON a.alias_norm = b.alias_norm AND a.entity_id < b.entity_id
+				JOIN entity ex ON ex.id = a.entity_id JOIN entity ey ON ey.id = b.entity_id
+				WHERE ex.merged_into IS NULL AND ey.merged_into IS NULL
+				AND (ex.type = ey.type OR ex.type = 'unknown' OR ey.type = 'unknown')""").stream()
 				.map(r -> new long[] {r.lng("x"), r.lng("y")}).toList());
 	}
 
@@ -415,14 +419,13 @@ public final class EntityService {
 					continue;
 				}
 				List<Entity> hits = db.read(tx -> tx.query("""
-				                                           SELECT DISTINCT e.* FROM entity_alias a JOIN entity e ON e.id = a.entity_id
-				                                           WHERE a.alias_norm = ? AND e.merged_into IS NULL ORDER BY e.id""",
-						gram).stream().map(Entity::from).toList());
+						SELECT DISTINCT e.* FROM entity_alias a JOIN entity e ON e.id = a.entity_id
+						WHERE a.alias_norm = ? AND e.merged_into IS NULL ORDER BY e.id""", gram).stream()
+						.map(Entity::from).toList());
 				if (hits.isEmpty() && n == 1 && gram.length() >= 3) {
 					hits = db.read(tx -> tx.query("""
-					                              SELECT e.* FROM entity e WHERE e.type = 'person' AND e.merged_into IS NULL
-					                              AND (lower(e.name) LIKE ? || ' %')""", gram).stream()
-							.map(Entity::from).toList());
+							SELECT e.* FROM entity e WHERE e.type = 'person' AND e.merged_into IS NULL
+							AND (lower(e.name) LIKE ? || ' %')""", gram).stream().map(Entity::from).toList());
 					if (hits.size() > 1) {
 						hits = List.of(); // ambiguous first name: no guess
 					}
@@ -456,20 +459,20 @@ public final class EntityService {
 	/** Entities with the most recent activity, for the briefing: by latest observation touching their facts. */
 	public List<Entity> active(int limit) {
 		return db.read(tx -> tx.query("""
-		                              SELECT e.*, MAX(o.observed_at) AS last FROM entity e
-		                              JOIN fact f ON f.subject_id = e.id OR f.object_id = e.id
-		                              JOIN observation o ON o.id = f.observation_id
-		                              WHERE e.merged_into IS NULL AND e.id <> ? AND f.status = 'current'
-		                              GROUP BY e.id ORDER BY last DESC LIMIT ?""", owner.id(), limit).stream()
-				.map(Entity::from).toList());
+				SELECT e.*, MAX(o.observed_at) AS last FROM entity e
+				JOIN fact f ON f.subject_id = e.id OR f.object_id = e.id
+				JOIN observation o ON o.id = f.observation_id
+				WHERE e.merged_into IS NULL AND e.id <> ? AND f.status = 'current'
+				GROUP BY e.id ORDER BY last DESC LIMIT ?""", owner.id(), limit).stream().map(Entity::from).toList());
 	}
 
 	/** Removes entities created by an observation that nothing references any more (forget cascade). */
 	public int removeOrphansCreatedBy(long observationId) {
-		return db.write(tx -> tx.update("""
-		                                DELETE FROM entity WHERE created_from = ?
-		                                AND NOT EXISTS (SELECT 1 FROM fact f WHERE f.subject_id = entity.id OR f.object_id = entity.id OR f.scope_id = entity.id)
-		                                AND NOT EXISTS (SELECT 1 FROM event_participant p WHERE p.entity_id = entity.id)""",
+		return db.write(tx -> tx.update(
+				"""
+						DELETE FROM entity WHERE created_from = ?
+						AND NOT EXISTS (SELECT 1 FROM fact f WHERE f.subject_id = entity.id OR f.object_id = entity.id OR f.scope_id = entity.id)
+						AND NOT EXISTS (SELECT 1 FROM event_participant p WHERE p.entity_id = entity.id)""",
 				observationId));
 	}
 

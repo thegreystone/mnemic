@@ -45,11 +45,11 @@ import java.time.temporal.ChronoUnit;
  * matter of valid time, see {@link #state(Instant)}.
  */
 public record Fact(long id, long subjectId, String predicate, Long objectId, String objectText, String qualifier,
-                   Long scopeId, String validStart, String validStartPrecision, String validEnd,
-                   String validEndPrecision, boolean ended, String status, String derivationKind, long observationId,
-                   Long eventId, Integer spanStart, Integer spanEnd, String rendering, Integer specVersion,
-                   int corroborations, String lastConfirmed, String startSource, String endSource, Long supersededBy,
-                   Long questionId, String mode, Double callerConfidence) {
+		Long scopeId, String validStart, String validStartPrecision, String validEnd, String validEndPrecision,
+		boolean ended, String status, String derivationKind, long observationId, Long eventId, Integer spanStart,
+		Integer spanEnd, String rendering, Integer specVersion, int corroborations, String lastConfirmed,
+		String startSource, String endSource, Long supersededBy, Long questionId, String mode,
+		Double callerConfidence) {
 
 	/** Below this the caller said it was a belief, not a statement; the rendering says so (family E). */
 	public static final double BELIEVED_BELOW = 0.6;
@@ -90,12 +90,12 @@ public record Fact(long id, long subjectId, String predicate, Long objectId, Str
 	}
 
 	/**
-	 * A plan whose date has passed without a word since: the start is on record, it is not in the future, and the
-	 * last confirmation predates it. A restatement after the date, or a correction, clears it.
+	 * A plan whose date has passed without a word since: the start is on record, it is not in the future, and the last
+	 * confirmation predates it. A restatement after the date, or a correction, clears it.
 	 */
 	public boolean due(Instant now) {
-		return current() && !ended && validStart != null && validStart.compareTo(day(now)) <= 0
-				&& lastConfirmed != null && lastConfirmed.compareTo(validStart) < 0;
+		return current() && !ended && validStart != null && validStart.compareTo(day(now)) <= 0 && lastConfirmed != null
+				&& lastConfirmed.compareTo(validStart) < 0;
 	}
 
 	/** Days from {@code now} until the valid start, for a future fact. */
@@ -130,6 +130,7 @@ public record Fact(long id, long subjectId, String predicate, Long objectId, Str
 				r.str("status"), r.str("derivation_kind"), r.lng("observation_id"), r.lngOrNull("event_id"),
 				r.intOrNull("span_start"), r.intOrNull("span_end"), r.str("rendering"), r.intOrNull("spec_version"),
 				(int) r.lng("corroborations"), r.str("last_confirmed"), r.str("start_source"), r.str("end_source"),
-				r.lngOrNull("superseded_by"), r.lngOrNull("question_id"), r.str("mode"), r.dblOrNull("caller_confidence"));
+				r.lngOrNull("superseded_by"), r.lngOrNull("question_id"), r.str("mode"),
+				r.dblOrNull("caller_confidence"));
 	}
 }

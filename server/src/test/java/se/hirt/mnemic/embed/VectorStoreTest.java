@@ -95,7 +95,8 @@ class VectorStoreTest {
 		try (Engine e = engine("vec-rehome")) {
 			long a = remember(e, "I work at Hooli.", se.hirt.mnemic.TestHomes.proposal().fact("works_at", "Hooli"))
 					.observation().observationId();
-			var second = remember(e, "As I said, I work at Hooli.", se.hirt.mnemic.TestHomes.proposal().fact("works_at", "Hooli"));
+			var second = remember(e, "As I said, I work at Hooli.",
+					se.hirt.mnemic.TestHomes.proposal().fact("works_at", "Hooli"));
 			long factId = Long.parseLong(second.applied().facts().getFirst().id().substring(2));
 			VectorStore v = e.vectors();
 			v.put(VectorStore.OBSERVATION, a, "m", new float[] {1});

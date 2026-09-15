@@ -46,15 +46,16 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * The runtime library is part of the build: this is the gate that fails the build when the artifact Maven
- * unpacked and the pin in the code disagree, so no library ever runs that the code did not name.
+ * The runtime library is part of the build: this is the gate that fails the build when the artifact Maven unpacked and
+ * the pin in the code disagree, so no library ever runs that the code did not name.
  */
 class OrtLibraryTest {
 
 	@Test
 	void theBundledRuntimeMatchesItsPin() throws Exception {
 		Assumptions.assumeTrue(OrtLibrary.platform() != null, "no ONNX Runtime build for this platform");
-		assertTrue(OrtLibrary.bundled(), "the build must carry " + OrtLibrary.resource() + " (Maven unpacks it from the artifact)");
+		assertTrue(OrtLibrary.bundled(),
+				"the build must carry " + OrtLibrary.resource() + " (Maven unpacks it from the artifact)");
 		MessageDigest md = MessageDigest.getInstance("SHA-256");
 		try (InputStream in = OrtLibrary.class.getClassLoader().getResourceAsStream(OrtLibrary.resource())) {
 			assertNotNull(in);
@@ -64,7 +65,8 @@ class OrtLibraryTest {
 				md.update(buf, 0, n);
 			}
 		}
-		assertEquals(OrtLibrary.sha256(), HexFormat.of().formatHex(md.digest()), "the bundled library is the pinned one");
+		assertEquals(OrtLibrary.sha256(), HexFormat.of().formatHex(md.digest()),
+				"the bundled library is the pinned one");
 		assertTrue(OrtLibrary.describe().contains("bundled"), OrtLibrary.describe());
 	}
 

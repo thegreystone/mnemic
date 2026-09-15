@@ -37,18 +37,18 @@ import java.util.Map;
 
 /**
  * A question Mnemic could not answer by itself and put to the caller: an ambiguous entity, an ambiguous predicate, a
- * conflict on a functional predicate, a type mismatch, or a containment gap. It stays open until answered or
- * dismissed; what it holds is applied only then.
+ * conflict on a functional predicate, a type mismatch, or a containment gap. It stays open until answered or dismissed;
+ * what it holds is applied only then.
  *
  * @param candidates
- * 		numbered choices, each {@code {n, id, label, score}}; small integers remapped per question so the model never has
- * 		to reproduce an internal id
+ *            numbered choices, each {@code {n, id, label, score}}; small integers remapped per question so the model
+ *            never has to reproduce an internal id
  * @param payload
- * 		the held proposal fragment as JSON, applied on resolution
+ *            the held proposal fragment as JSON, applied on resolution
  */
 public record Question(long id, String kind, String status, Long observationId, Long factId, String subject,
-                       String predicate, List<Map<String, Object>> candidates, String payload, String message,
-                       String createdAt, String answeredAt, String answer) {
+		String predicate, List<Map<String, Object>> candidates, String payload, String message, String createdAt,
+		String answeredAt, String answer) {
 
 	public String ref() {
 		return "q-" + id;
@@ -86,8 +86,8 @@ public record Question(long id, String kind, String status, Long observationId, 
 
 	@SuppressWarnings("unchecked")
 	static Question from(Row r) {
-		List<Map<String, Object>> candidates = (List<Map<String, Object>>) (List<?>) Json.readMap(
-				"{\"c\":" + r.str("candidates") + "}").get("c");
+		List<Map<String, Object>> candidates = (List<Map<String, Object>>) (List<?>) Json
+				.readMap("{\"c\":" + r.str("candidates") + "}").get("c");
 		return new Question(r.lng("id"), r.str("kind"), r.str("status"), r.lngOrNull("observation_id"),
 				r.lngOrNull("fact_id"), r.str("subject"), r.str("predicate"), candidates, r.str("payload"),
 				r.str("message"), r.str("created_at"), r.str("answered_at"), r.str("answer"));

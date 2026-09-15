@@ -41,12 +41,12 @@ import java.util.List;
  * (EXTRACTION.md, Channel provenance and the structured miss).
  *
  * @param candidates
- * 		number of distinct observations any channel produced before the budget
+ *            number of distinct observations any channel produced before the budget
  * @param truncated
- * 		true when the budget cut off candidates
+ *            true when the budget cut off candidates
  */
 public record RecallResult(String query, Instant asOf, Structured structured, List<Event> events, List<Hit> hits,
-                           int candidates, int tokensUsed, int maxTokens, boolean truncated, String text) {
+		int candidates, int tokensUsed, int maxTokens, boolean truncated, String text) {
 
 	/**
 	 * The structured channel's verdict. {@code state} is {@code matched} (entity and predicate resolved, fact found),
@@ -58,10 +58,10 @@ public record RecallResult(String query, Instant asOf, Structured structured, Li
 	 * probed subject and predicate; {@code notes} are appended to the verdict line.
 	 */
 	public record Structured(String state, String entity, String entityName, String predicate, String qualifier,
-	                         List<Fact> facts, List<Fact> nearMisses, List<Fact> chain, List<Fact> bounds,
-	                         Fact decidedBy, String basis, List<String> notes, List<Fact> future) {
+			List<Fact> facts, List<Fact> nearMisses, List<Fact> chain, List<Fact> bounds, Fact decidedBy, String basis,
+			List<String> notes, List<Fact> future) {
 		public Structured(String state, String entity, String entityName, String predicate, String qualifier,
-		                  List<Fact> facts, List<Fact> nearMisses, List<Fact> chain) {
+				List<Fact> facts, List<Fact> nearMisses, List<Fact> chain) {
 			this(state, entity, entityName, predicate, qualifier, facts, nearMisses, chain, List.of(), null, null,
 					List.of(), List.of());
 		}
@@ -82,17 +82,17 @@ public record RecallResult(String query, Instant asOf, Structured structured, Li
 
 	/**
 	 * @param channels
-	 * 		the channels that produced this hit, in rank order
+	 *            the channels that produced this hit, in rank order
 	 * @param score
-	 * 		the fused score; higher is better
+	 *            the fused score; higher is better
 	 * @param shown
-	 * 		the text placed in the block: the whole observation when it fits, else an excerpt
+	 *            the text placed in the block: the whole observation when it fits, else an excerpt
 	 * @param facts
-	 * 		the facts from this observation that anchored the hit (structured or lexical)
+	 *            the facts from this observation that anchored the hit (structured or lexical)
 	 * @param nearMiss
-	 * 		true when this hit is here only as a near miss of the structured probe
+	 *            true when this hit is here only as a near miss of the structured probe
 	 */
 	public record Hit(Observation observation, List<String> channels, double score, String shown, int tokens,
-	                  List<Fact> facts, boolean nearMiss) {
+			List<Fact> facts, boolean nearMiss) {
 	}
 }

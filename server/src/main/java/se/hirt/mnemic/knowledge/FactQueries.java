@@ -43,9 +43,9 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Reads over the fact table: by id, by entity, by observation, the structured probe over valid time, the lexical
- * lookup over renderings, the briefing order, provenance, history, and the review of what should be confirmed.
- * Valid time decides what held when; observation time only says since when a fact could have been known.
+ * Reads over the fact table: by id, by entity, by observation, the structured probe over valid time, the lexical lookup
+ * over renderings, the briefing order, provenance, history, and the review of what should be confirmed. Valid time
+ * decides what held when; observation time only says since when a fact could have been known.
  */
 public final class FactQueries {
 
@@ -90,8 +90,8 @@ public final class FactQueries {
 	/**
 	 * The asserted facts of a predicate that touch the entity: without {@code asOf}, those current or future (and
 	 * history when asked for); with it, those that may have held then and were known by then. Under a functional
-	 * predicate an open fact with no start is dropped for a past date when ended predecessors exist, since it is
-	 * the latest value, not the one that held then.
+	 * predicate an open fact with no start is dropped for a past date when ended predecessors exist, since it is the
+	 * latest value, not the one that held then.
 	 */
 	public List<Fact> probe(long entityId, String predicate, Instant asOf, Instant now, boolean includeHistory) {
 		List<Row> rows = db.read(tx -> tx.query("""
@@ -103,7 +103,8 @@ public final class FactQueries {
 			for (Row r : rows) {
 				Fact f = Fact.from(r);
 				String state = f.state(now);
-				if ("current".equals(state) || "future".equals(state) || (includeHistory && !"pending".equals(f.status()))) {
+				if ("current".equals(state) || "future".equals(state)
+						|| (includeHistory && !"pending".equals(f.status()))) {
 					out.add(f);
 				}
 			}
@@ -179,8 +180,8 @@ public final class FactQueries {
 	public List<Fact> briefingFacts(long entityId, Instant now, int limit) {
 		return factsOf(entityId).stream().filter(f -> "current".equals(f.state(now)) && f.asserted())
 				.sorted(Comparator.comparingInt((Fact f) -> briefingRank(f.predicate()))
-						.thenComparing(Fact::corroborations, Comparator.reverseOrder())
-						.thenComparing(Fact::id)).limit(limit).toList();
+						.thenComparing(Fact::corroborations, Comparator.reverseOrder()).thenComparing(Fact::id))
+				.limit(limit).toList();
 	}
 
 	private int briefingRank(String predicate) {
@@ -207,8 +208,8 @@ public final class FactQueries {
 
 	/** Current open asserted facts of the subject under the predicate whose object is x or lies within x. */
 	public List<Fact> assertedTouching(long subjectId, String predicate, long x) {
-		return db.read(tx -> assertedOpen(tx, subjectId, predicate).stream()
-				.filter(f -> f.objectId() != null && (f.objectId() == x || Containment.ancestors(tx, f.objectId()).contains(x)))
+		return db.read(tx -> assertedOpen(tx, subjectId, predicate).stream().filter(
+				f -> f.objectId() != null && (f.objectId() == x || Containment.ancestors(tx, f.objectId()).contains(x)))
 				.toList());
 	}
 
@@ -231,11 +232,13 @@ public final class FactQueries {
 
 	/** Every fact that ever touched the entity, with its changes, and the tombstones of forgotten observations. */
 	public History history(long entityId, String predicate) {
-		List<Fact> facts = db.read(tx -> (predicate == null ? tx.query("""
-				SELECT * FROM fact WHERE subject_id = ? OR object_id = ? OR scope_id = ? ORDER BY id""", entityId,
-				entityId, entityId) : tx.query("""
-				SELECT * FROM fact WHERE (subject_id = ? OR object_id = ? OR scope_id = ?) AND predicate = ?
-				ORDER BY id""", entityId, entityId, entityId, predicate)).stream().map(Fact::from).toList());
+		List<Fact> facts = db.read(tx -> (predicate == null
+				? tx.query("""
+						SELECT * FROM fact WHERE subject_id = ? OR object_id = ? OR scope_id = ? ORDER BY id""",
+						entityId, entityId, entityId)
+				: tx.query("""
+						SELECT * FROM fact WHERE (subject_id = ? OR object_id = ? OR scope_id = ?) AND predicate = ?
+						ORDER BY id""", entityId, entityId, entityId, predicate)).stream().map(Fact::from).toList());
 		var entries = new ArrayList<HistoryEntry>();
 		for (Fact f : facts) {
 			entries.add(new HistoryEntry(f, supersessionsOf(f.id())));
@@ -263,10 +266,10 @@ public final class FactQueries {
 	 */
 	public double confidence(Fact f) {
 		double base = switch (sourceKind(f)) {
-			case "user", "correction" -> 0.80;
-			case "conversation" -> 0.75;
-			case "document" -> 0.70;
-			default -> 0.60;
+		case "user", "correction" -> 0.80;
+		case "conversation" -> 0.75;
+		case "document" -> 0.70;
+		default -> 0.60;
 		};
 		if ("inferred".equals(f.derivationKind())) {
 			base -= 0.15;
@@ -279,10 +282,10 @@ public final class FactQueries {
 	}
 
 	/**
-	 * What a session should confirm before trusting the rest, at most {@code limit} items: plans whose date has
-	 * passed with no word since ({@code due}), then the open facts longest without confirmation on predicates that
-	 * age, oldest first. A fact confirmed within a fortnight, or well inside its predicate's staleness threshold, is
-	 * not listed; past the threshold it is marked {@code likely_changed}.
+	 * What a session should confirm before trusting the rest, at most {@code limit} items: plans whose date has passed
+	 * with no word since ({@code due}), then the open facts longest without confirmation on predicates that age, oldest
+	 * first. A fact confirmed within a fortnight, or well inside its predicate's staleness threshold, is not listed;
+	 * past the threshold it is marked {@code likely_changed}.
 	 */
 	public List<Map<String, Object>> review(int limit) {
 		Instant now = clock.instant();

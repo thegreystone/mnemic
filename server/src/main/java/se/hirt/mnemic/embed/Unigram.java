@@ -46,15 +46,15 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * A Unigram (sentencepiece) tokenizer read from a Hugging Face {@code tokenizer.json}, in pure Java so the native
- * image needs no tokenizer library. This is the tokenizer of XLM-RoBERTa and so of the granite multilingual
- * embedders: NFKC normalisation, the Metaspace pre-tokenizer (spaces become {@code ▁} and one is prefixed), then
- * Viterbi segmentation over the whole text by piece log-probabilities, unknown characters falling to {@code <unk>}.
- * Special tokens are added as the post-processor template says: {@code <s>} before, {@code </s>} after.
- *
- * <p>The precompiled character map inside the file's normalizer (sentencepiece's own NFKC table) is not
- * applied; Java's NFKC stands in for it. The two differ on a handful of code points, none of them letters
- * of the languages this store is used in.
+ * A Unigram (sentencepiece) tokenizer read from a Hugging Face {@code tokenizer.json}, in pure Java so the native image
+ * needs no tokenizer library. This is the tokenizer of XLM-RoBERTa and so of the granite multilingual embedders: NFKC
+ * normalisation, the Metaspace pre-tokenizer (spaces become {@code ▁} and one is prefixed), then Viterbi segmentation
+ * over the whole text by piece log-probabilities, unknown characters falling to {@code <unk>}. Special tokens are added
+ * as the post-processor template says: {@code <s>} before, {@code </s>} after.
+ * <p>
+ * The precompiled character map inside the file's normalizer (sentencepiece's own NFKC table) is not applied; Java's
+ * NFKC stands in for it. The two differ on a handful of code points, none of them letters of the languages this store
+ * is used in.
  */
 public final class Unigram implements Tokenizer {
 
@@ -132,7 +132,8 @@ public final class Unigram implements Tokenizer {
 	static String normalise(String text, boolean keepTrailing) {
 		String nfkc = Normalizer.normalize(text, Normalizer.Form.NFKC);
 		String n = nfkc.strip();
-		boolean trailing = keepTrailing && !n.isEmpty() && nfkc.length() > 0 && Character.isWhitespace(nfkc.charAt(nfkc.length() - 1));
+		boolean trailing = keepTrailing && !n.isEmpty() && nfkc.length() > 0
+				&& Character.isWhitespace(nfkc.charAt(nfkc.length() - 1));
 		var sb = new StringBuilder(n.length() + 2);
 		sb.append(SPACE);
 		boolean space = false;

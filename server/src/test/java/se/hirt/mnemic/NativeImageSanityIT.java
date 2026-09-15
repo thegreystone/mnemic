@@ -61,8 +61,8 @@ class NativeImageSanityIT {
 			OutputStream stdin = process.getOutputStream();
 			InputStream stdout = process.getInputStream();
 
-			send(stdin,
-					"{\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{}," + "\"clientInfo\":{\"name\":\"sanity-test\",\"version\":\"1.0\"}},\"jsonrpc\":\"2.0\",\"id\":0}");
+			send(stdin, "{\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{},"
+					+ "\"clientInfo\":{\"name\":\"sanity-test\",\"version\":\"1.0\"}},\"jsonrpc\":\"2.0\",\"id\":0}");
 			String init = readResponse(stdout, 15_000);
 			assertNotNull(init, "No initialize response");
 			assertTrue(init.contains("\"serverInfo\""), init);
@@ -74,15 +74,15 @@ class NativeImageSanityIT {
 			assertTrue(tools.contains("\"remember\""), tools);
 			assertTrue(tools.contains("\"recall\""), tools);
 
-			send(stdin,
-					"{\"method\":\"tools/call\",\"params\":{\"name\":\"remember\",\"arguments\":{\"text\":" + "\"I joined Hooli in 2018 as a director of engineering.\"}},\"jsonrpc\":\"2.0\",\"id\":2}");
+			send(stdin, "{\"method\":\"tools/call\",\"params\":{\"name\":\"remember\",\"arguments\":{\"text\":"
+					+ "\"I joined Hooli in 2018 as a director of engineering.\"}},\"jsonrpc\":\"2.0\",\"id\":2}");
 			String remembered = readResponse(stdout, 20_000);
 			assertNotNull(remembered, "No remember response");
 			assertTrue(remembered.contains("obs-1"), remembered);
 
 			// Lexical recall in M0: the query must share a term with the observation (A1 uses "work"; this one "Hooli").
-			send(stdin,
-					"{\"method\":\"tools/call\",\"params\":{\"name\":\"recall\",\"arguments\":{\"query\":" + "\"when did Mattias join Hooli\"}},\"jsonrpc\":\"2.0\",\"id\":3}");
+			send(stdin, "{\"method\":\"tools/call\",\"params\":{\"name\":\"recall\",\"arguments\":{\"query\":"
+					+ "\"when did Mattias join Hooli\"}},\"jsonrpc\":\"2.0\",\"id\":3}");
 			String recalled = readResponse(stdout, 20_000);
 			assertNotNull(recalled, "No recall response");
 			assertTrue(recalled.contains("Hooli"), recalled);
@@ -99,16 +99,17 @@ class NativeImageSanityIT {
 			assertTrue(proposed.contains("\"predicate\":\"lives_in\"") || proposed.contains("lives_in"),
 					"the proposal did not become a fact: " + proposed);
 			assertFalse(proposed.contains("\"isError\":true"), proposed);
-			send(stdin, "{\"method\":\"tools/call\",\"params\":{\"name\":\"remember\",\"arguments\":{\"text\":"
-					+ "\"Yes, that one.\",\"resolve\":[{\"question_id\":\"q-99\",\"choice\":\"new\"}]}},"
-					+ "\"jsonrpc\":\"2.0\",\"id\":6}");
+			send(stdin,
+					"{\"method\":\"tools/call\",\"params\":{\"name\":\"remember\",\"arguments\":{\"text\":"
+							+ "\"Yes, that one.\",\"resolve\":[{\"question_id\":\"q-99\",\"choice\":\"new\"}]}},"
+							+ "\"jsonrpc\":\"2.0\",\"id\":6}");
 			String resolved = readResponse(stdout, 20_000);
 			assertNotNull(resolved, "No response to remember with resolve");
 			assertTrue(resolved.contains("NOT_FOUND"), "resolve must reach the engine (no such question): " + resolved);
 
 			// ServiceLoader inside the image (application.properties, auto-service-loader-registration).
-			send(stdin,
-					"{\"method\":\"tools/call\",\"params\":{\"name\":\"status\",\"arguments\":{}}," + "\"jsonrpc\":\"2.0\",\"id\":4}");
+			send(stdin, "{\"method\":\"tools/call\",\"params\":{\"name\":\"status\",\"arguments\":{}},"
+					+ "\"jsonrpc\":\"2.0\",\"id\":4}");
 			String status = readResponse(stdout, 20_000);
 			assertNotNull(status, "No status response");
 			assertTrue(status.contains("openai-compatible"), "ModelProvider not found by ServiceLoader: " + status);
@@ -126,7 +127,10 @@ class NativeImageSanityIT {
 			OutputStream stdin = process.getOutputStream();
 			InputStream stdout = process.getInputStream();
 			send(stdin,
-					"{\"method\":\"server/discover\",\"params\":{\"_meta\":{" + "\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\"," + "\"io.modelcontextprotocol/clientInfo\":{\"name\":\"sanity-test\",\"version\":\"1.0\"}," + "\"io.modelcontextprotocol/clientCapabilities\":{}}},\"jsonrpc\":\"2.0\",\"id\":0}");
+					"{\"method\":\"server/discover\",\"params\":{\"_meta\":{"
+							+ "\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\","
+							+ "\"io.modelcontextprotocol/clientInfo\":{\"name\":\"sanity-test\",\"version\":\"1.0\"},"
+							+ "\"io.modelcontextprotocol/clientCapabilities\":{}}},\"jsonrpc\":\"2.0\",\"id\":0}");
 			String discover = readResponse(stdout, 15_000);
 			assertNotNull(discover, "No server/discover response");
 			assertTrue(discover.contains("supportedVersions") || discover.contains("2026-07-28"), discover);
@@ -146,22 +150,26 @@ class NativeImageSanityIT {
 		try {
 			OutputStream stdin = process.getOutputStream();
 			InputStream stdout = process.getInputStream();
-			send(stdin,
-					"{\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{}," + "\"clientInfo\":{\"name\":\"sanity-test\",\"version\":\"1.0\"}},\"jsonrpc\":\"2.0\",\"id\":0}");
+			send(stdin, "{\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{},"
+					+ "\"clientInfo\":{\"name\":\"sanity-test\",\"version\":\"1.0\"}},\"jsonrpc\":\"2.0\",\"id\":0}");
 			assertNotNull(readResponse(stdout, 15_000), "No initialize response");
 			send(stdin, "{\"method\":\"notifications/initialized\",\"jsonrpc\":\"2.0\"}");
-			send(stdin, "{\"method\":\"tools/call\",\"params\":{\"name\":\"status\",\"arguments\":{}},\"jsonrpc\":\"2.0\",\"id\":1}");
+			send(stdin,
+					"{\"method\":\"tools/call\",\"params\":{\"name\":\"status\",\"arguments\":{}},\"jsonrpc\":\"2.0\",\"id\":1}");
 			String status = readResponse(stdout, 20_000);
 			assertNotNull(status, "No status response");
 			// The tool result is JSON inside JSON, so the quotes arrive escaped.
-			assertTrue(status.contains("vec") && status.contains("v0.1."), "sqlite-vec did not load in the native image: " + status);
+			assertTrue(status.contains("vec") && status.contains("v0.1."),
+					"sqlite-vec did not load in the native image: " + status);
 		} finally {
 			process.destroyForcibly();
 			process.waitFor();
 		}
 	}
 
-	/** P3: foreign downcalls into ONNX Runtime inside the native image. Runs when MNEMIC_ORT_LIBRARY names the library. */
+	/**
+	 * P3: foreign downcalls into ONNX Runtime inside the native image. Runs when MNEMIC_ORT_LIBRARY names the library.
+	 */
 	@Test
 	void nativeBinaryCallsOnnxRuntime() throws Exception {
 		String lib = System.getenv("MNEMIC_ORT_LIBRARY");
@@ -171,11 +179,12 @@ class NativeImageSanityIT {
 		try {
 			OutputStream stdin = process.getOutputStream();
 			InputStream stdout = process.getInputStream();
-			send(stdin,
-					"{\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{}," + "\"clientInfo\":{\"name\":\"sanity-test\",\"version\":\"1.0\"}},\"jsonrpc\":\"2.0\",\"id\":0}");
+			send(stdin, "{\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{},"
+					+ "\"clientInfo\":{\"name\":\"sanity-test\",\"version\":\"1.0\"}},\"jsonrpc\":\"2.0\",\"id\":0}");
 			assertNotNull(readResponse(stdout, 15_000), "No initialize response");
 			send(stdin, "{\"method\":\"notifications/initialized\",\"jsonrpc\":\"2.0\"}");
-			send(stdin, "{\"method\":\"tools/call\",\"params\":{\"name\":\"status\",\"arguments\":{}},\"jsonrpc\":\"2.0\",\"id\":1}");
+			send(stdin,
+					"{\"method\":\"tools/call\",\"params\":{\"name\":\"status\",\"arguments\":{}},\"jsonrpc\":\"2.0\",\"id\":1}");
 			String status = readResponse(stdout, 20_000);
 			assertNotNull(status, "No status response");
 			assertTrue(status.contains("onnxruntime 1.") && status.contains("available"),
@@ -191,30 +200,36 @@ class NativeImageSanityIT {
 	void nativeBinaryEmbedsText() throws Exception {
 		String lib = System.getenv("MNEMIC_ORT_LIBRARY");
 		String model = System.getenv("MNEMIC_EMBED_MODEL");
-		org.junit.jupiter.api.Assumptions.assumeTrue(lib != null && Files.exists(Path.of(lib)) && model != null
-				&& Files.exists(Path.of(model, "model.onnx")), "MNEMIC_ORT_LIBRARY / MNEMIC_EMBED_MODEL not set");
+		org.junit.jupiter.api.Assumptions.assumeTrue(
+				lib != null && Files.exists(Path.of(lib)) && model != null
+						&& Files.exists(Path.of(model, "model.onnx")),
+				"MNEMIC_ORT_LIBRARY / MNEMIC_EMBED_MODEL not set");
 		Process process = start("-Dmnemic.ort-library=" + lib, "-Dmnemic.embed-model=" + model);
 		try {
 			OutputStream stdin = process.getOutputStream();
 			InputStream stdout = process.getInputStream();
-			send(stdin,
-					"{\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{}," + "\"clientInfo\":{\"name\":\"sanity-test\",\"version\":\"1.0\"}},\"jsonrpc\":\"2.0\",\"id\":0}");
+			send(stdin, "{\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{},"
+					+ "\"clientInfo\":{\"name\":\"sanity-test\",\"version\":\"1.0\"}},\"jsonrpc\":\"2.0\",\"id\":0}");
 			assertNotNull(readResponse(stdout, 15_000), "No initialize response");
 			send(stdin, "{\"method\":\"notifications/initialized\",\"jsonrpc\":\"2.0\"}");
 			// The model loads in the background; the server answers at once and status says where the loader is.
 			String status = null;
 			long deadline = System.currentTimeMillis() + 60_000;
 			for (int id = 1; System.currentTimeMillis() < deadline; id++) {
-				send(stdin, "{\"method\":\"tools/call\",\"params\":{\"name\":\"status\",\"arguments\":{}},\"jsonrpc\":\"2.0\",\"id\":" + id + "}");
+				send(stdin,
+						"{\"method\":\"tools/call\",\"params\":{\"name\":\"status\",\"arguments\":{}},\"jsonrpc\":\"2.0\",\"id\":"
+								+ id + "}");
 				status = readResponse(stdout, 30_000);
 				assertNotNull(status, "No status response");
 				if (status.contains("dims") && status.contains("384")) {
 					break;
 				}
-				assertTrue(!status.contains("\\\"state\\\":\\\"failed\\\""), "the embedder failed in the native image: " + status);
+				assertTrue(!status.contains("\\\"state\\\":\\\"failed\\\""),
+						"the embedder failed in the native image: " + status);
 				Thread.sleep(500);
 			}
-			assertTrue(status != null && status.contains("dims") && status.contains("384"), "the embedder did not run in the native image: " + status);
+			assertTrue(status != null && status.contains("dims") && status.contains("384"),
+					"the embedder did not run in the native image: " + status);
 			System.out.println(status);
 		} finally {
 			process.destroyForcibly();
@@ -224,8 +239,8 @@ class NativeImageSanityIT {
 
 	/**
 	 * First use inside the image: nothing on disk, a local mirror of the runtime jar and the model, the server
-	 * answering at once, and the channel alive once the fetch lands; the runtime library comes out of the image
-	 * itself, nothing executable is fetched. Needs MNEMIC_EMBED_MIRROR (a copy of the model's repository files).
+	 * answering at once, and the channel alive once the fetch lands; the runtime library comes out of the image itself,
+	 * nothing executable is fetched. Needs MNEMIC_EMBED_MIRROR (a copy of the model's repository files).
 	 */
 	@Test
 	void nativeBinaryFetchesTheModelOnFirstUse() throws Exception {
@@ -238,8 +253,8 @@ class NativeImageSanityIT {
 		try {
 			OutputStream stdin = process.getOutputStream();
 			InputStream stdout = process.getInputStream();
-			send(stdin,
-					"{\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{}," + "\"clientInfo\":{\"name\":\"sanity-test\",\"version\":\"1.0\"}},\"jsonrpc\":\"2.0\",\"id\":0}");
+			send(stdin, "{\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{},"
+					+ "\"clientInfo\":{\"name\":\"sanity-test\",\"version\":\"1.0\"}},\"jsonrpc\":\"2.0\",\"id\":0}");
 			assertNotNull(readResponse(stdout, 15_000), "No initialize response");
 			send(stdin, "{\"method\":\"notifications/initialized\",\"jsonrpc\":\"2.0\"}");
 			// Remember works while the fetch runs.
@@ -253,7 +268,9 @@ class NativeImageSanityIT {
 			long deadline = System.currentTimeMillis() + 180_000;
 			int id = 2;
 			while (System.currentTimeMillis() < deadline) {
-				send(stdin, "{\"method\":\"tools/call\",\"params\":{\"name\":\"status\",\"arguments\":{}},\"jsonrpc\":\"2.0\",\"id\":" + id++ + "}");
+				send(stdin,
+						"{\"method\":\"tools/call\",\"params\":{\"name\":\"status\",\"arguments\":{}},\"jsonrpc\":\"2.0\",\"id\":"
+								+ id++ + "}");
 				status = readResponse(stdout, 30_000);
 				assertNotNull(status, "No status response");
 				if (status.contains("\\\"state\\\":\\\"ready\\\"")) {
@@ -263,11 +280,16 @@ class NativeImageSanityIT {
 				Thread.sleep(2_000);
 			}
 			assertTrue(status != null && status.contains("ready"), "embedder never became ready: " + status);
-			assertTrue(Files.exists(models.resolve(se.hirt.mnemic.embed.ModelFetcher.MODEL_ID).resolve("model.onnx")), "fetched into the models directory");
-			assertTrue(Files.exists(models.resolve("onnxruntime-" + se.hirt.mnemic.embed.OrtLibrary.VERSION)), "the runtime was written out of the image");
-			assertTrue(status.contains("\\\"semantic\\\":\\\"on\\\""), "channels report the semantic one on: " + status);
+			assertTrue(Files.exists(models.resolve(se.hirt.mnemic.embed.ModelFetcher.MODEL_ID).resolve("model.onnx")),
+					"fetched into the models directory");
+			assertTrue(Files.exists(models.resolve("onnxruntime-" + se.hirt.mnemic.embed.OrtLibrary.VERSION)),
+					"the runtime was written out of the image");
+			assertTrue(status.contains("\\\"semantic\\\":\\\"on\\\""),
+					"channels report the semantic one on: " + status);
 			// The channel is alive: a paraphrase finds the observation.
-			send(stdin, "{\"method\":\"tools/call\",\"params\":{\"name\":\"recall\",\"arguments\":{\"query\":\"where do I bank\"}},\"jsonrpc\":\"2.0\",\"id\":" + id + "}");
+			send(stdin,
+					"{\"method\":\"tools/call\",\"params\":{\"name\":\"recall\",\"arguments\":{\"query\":\"where do I bank\"}},\"jsonrpc\":\"2.0\",\"id\":"
+							+ id + "}");
 			String recalled = readResponse(stdout, 30_000);
 			assertNotNull(recalled, "No recall response");
 			assertTrue(recalled.contains("Nordbank") && recalled.contains("semantic"), recalled);
@@ -277,7 +299,7 @@ class NativeImageSanityIT {
 		}
 	}
 
-	private static Process start(String... extra) throws Exception {
+	private static Process start(String ... extra) throws Exception {
 		Path binary = Path.of(System.getProperty("native.image.path"));
 		assertTrue(Files.exists(binary), "Native binary not found at: " + binary);
 		Path home = Files.createTempDirectory("mnemic-native-it");
@@ -286,7 +308,8 @@ class NativeImageSanityIT {
 				"-Dquarkus.log.file.path=" + home.resolve("mnemic.log").toAbsolutePath()));
 		// No test fetches 480 MB from the internet by accident: the semantic channel is off unless a test says so,
 		// and the server under test never sees this JVM's MNEMIC_* environment (the fetch test must start from nothing).
-		if (java.util.Arrays.stream(extra).noneMatch(a -> a.startsWith("-Dmnemic.embed") || a.startsWith("-Dmnemic.ort-library"))) {
+		if (java.util.Arrays.stream(extra)
+				.noneMatch(a -> a.startsWith("-Dmnemic.embed") || a.startsWith("-Dmnemic.ort-library"))) {
 			cmd.add("-Dmnemic.embed=off");
 		}
 		cmd.addAll(List.of(extra));

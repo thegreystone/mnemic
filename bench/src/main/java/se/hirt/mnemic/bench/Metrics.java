@@ -31,9 +31,9 @@ package se.hirt.mnemic.bench;
 import java.util.*;
 
 /**
- * The numbers the benchmark reports: means with bootstrap intervals, per-type slices, session
- * recall@k, latency percentiles, and the paired bootstrap that decides whether two runs differ. Bootstrap uses a fixed
- * seed so a report is reproducible from its inputs.
+ * The numbers the benchmark reports: means with bootstrap intervals, per-type slices, session recall@k, latency
+ * percentiles, and the paired bootstrap that decides whether two runs differ. Bootstrap uses a fixed seed so a report
+ * is reproducible from its inputs.
  */
 public final class Metrics {
 

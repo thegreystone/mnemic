@@ -83,8 +83,8 @@ class HybridRecallTest {
 				remember(e, "Mattias works on profiler item " + i + " at Hooli.",
 						Instant.parse("2026-01-01T00:00:00Z"));
 			}
-			RecallResult r = e.recall()
-					.recall("where does Mattias work", Instant.parse("2015-06-01T00:00:00Z"), 800, 10);
+			RecallResult r = e.recall().recall("where does Mattias work", Instant.parse("2015-06-01T00:00:00Z"), 800,
+					10);
 			assertEquals(1, r.hits().size(), r.text());
 			assertTrue(r.hits().getFirst().observation().text().contains("Initrode"));
 			assertEquals(1, r.candidates(), "the 95 later observations never entered the candidate list");

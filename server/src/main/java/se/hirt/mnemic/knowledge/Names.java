@@ -81,24 +81,25 @@ public final class Names {
 	}
 
 	/**
-	 * Words that say what kind of thing an entity is rather than which one: "Kanton Luzern" and "Kanton Schwyz"
-	 * share "kanton" and nothing that identifies. Dropped from the identity tokens of a name of that type before
-	 * fuzzy matching. English, German, Swedish, and the usual company suffixes.
+	 * Words that say what kind of thing an entity is rather than which one: "Kanton Luzern" and "Kanton Schwyz" share
+	 * "kanton" and nothing that identifies. Dropped from the identity tokens of a name of that type before fuzzy
+	 * matching. English, German, Swedish, and the usual company suffixes.
 	 */
-	private static final Map<String, Set<String>> TYPE_WORDS = Map.of(
-			"place", Set.of("kanton", "canton", "county", "province", "region", "state", "district", "lake", "mount",
-					"mountain", "river", "island", "city", "town", "village", "municipality", "kommun", "gemeinde", "stadt",
+	private static final Map<String, Set<String>> TYPE_WORDS = Map.of("place",
+			Set.of("kanton", "canton", "county", "province", "region", "state", "district", "lake", "mount", "mountain",
+					"river", "island", "city", "town", "village", "municipality", "kommun", "gemeinde", "stadt",
 					"bezirk", "landkreis", "lan", "sjo", "berg", "see"),
-			"organization", Set.of("company", "corporation", "corp", "inc", "ltd", "llc", "plc", "gmbh", "ag", "ab",
-					"oy", "asa", "sa", "bv", "nv", "group", "holding", "holdings", "foundation", "institute", "university",
-					"school", "bank", "agency", "department", "ministry", "verein", "stiftung", "forening"),
-			"project", Set.of("project", "projekt", "initiative", "program", "programme"),
-			"team", Set.of("team", "group", "squad", "unit", "department"),
-			"event", Set.of("conference", "meeting", "summit", "workshop", "festival", "trip", "review"));
+			"organization",
+			Set.of("company", "corporation", "corp", "inc", "ltd", "llc", "plc", "gmbh", "ag", "ab", "oy", "asa", "sa",
+					"bv", "nv", "group", "holding", "holdings", "foundation", "institute", "university", "school",
+					"bank", "agency", "department", "ministry", "verein", "stiftung", "forening"),
+			"project", Set.of("project", "projekt", "initiative", "program", "programme"), "team",
+			Set.of("team", "group", "squad", "unit", "department"), "event",
+			Set.of("conference", "meeting", "summit", "workshop", "festival", "trip", "review"));
 
 	/**
-	 * A country is a place that decides disjointness (family Q): two different countries do not overlap, so
-	 * "only within Switzerland" answers "in Sweden" with no. Everything that accepts a place accepts a country.
+	 * A country is a place that decides disjointness (family Q): two different countries do not overlap, so "only
+	 * within Switzerland" answers "in Sweden" with no. Everything that accepts a place accepts a country.
 	 */
 	public static boolean isPlace(String type) {
 		return "place".equals(type) || "country".equals(type);
@@ -134,13 +135,13 @@ public final class Names {
 		}
 		String t = norm(type);
 		return switch (t) {
-			case "company", "org", "organisation", "employer", "firm" -> "organization";
-			case "city", "town", "region", "location", "village" -> "place";
-			case "nation" -> "country";
-			case "human", "people", "individual" -> "person";
-			case "tool", "library", "language", "framework", "software", "database", "platform" -> "technology";
-			case "team", "group" -> "team";
-			default -> t;
+		case "company", "org", "organisation", "employer", "firm" -> "organization";
+		case "city", "town", "region", "location", "village" -> "place";
+		case "nation" -> "country";
+		case "human", "people", "individual" -> "person";
+		case "tool", "library", "language", "framework", "software", "database", "platform" -> "technology";
+		case "team", "group" -> "team";
+		default -> t;
 		};
 	}
 }

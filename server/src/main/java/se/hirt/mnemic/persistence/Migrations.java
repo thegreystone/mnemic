@@ -49,25 +49,12 @@ import java.util.regex.Pattern;
 final class Migrations {
 
 	/** Add new migrations here, in order. Never edit an applied one. */
-	static final List<String> MIGRATIONS = List.of(
-			"V001__observations.sql",
-			"V002__facts.sql",
-			"V003__time.sql",
-			"V004__questions.sql",
-			"V005__event_keys.sql",
-			"V006__proposer.sql",
-			"V007__located_in_nests.sql",
-			"V008__sibling_qualifiers.sql",
-			"V009__inverse_lexicon.sql",
-			"V010__event_lexicon.sql",
-			"V011__qualifier_convention.sql",
-			"V012__fact_mode.sql",
-			"V013__related_to_qualifier.sql",
-			"V014__rerender_after_template_change.sql",
-			"V015__embedding.sql",
-			"V016__fact_observation_and_chunks.sql",
-			"V017__language.sql",
-			"V018__retired_observation.sql");
+	static final List<String> MIGRATIONS = List.of("V001__observations.sql", "V002__facts.sql", "V003__time.sql",
+			"V004__questions.sql", "V005__event_keys.sql", "V006__proposer.sql", "V007__located_in_nests.sql",
+			"V008__sibling_qualifiers.sql", "V009__inverse_lexicon.sql", "V010__event_lexicon.sql",
+			"V011__qualifier_convention.sql", "V012__fact_mode.sql", "V013__related_to_qualifier.sql",
+			"V014__rerender_after_template_change.sql", "V015__embedding.sql", "V016__fact_observation_and_chunks.sql",
+			"V017__language.sql", "V018__retired_observation.sql");
 
 	private static final Pattern NAME = Pattern.compile("^V(\\d+)__(.+)\\.sql$");
 
@@ -94,20 +81,20 @@ final class Migrations {
 	private static void applyAll(Connection c) throws SQLException {
 		try (Statement st = c.createStatement()) {
 			st.execute("""
-			           CREATE TABLE IF NOT EXISTS schema_version (
-			               id          INTEGER PRIMARY KEY AUTOINCREMENT,
-			               version     INTEGER NOT NULL UNIQUE,
-			               description TEXT NOT NULL,
-			               checksum    TEXT NOT NULL,
-			               applied_at  TEXT NOT NULL
-			           )""");
+					CREATE TABLE IF NOT EXISTS schema_version (
+					    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+					    version     INTEGER NOT NULL UNIQUE,
+					    description TEXT NOT NULL,
+					    checksum    TEXT NOT NULL,
+					    applied_at  TEXT NOT NULL
+					)""");
 		}
 		int known = MIGRATIONS.size();
 		try (PreparedStatement ps = c.prepareStatement("SELECT COALESCE(MAX(version), 0) FROM schema_version");
 				ResultSet rs = ps.executeQuery()) {
 			if (rs.next() && rs.getInt(1) > known) {
-				throw MnemicException.internal("Database schema version " + rs.getInt(
-						1) + " is newer than this binary understands (" + known + "). Upgrade Mnemic.", null);
+				throw MnemicException.internal("Database schema version " + rs.getInt(1)
+						+ " is newer than this binary understands (" + known + "). Upgrade Mnemic.", null);
 			}
 		}
 		for (String file : MIGRATIONS) {
@@ -165,8 +152,8 @@ final class Migrations {
 	 * while any DDL change still trips the guard.
 	 */
 	static String checksum(String sql) {
-		String canonical = String.join(";", splitStatements(sql)).replaceAll("\\s+", " ")
-				.replaceAll("\\s*([(),;])\\s*", "$1");
+		String canonical = String.join(";", splitStatements(sql)).replaceAll("\\s+", " ").replaceAll("\\s*([(),;])\\s*",
+				"$1");
 		return Json.hashText(canonical);
 	}
 

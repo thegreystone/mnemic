@@ -35,10 +35,10 @@ import se.hirt.mnemic.persistence.Row;
  * (DESIGN.md: corrections preserve history; EVALUATION.md metric "silent overwrite count = 0").
  *
  * @param kind
- * 		event | correction | supersession | invalidation | entity_ended
+ *            event | correction | supersession | invalidation | entity_ended
  */
 public record Supersession(long id, long factId, Long supersededById, String kind, String reason, Long eventId,
-                           Long observationId, String closedAt, String recordedAt) {
+		Long observationId, String closedAt, String recordedAt) {
 
 	static Supersession from(Row r) {
 		return new Supersession(r.lng("id"), r.lng("fact_id"), r.lngOrNull("superseded_by_id"), r.str("kind"),

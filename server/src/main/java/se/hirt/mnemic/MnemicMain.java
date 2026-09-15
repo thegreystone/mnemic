@@ -47,8 +47,8 @@ import java.nio.file.Paths;
  * runtime init, so it has to be rewrapped before Quarkus boots. Stdin is fine: the default charset has been UTF-8 since
  * JDK 18.
  * <p>
- * Desktop MCP hosts on Windows may spawn the server with {@code C:\WINDOWS\system32} as the working directory,
- * so the working directory is never relied on. Quarkus lists {@code ${user.dir}/config} during boot, and
+ * Desktop MCP hosts on Windows may spawn the server with {@code C:\WINDOWS\system32} as the working directory, so the
+ * working directory is never relied on. Quarkus lists {@code ${user.dir}/config} during boot, and
  * {@code system32\config} exists but cannot be listed, so boot fails with {@code AccessDeniedException}. If the working
  * directory's {@code config} entry cannot be listed, {@code user.dir} is redirected to the data home before Quarkus
  * starts. Nothing in the server resolves paths relative to the working directory.
@@ -56,7 +56,7 @@ import java.nio.file.Paths;
 @QuarkusMain
 public class MnemicMain {
 
-	public static void main(String... args) {
+	public static void main(String ... args) {
 		System.setOut(new PrintStream(new FileOutputStream(FileDescriptor.out), true, StandardCharsets.UTF_8));
 		ensureScannableWorkingDirectory();
 		Quarkus.run(args);

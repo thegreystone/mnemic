@@ -49,14 +49,14 @@ public record ModelSpec(String provider, String model, String endpoint, String a
 		}
 		int colon = s.indexOf(':');
 		if (colon <= 0) {
-			throw new IllegalArgumentException(
-					"model spec '" + text + "' needs a provider prefix, e.g. " + "anthropic:claude-haiku-4-5, openai:gpt-4o-mini, lmstudio:<model-id>");
+			throw new IllegalArgumentException("model spec '" + text + "' needs a provider prefix, e.g. "
+					+ "anthropic:claude-haiku-4-5, openai:gpt-4o-mini, lmstudio:<model-id>");
 		}
 		return new ModelSpec(s.substring(0, colon).toLowerCase(), s.substring(colon + 1), endpoint, apiKeyEnvOverride);
 	}
 
 	/** The first of the candidate environment variables that is set, or null. */
-	public static String key(String override, String... conventional) {
+	public static String key(String override, String ... conventional) {
 		if (override != null && !override.isBlank()) {
 			return System.getenv(override);
 		}

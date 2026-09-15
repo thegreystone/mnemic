@@ -67,8 +67,9 @@ final class ToolSupport {
 			return ToolResponse.error(Json.write(e.toErrorMap()));
 		} catch (RuntimeException e) {
 			LOG.errorf(e, "%s failed unexpectedly", tool);
-			return ToolResponse.error(Json.write(MnemicException.internal(
-							"Internal error in " + tool + ": " + e.getClass().getSimpleName() + ": " + e.getMessage(), e)
+			return ToolResponse.error(Json.write(MnemicException
+					.internal("Internal error in " + tool + ": " + e.getClass().getSimpleName() + ": " + e.getMessage(),
+							e)
 					.toErrorMap()));
 		}
 	}

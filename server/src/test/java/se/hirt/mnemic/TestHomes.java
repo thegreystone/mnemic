@@ -116,7 +116,7 @@ public final class TestHomes {
 	}
 
 	/** {@code remember} that also answers open questions (EVALUATION.md B2, D3). */
-	public static RememberOutcome remember(Engine e, String text, P proposal, Resolve... resolves) {
+	public static RememberOutcome remember(Engine e, String text, P proposal, Resolve ... resolves) {
 		return e.remember(text, Source.user(), null, proposal == null ? null : proposal.build(),
 				Proposal.CURRENT_SPEC_VERSION, null, List.of(resolves));
 	}
@@ -136,8 +136,8 @@ public final class TestHomes {
 
 	/** A fact reference with every field, for the temporal scenarios. */
 	public static FactRef fact(
-			String subject, String predicate, String object, String qualifier, String scope,
-			String start, String end, Boolean ended, List<String> derivedFrom, String derivationKind) {
+		String subject, String predicate, String object, String qualifier, String scope, String start, String end,
+		Boolean ended, List<String> derivedFrom, String derivationKind) {
 		ValidTime vt = start == null && end == null ? null : new ValidTime(start, end, null);
 		return new FactRef(subject, predicate, object, qualifier, scope, vt, ended, derivedFrom,
 				derivationKind == null ? null : new Derivation(derivationKind), null, null, null);
@@ -155,12 +155,12 @@ public final class TestHomes {
 			return this;
 		}
 
-		public P entity(String ref, String name, String type, String... aliases) {
+		public P entity(String ref, String name, String type, String ... aliases) {
 			entities.add(new EntityRef(ref, name, type, List.of(aliases)));
 			return this;
 		}
 
-		public P event(String ref, String type, String start, String... participants) {
+		public P event(String ref, String type, String start, String ... participants) {
 			events.add(new EventRef(ref, type, List.of(participants),
 					start == null ? null : new ValidTime(start, null, null)));
 			return this;

@@ -34,7 +34,7 @@ import java.util.List;
 
 /** An occurrence at a point or interval in valid time, with participants (DESIGN.md, Events versus Facts). */
 public record Event(long id, String type, long observationId, String validStart, String validStartPrecision,
-                    String validEnd, String validEndPrecision, String rendering, List<Long> participants) {
+		String validEnd, String validEndPrecision, String rendering, List<Long> participants) {
 
 	public String ref() {
 		return "evt-" + id;

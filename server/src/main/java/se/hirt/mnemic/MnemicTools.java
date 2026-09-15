@@ -76,33 +76,33 @@ public class MnemicTools {
 	MnemicConfig config;
 
 	@Tool(name = "remember", description = ToolDescriptions.REMEMBER, annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = false, openWorldHint = false))
-	ToolResponse remember(
-			@ToolArg(description = "The observation, verbatim. Required.") String text,
-			@ToolArg(description = "user | assistant | conversation | document | connector (default user)")
-			Optional<String> source_kind,
-			@ToolArg(description = "Document path, message id, or conversation id the text came from")
-			Optional<String> source_ref,
-			@ToolArg(description = "Chunk index within source_ref when a larger source was split")
-			Optional<Integer> source_chunk,
-			@ToolArg(description = "Your session id, if you have one") Optional<String> session,
-			@ToolArg(description = "When this was said, ISO-8601 instant or date (default now). Use the conversation "
-					+ "date when replaying older history.")
-			Optional<String> observed_at,
-			@ToolArg(required = false, description = ToolDescriptions.REMEMBER_PROPOSAL) Map<String, Object> proposal,
-			@ToolArg(description = "Extraction spec version the proposal follows (current: 1)")
-			Optional<Integer> spec_version,
-			@ToolArg(description = "Client-generated key; repeating a call with the same key returns the same id")
-			Optional<String> idempotency_key,
-			@ToolArg(required = false, description = ToolDescriptions.REMEMBER_RESOLVE) List<Map<String, Object>> resolve) {
+	ToolResponse remember(@ToolArg(description = "The observation, verbatim. Required.")
+	String text, @ToolArg(description = "user | assistant | conversation | document | connector (default user)")
+	Optional<String> source_kind,
+		@ToolArg(description = "Document path, message id, or conversation id the text came from")
+		Optional<String> source_ref,
+		@ToolArg(description = "Chunk index within source_ref when a larger source was split")
+		Optional<Integer> source_chunk, @ToolArg(description = "Your session id, if you have one")
+		Optional<String> session,
+		@ToolArg(description = "When this was said, ISO-8601 instant or date (default now). Use the conversation "
+				+ "date when replaying older history.")
+		Optional<String> observed_at, @ToolArg(required = false, description = ToolDescriptions.REMEMBER_PROPOSAL)
+		Map<String, Object> proposal,
+		@ToolArg(description = "Extraction spec version the proposal follows (current: 1)")
+		Optional<Integer> spec_version,
+		@ToolArg(description = "Client-generated key; repeating a call with the same key returns the same id")
+		Optional<String> idempotency_key, @ToolArg(required = false, description = ToolDescriptions.REMEMBER_RESOLVE)
+		List<Map<String, Object>> resolve) {
 		return ToolSupport.json("remember", () -> {
 			Source source = new Source(source_kind.orElse("user"), source_ref.orElse(null), source_chunk.orElse(null),
 					null, session.orElse(null));
-			List<Resolve> resolves = (resolve == null ? List.<Map<String, Object>>of() : resolve).stream().map(m -> {
+			List<Resolve> resolves = (resolve == null ? List.<Map<String, Object>> of() : resolve).stream().map(m -> {
 				Object id = m.containsKey("question_id") ? m.get("question_id") : m.get("question");
 				if (id == null) {
 					throw MnemicException.invalidArgument("Each resolve entry needs 'question_id' (q-N) and 'choice'.");
 				}
-				return new Resolve(String.valueOf(id), m.get("choice") == null ? null : String.valueOf(m.get("choice")));
+				return new Resolve(String.valueOf(id),
+						m.get("choice") == null ? null : String.valueOf(m.get("choice")));
 			}).toList();
 			Proposal.Parsed parsed = Engine.proposalWithWarnings(proposal);
 			RememberOutcome o = engine.remember(text, source, observed_at.map(MnemicTools::instant).orElse(null),
@@ -135,16 +135,16 @@ public class MnemicTools {
 
 	@Tool(name = "recall", description = ToolDescriptions.RECALL, annotations = @Tool.Annotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
 	ToolResponse recall(
-			@ToolArg(description = "The question or topic, in natural language. Omit for the session briefing.")
-			Optional<String> query,
-			@ToolArg(description = "Knowledge as it stood at this ISO date/instant: facts by their valid time, "
-					+ "observations by when they were observed")
-			Optional<String> as_of,
-			@ToolArg(description = "Token budget for the returned block (default 800)") Optional<Integer> max_tokens,
-			@ToolArg(description = "Maximum number of items (default 10)") Optional<Integer> limit,
-			@ToolArg(description = "Also return ended and superseded facts (default false); past tense in the "
-					+ "question usually means yes")
-			Optional<Boolean> include_history) {
+		@ToolArg(description = "The question or topic, in natural language. Omit for the session briefing.")
+		Optional<String> query,
+		@ToolArg(description = "Knowledge as it stood at this ISO date/instant: facts by their valid time, "
+				+ "observations by when they were observed")
+		Optional<String> as_of, @ToolArg(description = "Token budget for the returned block (default 800)")
+		Optional<Integer> max_tokens, @ToolArg(description = "Maximum number of items (default 10)")
+		Optional<Integer> limit,
+		@ToolArg(description = "Also return ended and superseded facts (default false); past tense in the "
+				+ "question usually means yes")
+		Optional<Boolean> include_history) {
 		return ToolSupport.text("recall", () -> {
 			if (query.isEmpty() || query.get().isBlank()) {
 				return engine.briefing(max_tokens.orElse(800));
@@ -156,9 +156,9 @@ public class MnemicTools {
 	}
 
 	@Tool(name = "history", description = ToolDescriptions.HISTORY, annotations = @Tool.Annotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
-	ToolResponse history(
-			@ToolArg(description = "Name, alias, or id (ent-N) of the entity") String entity,
-			@ToolArg(description = "Only this predicate, e.g. works_at") Optional<String> predicate) {
+	ToolResponse history(@ToolArg(description = "Name, alias, or id (ent-N) of the entity")
+	String entity, @ToolArg(description = "Only this predicate, e.g. works_at")
+	Optional<String> predicate) {
 		return ToolSupport.json("history", () -> {
 			Entity e = engine.entities().byRef(entity)
 					.orElseThrow(() -> MnemicException.notFound("No entity matches '" + entity + "'."));
@@ -195,21 +195,18 @@ public class MnemicTools {
 				entries.add(m);
 			}
 			out.put("facts", entries);
-			out.put("tombstones", h.tombstones().stream()
-					.map(t -> Map.of("kind", "forgotten", "observation", "obs-" + t.observationId(), "forgotten_at",
-							t.forgottenAt())).toList());
+			out.put("tombstones", h.tombstones().stream().map(t -> Map.of("kind", "forgotten", "observation",
+					"obs-" + t.observationId(), "forgotten_at", t.forgottenAt())).toList());
 			return out;
 		});
 	}
 
 	@Tool(name = "correct", description = ToolDescriptions.CORRECT, annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
-	ToolResponse correct(
-			@ToolArg(description = "The fact to correct, e.g. f-12 (omit when correcting a predicate)")
-			Optional<String> fact_id,
-			@ToolArg(description = ToolDescriptions.CORRECT_REPLACEMENT) Map<String, Object> replacement,
-			@ToolArg(description = "Why, in the user's words") Optional<String> reason,
-			@ToolArg(description = "The predicate to correct instead of a fact, e.g. parent_of")
-			Optional<String> predicate) {
+	ToolResponse correct(@ToolArg(description = "The fact to correct, e.g. f-12 (omit when correcting a predicate)")
+	Optional<String> fact_id, @ToolArg(description = ToolDescriptions.CORRECT_REPLACEMENT)
+	Map<String, Object> replacement, @ToolArg(description = "Why, in the user's words")
+	Optional<String> reason, @ToolArg(description = "The predicate to correct instead of a fact, e.g. parent_of")
+	Optional<String> predicate) {
 		return ToolSupport.json("correct", () -> {
 			if (predicate.isPresent()) {
 				return engine.correctPredicate(predicate.get(), replacement, reason.orElse(null));
@@ -231,14 +228,15 @@ public class MnemicTools {
 	}
 
 	@Tool(name = "propose", description = ToolDescriptions.PROPOSE, annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = false, openWorldHint = false))
-	ToolResponse propose(
-			@ToolArg(description = "The observation, e.g. obs-48") String observation_id,
-			@ToolArg(description = "Structured proposal, as for remember: {entities, events, facts, predicates, closures}")
-			Map<String, Object> proposal) {
+	ToolResponse propose(@ToolArg(description = "The observation, e.g. obs-48")
+	String observation_id,
+		@ToolArg(description = "Structured proposal, as for remember: {entities, events, facts, predicates, closures}")
+		Map<String, Object> proposal) {
 		return ToolSupport.json("propose", () -> {
 			Proposal.Parsed parsed = Engine.proposalWithWarnings(proposal);
 			if (parsed == null) {
-				throw MnemicException.invalidArgument("'proposal' is required: the structured reading of the observation.");
+				throw MnemicException
+						.invalidArgument("'proposal' is required: the structured reading of the observation.");
 			}
 			long id = parseId(observation_id, "obs-");
 			Applied a = engine.propose(id, parsed.proposal());
@@ -256,12 +254,12 @@ public class MnemicTools {
 	}
 
 	@Tool(name = "retire", description = ToolDescriptions.RETIRE, annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
-	ToolResponse retire(
-			@ToolArg(description = "The observation to retire, e.g. obs-51") String observation_id,
-			@ToolArg(description = "Why, in the user's words") Optional<String> reason,
-			@ToolArg(description = "The observation that supersedes it, e.g. obs-52") Optional<String> superseded_by,
-			@ToolArg(description = "true to undo a retirement: the observation is live again (and back in pending_proposals if it never had a reading)")
-			Optional<Boolean> undo) {
+	ToolResponse retire(@ToolArg(description = "The observation to retire, e.g. obs-51")
+	String observation_id, @ToolArg(description = "Why, in the user's words")
+	Optional<String> reason, @ToolArg(description = "The observation that supersedes it, e.g. obs-52")
+	Optional<String> superseded_by,
+		@ToolArg(description = "true to undo a retirement: the observation is live again (and back in pending_proposals if it never had a reading)")
+		Optional<Boolean> undo) {
 		return ToolSupport.json("retire", () -> {
 			long id = parseId(observation_id, "obs-");
 			var out = new LinkedHashMap<String, Object>();
@@ -276,7 +274,8 @@ public class MnemicTools {
 			out.put("reason", o.retiredReason());
 			out.put("superseded_by", o.supersededBy() == null ? null : "obs-" + o.supersededBy());
 			// The facts this observation produced stay, and cite it: the caller decides whether they stand.
-			List<String> citing = engine.facts().factsOfObservation(id).stream().filter(Fact::current).map(Fact::ref).toList();
+			List<String> citing = engine.facts().factsOfObservation(id).stream().filter(Fact::current).map(Fact::ref)
+					.toList();
 			out.put("facts_citing", citing);
 			if (!citing.isEmpty()) {
 				out.put("note", ToolDescriptions.FACTS_CITING_NOTE);
@@ -287,9 +286,9 @@ public class MnemicTools {
 	}
 
 	@Tool(name = "retract", description = ToolDescriptions.RETRACT, annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
-	ToolResponse retract(
-			@ToolArg(description = "The fact to withdraw, e.g. f-91") String fact_id,
-			@ToolArg(description = "Why it was never true, in the user's words") Optional<String> reason) {
+	ToolResponse retract(@ToolArg(description = "The fact to withdraw, e.g. f-91")
+	String fact_id, @ToolArg(description = "Why it was never true, in the user's words")
+	Optional<String> reason) {
 		return ToolSupport.json("retract", () -> {
 			Corrected c = engine.correct(parseId(fact_id, "f-"), Map.of("wrong", true), reason.orElse(null));
 			var out = new LinkedHashMap<String, Object>();
@@ -300,10 +299,11 @@ public class MnemicTools {
 	}
 
 	@Tool(name = "get_entity", description = ToolDescriptions.GET_ENTITY, annotations = @Tool.Annotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
-	ToolResponse getEntity(@ToolArg(description = "Name, alias, or id (ent-N) of the entity") String entity) {
+	ToolResponse getEntity(@ToolArg(description = "Name, alias, or id (ent-N) of the entity")
+	String entity) {
 		return ToolSupport.json("get_entity", () -> {
-			Entity e = engine.entities().byRef(entity).orElseThrow(() -> MnemicException.notFound(
-					"No entity matches '" + entity + "'. Try recall with the name to see what is known."));
+			Entity e = engine.entities().byRef(entity).orElseThrow(() -> MnemicException
+					.notFound("No entity matches '" + entity + "'. Try recall with the name to see what is known."));
 			var out = new LinkedHashMap<String, Object>();
 			out.put("id", e.ref());
 			out.put("name", e.name());
@@ -334,21 +334,21 @@ public class MnemicTools {
 	}
 
 	@Tool(name = "forget", description = ToolDescriptions.FORGET, annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = true, openWorldHint = false))
-	ToolResponse forget(
-			@ToolArg(description = "The observation id, e.g. obs-12") String observation_id,
-			@ToolArg(required = false, description = ToolDescriptions.FORGET_KEEP_ENTITIES) Optional<Boolean> keep_entities) {
+	ToolResponse forget(@ToolArg(description = "The observation id, e.g. obs-12")
+	String observation_id, @ToolArg(required = false, description = ToolDescriptions.FORGET_KEEP_ENTITIES)
+	Optional<Boolean> keep_entities) {
 		return ToolSupport.json("forget", () -> {
 			long id = parseId(observation_id, "obs-");
 			boolean removed = engine.forget(id, keep_entities.orElse(false));
-			return Map.of("observation_id", "obs-" + id, "removed", removed, "kept_entities", keep_entities.orElse(false));
+			return Map.of("observation_id", "obs-" + id, "removed", removed, "kept_entities",
+					keep_entities.orElse(false));
 		});
 	}
 
 	@Tool(name = "consolidate", description = ToolDescriptions.CONSOLIDATE, annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
-	ToolResponse consolidate(
-			@ToolArg(description = "Report what would change without changing it (default false)")
-			Optional<Boolean> dry_run,
-			@ToolArg(required = false, description = ToolDescriptions.CONSOLIDATE_RETIRE) Optional<List<String>> retire) {
+	ToolResponse consolidate(@ToolArg(description = "Report what would change without changing it (default false)")
+	Optional<Boolean> dry_run, @ToolArg(required = false, description = ToolDescriptions.CONSOLIDATE_RETIRE)
+	Optional<List<String>> retire) {
 		return ToolSupport.json("consolidate", () -> {
 			List<Long> retireIds = retire.orElse(List.of()).stream().map(r -> parseId(r, "obs-")).toList();
 			var c = engine.consolidate(dry_run.orElse(false), retireIds);
@@ -441,7 +441,8 @@ public class MnemicTools {
 			out.put("predicates", engine.predicates().all().size());
 			long pending = engine.observations().pendingProposals();
 			out.put("pending_proposals", pending);
-			out.put("pending_proposal_ids", engine.observations().pendingProposalIds(25).stream().map(id -> "obs-" + id).toList());
+			out.put("pending_proposal_ids",
+					engine.observations().pendingProposalIds(25).stream().map(id -> "obs-" + id).toList());
 			if (pending > 0) {
 				out.put("pending_proposals_note", ToolDescriptions.PENDING_PROPOSALS_NOTE);
 			}
@@ -450,16 +451,19 @@ public class MnemicTools {
 			out.put("open_questions", engine.questions().openCount());
 			out.put("model_providers", ModelProvider.available());
 			String vec = engine.database().vecVersion();
-			out.put("vec", vec == null ? "scan (sqlite-vec not loaded; exact search over every vector, fine for a personal store)"
-					: "sqlite-vec " + vec);
+			out.put("vec",
+					vec == null
+							? "scan (sqlite-vec not loaded; exact search over every vector, fine for a personal store)"
+							: "sqlite-vec " + vec);
 			EmbedderHolder holder = engine.embedderHolder();
 			EmbedderHolder.State st = holder.state();
 			Embedder emb = engine.embedder();
 			if (config.ortLibrary().isPresent()) {
-				out.put("ort", OrtProbe.describe(config.ortLibrary().get()) + (emb != null ? ", in use by the embedder" : ""));
+				out.put("ort",
+						OrtProbe.describe(config.ortLibrary().get()) + (emb != null ? ", in use by the embedder" : ""));
 			} else if (holder.library() != null) {
-				out.put("ort", "ONNX Runtime " + (emb != null ? emb.runtimeVersion() + " " : "") + "at " + holder.library()
-						+ " (written from the build)");
+				out.put("ort", "ONNX Runtime " + (emb != null ? emb.runtimeVersion() + " " : "") + "at "
+						+ holder.library() + " (written from the build)");
 			} else {
 				out.put("ort", "not loaded yet (the embedder's runtime; see embedder.state)");
 			}
@@ -469,11 +473,12 @@ public class MnemicTools {
 			channels.put("keys", "on");
 			channels.put("lexical", "on");
 			channels.put("semantic", switch (st.state()) {
-				case "ready" -> "on";
-				case "downloading" -> "downloading " + st.percent() + "% (" + (st.received() >> 20) + " of " + (st.total() >> 20) + " MB)";
-				case "loading" -> "loading the model";
-				case "failed" -> "failed: " + st.detail();
-				default -> "off (" + st.detail() + ")";
+			case "ready" -> "on";
+			case "downloading" ->
+				"downloading " + st.percent() + "% (" + (st.received() >> 20) + " of " + (st.total() >> 20) + " MB)";
+			case "loading" -> "loading the model";
+			case "failed" -> "failed: " + st.detail();
+			default -> "off (" + st.detail() + ")";
 			});
 			out.put("channels", channels);
 			var m = new LinkedHashMap<String, Object>();
@@ -512,13 +517,12 @@ public class MnemicTools {
 	/** What a proposal stored: entities, events, and facts with their resolutions. */
 	private static Map<String, Object> stored(Applied a) {
 		var stored = new LinkedHashMap<String, Object>();
-		stored.put("entities", a.entities().stream()
-				.map(e -> Map.of("ref", e.ref(), "id", e.id(), "name", e.name(), "resolution", e.resolution(),
-						"score", e.score())).toList());
-		stored.put("events", a.events().stream().map(e -> Map.of("ref", e.ref(), "id", e.id(), "type", e.type())).toList());
-		stored.put("facts", a.facts().stream()
-				.map(f -> Map.of("id", f.id(), "predicate", f.predicate(), "rendering", f.rendering(), "status",
-						f.status(), "corroborated", f.corroborated())).toList());
+		stored.put("entities", a.entities().stream().map(e -> Map.of("ref", e.ref(), "id", e.id(), "name", e.name(),
+				"resolution", e.resolution(), "score", e.score())).toList());
+		stored.put("events",
+				a.events().stream().map(e -> Map.of("ref", e.ref(), "id", e.id(), "type", e.type())).toList());
+		stored.put("facts", a.facts().stream().map(f -> Map.of("id", f.id(), "predicate", f.predicate(), "rendering",
+				f.rendering(), "status", f.status(), "corroborated", f.corroborated())).toList());
 		return stored;
 	}
 

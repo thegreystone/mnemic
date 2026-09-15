@@ -63,21 +63,26 @@ public final class Judge {
 
 	static String prompt(String questionId, String type, String question, String reference, String hypothesis) {
 		if (questionId.endsWith("_abs")) {
-			return "The question is unanswerable from the information the model had. Does the model's response " + "correctly identify the question as unanswerable, for example by saying it lacks the information, " + "that the information is incomplete, or that what it has is irrelevant? Answer yes or no.\n\n" + "Question: " + question + "\n\nModel response: " + hypothesis;
+			return "The question is unanswerable from the information the model had. Does the model's response "
+					+ "correctly identify the question as unanswerable, for example by saying it lacks the information, "
+					+ "that the information is incomplete, or that what it has is irrelevant? Answer yes or no.\n\n"
+					+ "Question: " + question + "\n\nModel response: " + hypothesis;
 		}
 		return switch (type) {
-			case "temporal-reasoning" ->
-					"Judge whether the model's response contains the correct answer or is " + "equivalent to it. Do not penalize off-by-one errors in a number of days. A response containing " + "only a subset of the required information is wrong. Answer yes or no.\n\n" + core(
-							question, reference, hypothesis);
-			case "knowledge-update" ->
-					"Judge whether the model's response contains the updated, correct answer. A " + "response that mentions previous information along with the updated answer is correct if the " + "updated part matches. Answer yes or no.\n\n" + core(
-							question, reference, hypothesis);
-			case "single-session-preference" ->
-					"The reference is a rubric of the user's personal information that a " + "good response should recall and use. The response need not reflect every point, but it must " + "recall and utilize the user's personal information correctly. Does it? Answer yes or no.\n\n" + core(
-							question, reference, hypothesis);
-			default ->
-					"Judge whether the model's response contains the correct answer or is equivalent to it. A " + "response containing only a subset of the required information is wrong. Answer yes or no.\n\n" + core(
-							question, reference, hypothesis);
+		case "temporal-reasoning" -> "Judge whether the model's response contains the correct answer or is "
+				+ "equivalent to it. Do not penalize off-by-one errors in a number of days. A response containing "
+				+ "only a subset of the required information is wrong. Answer yes or no.\n\n"
+				+ core(question, reference, hypothesis);
+		case "knowledge-update" -> "Judge whether the model's response contains the updated, correct answer. A "
+				+ "response that mentions previous information along with the updated answer is correct if the "
+				+ "updated part matches. Answer yes or no.\n\n" + core(question, reference, hypothesis);
+		case "single-session-preference" -> "The reference is a rubric of the user's personal information that a "
+				+ "good response should recall and use. The response need not reflect every point, but it must "
+				+ "recall and utilize the user's personal information correctly. Does it? Answer yes or no.\n\n"
+				+ core(question, reference, hypothesis);
+		default -> "Judge whether the model's response contains the correct answer or is equivalent to it. A "
+				+ "response containing only a subset of the required information is wrong. Answer yes or no.\n\n"
+				+ core(question, reference, hypothesis);
 		};
 	}
 

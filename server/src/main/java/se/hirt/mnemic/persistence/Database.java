@@ -157,7 +157,8 @@ public final class Database implements AutoCloseable {
 	}
 
 	private static int versionOrZero(Connection conn) {
-		try (var st = conn.createStatement(); var rs = st.executeQuery("SELECT COALESCE(MAX(version), 0) FROM schema_version")) {
+		try (var st = conn.createStatement();
+				var rs = st.executeQuery("SELECT COALESCE(MAX(version), 0) FROM schema_version")) {
 			return rs.next() ? rs.getInt(1) : 0;
 		} catch (SQLException e) {
 			return 0; // no schema_version table yet: a new file
@@ -166,7 +167,8 @@ public final class Database implements AutoCloseable {
 
 	/** A store-level setting kept beside the data ({@code store_meta}), or null. */
 	public String meta(String key) {
-		return read(tx -> tx.queryOne("SELECT value FROM store_meta WHERE key = ?", key).map(r -> r.str("value")).orElse(null));
+		return read(tx -> tx.queryOne("SELECT value FROM store_meta WHERE key = ?", key).map(r -> r.str("value"))
+				.orElse(null));
 	}
 
 	public void setMeta(String key, String value) {

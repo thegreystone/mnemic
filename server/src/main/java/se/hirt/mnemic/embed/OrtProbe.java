@@ -40,8 +40,8 @@ import java.nio.file.Path;
 /**
  * A diagnostic for a user-provided ONNX Runtime library, reported by {@code status}: loads it, calls
  * {@code OrtGetApiBase()}, and reads the version string and whether {@code GetApi(ORT_API_VERSION)} serves the API
- * table. Its downcall signatures are registered for the native image in {@code reachability-metadata.json}. No
- * session is created here; that is {@link OrtRuntime}'s job.
+ * table. Its downcall signatures are registered for the native image in {@code reachability-metadata.json}. No session
+ * is created here; that is {@link OrtRuntime}'s job.
  */
 public final class OrtProbe {
 
@@ -56,7 +56,8 @@ public final class OrtProbe {
 			return "onnxruntime " + version(Path.of(library)) + ", api " + API_VERSION + " "
 					+ (apiTable(Path.of(library)) ? "available" : "missing");
 		} catch (Throwable t) {
-			return "unavailable: " + t.getClass().getSimpleName() + (t.getMessage() == null ? "" : ": " + t.getMessage());
+			return "unavailable: " + t.getClass().getSimpleName()
+					+ (t.getMessage() == null ? "" : ": " + t.getMessage());
 		}
 	}
 

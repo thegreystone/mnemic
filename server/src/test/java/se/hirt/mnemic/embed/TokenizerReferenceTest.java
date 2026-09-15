@@ -45,11 +45,11 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * The in-process tokenizers against the models' own: token ids produced by the Hugging Face {@code tokenizers}
- * library for twelve sentences (English, German, Swedish, odd whitespace, punctuation, CJK, emoji) from each
- * candidate's {@code tokenizer.json}, recorded in {@code reference-tokens.json}. A model whose tokens differ
- * would be embedded by a different model than the one measured. Runs when MNEMIC_BAKEOFF_MODELS names a
- * directory holding {@code <model>/tokenizer.json} for the models in the reference file.
+ * The in-process tokenizers against the models' own: token ids produced by the Hugging Face {@code tokenizers} library
+ * for twelve sentences (English, German, Swedish, odd whitespace, punctuation, CJK, emoji) from each candidate's
+ * {@code tokenizer.json}, recorded in {@code reference-tokens.json}. A model whose tokens differ would be embedded by a
+ * different model than the one measured. Runs when MNEMIC_BAKEOFF_MODELS names a directory holding
+ * {@code <model>/tokenizer.json} for the models in the reference file.
  */
 class TokenizerReferenceTest {
 
@@ -76,14 +76,16 @@ class TokenizerReferenceTest {
 				e.getValue().get(i).forEach(n -> expected.add(n.asInt()));
 				int[] actual = t.encode(sentences.get(i), 512);
 				if (!expected.equals(Arrays.stream(actual).boxed().toList())) {
-					problems.add(e.getKey() + " #" + i + " '" + sentences.get(i).replace("\n", "\\n").replace("\t", "\\t") + "'\n    expected "
-							+ expected + "\n    actual   " + Arrays.toString(actual));
+					problems.add(
+							e.getKey() + " #" + i + " '" + sentences.get(i).replace("\n", "\\n").replace("\t", "\\t")
+									+ "'\n    expected " + expected + "\n    actual   " + Arrays.toString(actual));
 				}
 			}
 		}
 		Assumptions.assumeTrue(checked > 0, "no tokenizer.json under " + dir);
 		System.out.println("tokenizers checked: " + checked + ", mismatches: " + problems.size());
 		problems.forEach(System.out::println);
-		assertTrue(problems.isEmpty(), problems.size() + " tokenizations differ from the reference:\n" + String.join("\n", problems));
+		assertTrue(problems.isEmpty(),
+				problems.size() + " tokenizations differ from the reference:\n" + String.join("\n", problems));
 	}
 }

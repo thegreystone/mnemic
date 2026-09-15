@@ -43,10 +43,9 @@ import java.util.List;
 import java.util.PriorityQueue;
 
 /**
- * Vectors beside the rows they describe: one row per item chunk and model, so two embedders can coexist and a
- * change of model is an incremental re-embedding, never a migration. Search is a scan over the model's vectors
- * with a dot product, which is exact and, at the sizes a personal store reaches, faster than an index would be
- * to maintain.
+ * Vectors beside the rows they describe: one row per item chunk and model, so two embedders can coexist and a change of
+ * model is an incremental re-embedding, never a migration. Search is a scan over the model's vectors with a dot
+ * product, which is exact and, at the sizes a personal store reaches, faster than an index would be to maintain.
  */
 public final class VectorStore {
 
@@ -78,16 +77,18 @@ public final class VectorStore {
 					buf.putFloat(f);
 				}
 				tx.update("""
-				          INSERT INTO embedding(item_kind, item_id, model, chunk, dims, vec, created_at)
-				          VALUES (?,?,?,?,?,?,?)""", kind, id, model, chunk++, vector.length, buf.array(), Instant.now().toString());
+						INSERT INTO embedding(item_kind, item_id, model, chunk, dims, vec, created_at)
+						VALUES (?,?,?,?,?,?,?)""", kind, id, model, chunk++, vector.length, buf.array(),
+						Instant.now().toString());
 			}
 			return null;
 		});
 	}
 
 	public boolean has(String kind, long id, String model) {
-		return db.read(tx -> tx.queryLong(
-				"SELECT COUNT(*) FROM embedding WHERE item_kind = ? AND item_id = ? AND model = ?", kind, id, model)) > 0;
+		return db.read(
+				tx -> tx.queryLong("SELECT COUNT(*) FROM embedding WHERE item_kind = ? AND item_id = ? AND model = ?",
+						kind, id, model)) > 0;
 	}
 
 	public long count(String model) {
@@ -97,20 +98,22 @@ public final class VectorStore {
 	/** Observations that have no vector under the model yet: the backlog status shows. */
 	public long missingObservationCount(String model) {
 		return db.read(tx -> tx.queryLong("""
-		                                  SELECT COUNT(*) FROM observation o WHERE o.forgotten_at IS NULL AND NOT EXISTS
-		                                  (SELECT 1 FROM embedding e WHERE e.item_kind = 'observation' AND e.item_id = o.id AND e.model = ?)""", model));
+				SELECT COUNT(*) FROM observation o WHERE o.forgotten_at IS NULL AND NOT EXISTS
+				(SELECT 1 FROM embedding e WHERE e.item_kind = 'observation' AND e.item_id = o.id AND e.model = ?)""",
+				model));
 	}
 
 	/** Accepted facts that have no vector under the model yet. */
 	public long missingFactCount(String model) {
 		return db.read(tx -> tx.queryLong("""
-		                                  SELECT COUNT(*) FROM fact f WHERE f.status IN ('current', 'superseded') AND NOT EXISTS
-		                                  (SELECT 1 FROM embedding e WHERE e.item_kind = 'fact' AND e.item_id = f.id AND e.model = ?)""", model));
+				SELECT COUNT(*) FROM fact f WHERE f.status IN ('current', 'superseded') AND NOT EXISTS
+				(SELECT 1 FROM embedding e WHERE e.item_kind = 'fact' AND e.item_id = f.id AND e.model = ?)""", model));
 	}
 
 	/** The {@code k} nearest items of the model to {@code query}, best first; an item scores by its best chunk. */
 	public List<Hit> search(String model, float[] query, int k) {
-		List<Row> rows = db.read(tx -> tx.query("SELECT item_kind, item_id, vec FROM embedding WHERE model = ?", model));
+		List<Row> rows = db
+				.read(tx -> tx.query("SELECT item_kind, item_id, vec FROM embedding WHERE model = ?", model));
 		var bestByItem = new HashMap<String, Hit>();
 		for (Row r : rows) {
 			byte[] blob = (byte[]) r.get("vec");
@@ -148,17 +151,17 @@ public final class VectorStore {
 	/** Observations not yet embedded under the model, oldest first. */
 	public List<Long> missingObservations(String model, int limit) {
 		return db.read(tx -> tx.query("""
-		                              SELECT o.id FROM observation o WHERE o.forgotten_at IS NULL AND NOT EXISTS
-		                              (SELECT 1 FROM embedding e WHERE e.item_kind = 'observation' AND e.item_id = o.id AND e.model = ?)
-		                              ORDER BY o.id LIMIT ?""", model, limit)).stream().map(r -> r.lng("id")).toList();
+				SELECT o.id FROM observation o WHERE o.forgotten_at IS NULL AND NOT EXISTS
+				(SELECT 1 FROM embedding e WHERE e.item_kind = 'observation' AND e.item_id = o.id AND e.model = ?)
+				ORDER BY o.id LIMIT ?""", model, limit)).stream().map(r -> r.lng("id")).toList();
 	}
 
 	/** Accepted facts not yet embedded under the model, oldest first. */
 	public List<Long> missingFacts(String model, int limit) {
 		return db.read(tx -> tx.query("""
-		                              SELECT f.id FROM fact f WHERE f.status IN ('current', 'superseded') AND NOT EXISTS
-		                              (SELECT 1 FROM embedding e WHERE e.item_kind = 'fact' AND e.item_id = f.id AND e.model = ?)
-		                              ORDER BY f.id LIMIT ?""", model, limit)).stream().map(r -> r.lng("id")).toList();
+				SELECT f.id FROM fact f WHERE f.status IN ('current', 'superseded') AND NOT EXISTS
+				(SELECT 1 FROM embedding e WHERE e.item_kind = 'fact' AND e.item_id = f.id AND e.model = ?)
+				ORDER BY f.id LIMIT ?""", model, limit)).stream().map(r -> r.lng("id")).toList();
 	}
 
 	/** The vectors of every other model: unusable once the store's model changed; the number removed. */

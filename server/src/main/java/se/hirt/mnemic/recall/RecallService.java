@@ -61,12 +61,12 @@ import java.util.Set;
 
 /**
  * Retrieval, not question answering (EXTRACTION.md, Recall). Channels: the structured probe (entity spotting plus
- * predicate cues, looked up over valid time), the keys (fact and event renderings matched lexically), lexical BM25
- * over observation text, the semantic channel (the question's vector against every observation's and fact's), and
- * the upcoming channel for questions about what is coming. Candidates are observations; channels are fused with
- * reciprocal rank fusion; every hit returns the observation window with the facts that anchored it. {@code as_of} is
- * a pre-filter inside every channel, never a post-filter; current facts outrank ended and superseded ones; confidence
- * never depends on the clock, staleness is an annotation.
+ * predicate cues, looked up over valid time), the keys (fact and event renderings matched lexically), lexical BM25 over
+ * observation text, the semantic channel (the question's vector against every observation's and fact's), and the
+ * upcoming channel for questions about what is coming. Candidates are observations; channels are fused with reciprocal
+ * rank fusion; every hit returns the observation window with the facts that anchored it. {@code as_of} is a pre-filter
+ * inside every channel, never a post-filter; current facts outrank ended and superseded ones; confidence never depends
+ * on the clock, staleness is an annotation.
  */
 public final class RecallService {
 
@@ -79,7 +79,8 @@ public final class RecallService {
 	 * The semantic channel's fusion weight, measured on the stratified 120 (BENCHMARKS.md): with one vector per chunk
 	 * it votes as an equal, +0.050 [0.017, 0.092] recall at both 5 and 10. The system properties are bench knobs.
 	 */
-	private static final double SEMANTIC_WEIGHT = Double.parseDouble(System.getProperty("mnemic.semantic.weight", "1.0"));
+	private static final double SEMANTIC_WEIGHT = Double
+			.parseDouble(System.getProperty("mnemic.semantic.weight", "1.0"));
 	private static final String SEMANTIC_KINDS = System.getProperty("mnemic.semantic.kinds", "both");
 	/** At most this many observations enter the fusion from the semantic channel, and only above this cosine. */
 	private static final int SEMANTIC_TOP = Integer.parseInt(System.getProperty("mnemic.semantic.top", "100"));
@@ -120,10 +121,10 @@ public final class RecallService {
 
 	/**
 	 * What the structured verdict is allowed to rank. The owner is the subject of nearly every fact, so their facts
-	 * under an undirected, non-functional cue ("what does Mattias use") would push the oldest observations to the
-	 * top (measured: −0.10 recall@5 on the first facts-as-keys pilot, −0.033 recall@10 on the stratified 120); a
-	 * directed cue ("Mattias's father"), a functional one ("works_at"), a cue that is the whole question ("what does
-	 * Mattias own"), or a yes/no question that names something are answers and rank.
+	 * under an undirected, non-functional cue ("what does Mattias use") would push the oldest observations to the top
+	 * (measured: −0.10 recall@5 on the first facts-as-keys pilot, −0.033 recall@10 on the stratified 120); a directed
+	 * cue ("Mattias's father"), a functional one ("works_at"), a cue that is the whole question ("what does Mattias
+	 * own"), or a yes/no question that names something are answers and rank.
 	 */
 	private record Gates(String cueDirection, boolean answerCue, boolean ownerOnly) {
 	}
@@ -141,9 +142,9 @@ public final class RecallService {
 	private final RecallRenderer renderer;
 
 	/** {@code vectors} and {@code holder} carry the semantic channel; the holder may deliver its embedder later. */
-	public RecallService(
-			Database db, EntityService entities, PredicateRegistry predicates, FactQueries facts, EventService events,
-			Containment containment, TokenEstimator tokens, Clock clock, VectorStore vectors, EmbedderHolder holder) {
+	public RecallService(Database db, EntityService entities, PredicateRegistry predicates, FactQueries facts,
+			EventService events, Containment containment, TokenEstimator tokens, Clock clock, VectorStore vectors,
+			EmbedderHolder holder) {
 		this.db = db;
 		this.entities = entities;
 		this.predicates = predicates;
@@ -201,7 +202,8 @@ public final class RecallService {
 
 	private Gates gates(Query q, Structured s) {
 		long ownerId = entities.owner().id();
-		boolean functionalCue = s.predicate() != null && predicates.get(s.predicate()).map(Predicate::functional).orElse(false);
+		boolean functionalCue = s.predicate() != null
+				&& predicates.get(s.predicate()).map(Predicate::functional).orElse(false);
 		String cueDirection = q.cues().isEmpty() || s.predicate() == null ? "any" : q.cues().getFirst().direction();
 		boolean cueIsTheQuestion = !q.cues().isEmpty() && s.predicate() != null && !"entity".equals(s.state())
 				&& q.beyondEntities().stream().allMatch(q.cueTokens()::contains);
@@ -261,7 +263,8 @@ public final class RecallService {
 	 * query has three or more: on renderings this short one shared word is noise that outranked exact observation
 	 * matches (−0.10 recall@5). Every observation that stated or corroborated a fact is reached.
 	 */
-	private void keysChannel(Query q, Structured s, Gates g, Instant asOf, Instant now, boolean includeHistory, Channels ch) {
+	private void keysChannel(
+		Query q, Structured s, Gates g, Instant asOf, Instant now, boolean includeHistory, Channels ch) {
 		int needed = q.terms().size() >= 3 ? 2 : 1;
 		for (Fact f : facts.lexical(q.fts(), asOf, now, includeHistory, CANDIDATES)) {
 			if (Query.matchedTerms(f.rendering(), q.terms()) < needed) {
@@ -269,7 +272,8 @@ public final class RecallService {
 			}
 			// The keys obey the direction the verdict applied: under "Mattias's father" a rendering with Mattias on
 			// the wrong side, or about someone else's mother, is out.
-			if (f.predicate().equals(s.predicate()) && !"any".equals(g.cueDirection()) && !rightWay(f, q, g.cueDirection())) {
+			if (f.predicate().equals(s.predicate()) && !"any".equals(g.cueDirection())
+					&& !rightWay(f, q, g.cueDirection())) {
 				continue;
 			}
 			ch.rankAndAnchor(ch.keys, f, facts.observationsOf(f.id()));
@@ -302,8 +306,8 @@ public final class RecallService {
 	}
 
 	/**
-	 * Events of the entities the query names, within the time window. The owner's events are everything, so theirs
-	 * come along only when they explain the predicate the structured probe matched (EVALUATION.md C9).
+	 * Events of the entities the query names, within the time window. The owner's events are everything, so theirs come
+	 * along only when they explain the predicate the structured probe matched (EVALUATION.md C9).
 	 */
 	private void entityEvents(Query q, Structured s, Instant asOf, Channels ch) {
 		for (Entity e : q.spotted()) {
@@ -326,7 +330,8 @@ public final class RecallService {
 	}
 
 	private static boolean within(Event ev, Instant asOf) {
-		return asOf == null || ev.validStart() == null || ev.validStart().compareTo(RecallRenderer.DAY.format(asOf)) <= 0;
+		return asOf == null || ev.validStart() == null
+				|| ev.validStart().compareTo(RecallRenderer.DAY.format(asOf)) <= 0;
 	}
 
 	/**
@@ -364,7 +369,8 @@ public final class RecallService {
 		}
 		ch.structured.clear();
 		ch.structured.addAll(ranked);
-		boolean answered = ("matched".equals(s.state()) && g.answerCue()) || s.knownFalse() || "future".equals(s.state());
+		boolean answered = ("matched".equals(s.state()) && g.answerCue()) || s.knownFalse()
+				|| "future".equals(s.state());
 		return answered ? s : s.withState("events");
 	}
 
@@ -386,10 +392,10 @@ public final class RecallService {
 	}
 
 	/**
-	 * Channel 4: the question's vector against every observation's and fact's. A fact hit anchors its observations
-	 * like a key hit; an observation hit ranks on its own. The same valid-time and observation-time rules apply. A
-	 * model already on disk is waited for briefly after a start; a download never is. A runtime fault costs the
-	 * semantic hits, never the answer.
+	 * Channel 4: the question's vector against every observation's and fact's. A fact hit anchors its observations like
+	 * a key hit; an observation hit ranks on its own. The same valid-time and observation-time rules apply. A model
+	 * already on disk is waited for briefly after a start; a download never is. A runtime fault costs the semantic
+	 * hits, never the answer.
 	 */
 	private void semanticChannel(Query q, Instant asOf, Instant now, boolean includeHistory, Channels ch) {
 		if (holder != null && holder.get() == null && "loading".equals(holder.state().state())) {
@@ -439,9 +445,9 @@ public final class RecallService {
 	}
 
 	/**
-	 * Channel 5: a question about what is coming ranks the observations behind future-dated facts of the entities
-	 * in it, or the owner's, with the structured channel's weight, so a car collected next week is not lost to an
-	 * old robot on the word "vehicle".
+	 * Channel 5: a question about what is coming ranks the observations behind future-dated facts of the entities in
+	 * it, or the owner's, with the structured channel's weight, so a car collected next week is not lost to an old
+	 * robot on the word "vehicle".
 	 */
 	private void upcomingChannel(Query q, Instant asOf, Instant now, Channels ch) {
 		if (asOf != null || !q.forward()) {
@@ -495,9 +501,9 @@ public final class RecallService {
 	}
 
 	/**
-	 * Fits the ranked candidates into the budget. A candidate that does not fit whole is shown as its fact lines
-	 * alone before it is dropped: the fact is the answer, the prose is the evidence. A retired observation was wrong
-	 * or superseded; history shows it, flagged, recall does not.
+	 * Fits the ranked candidates into the budget. A candidate that does not fit whole is shown as its fact lines alone
+	 * before it is dropped: the fact is the answer, the prose is the evidence. A retired observation was wrong or
+	 * superseded; history shows it, flagged, recall does not.
 	 */
 	private List<Hit> budget(Ranking r, Channels ch, Query q, int maxTokens, int limit, boolean includeHistory) {
 		var hits = new ArrayList<Hit>();

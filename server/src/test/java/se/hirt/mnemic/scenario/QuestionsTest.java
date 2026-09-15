@@ -75,9 +75,8 @@ class QuestionsTest {
 			remember(e, "I met Anna Lindqvist at the conference.",
 					proposal().entity("e1", "Anna Lindqvist", "person").fact("self", "knows", "e1"));
 			Entity anna = e.entities().byRef("Anna Lindqvist").orElseThrow();
-			RememberOutcome second = remember(e, "Anna is joining Hooli next month.",
-					proposal().entity("e1", "Anna", "person").entity("e2", "Hooli", "organization")
-							.fact("e1", "works_at", "e2"));
+			RememberOutcome second = remember(e, "Anna is joining Hooli next month.", proposal()
+					.entity("e1", "Anna", "person").entity("e2", "Hooli", "organization").fact("e1", "works_at", "e2"));
 			assertEquals(1, second.applied().questions().size(), second.applied().toString());
 			Map<String, Object> q = second.applied().questions().getFirst();
 			assertEquals("entity_resolution", q.get("kind"));
@@ -106,9 +105,8 @@ class QuestionsTest {
 		try (Engine e = engine("b2-new")) {
 			remember(e, "I met Anna Lindqvist at the conference.",
 					proposal().entity("e1", "Anna Lindqvist", "person").fact("self", "knows", "e1"));
-			RememberOutcome second = remember(e, "Anna is joining Hooli next month.",
-					proposal().entity("e1", "Anna", "person").entity("e2", "Hooli", "organization")
-							.fact("e1", "works_at", "e2"));
+			RememberOutcome second = remember(e, "Anna is joining Hooli next month.", proposal()
+					.entity("e1", "Anna", "person").entity("e2", "Hooli", "organization").fact("e1", "works_at", "e2"));
 			RememberOutcome no = remember(e, "No, a different Anna.", null, new Resolve(questionId(second), "new"));
 			Entity created = e.entities().byRef(no.resolved().getFirst().get("entity").toString()).orElseThrow();
 			assertEquals("Anna", created.name());
@@ -149,18 +147,20 @@ class QuestionsTest {
 					.fact(fact("e1", "parent_of", "self", "father", null, null, null, null, null, null)));
 			// Six children declared in one proposal, each with a full name that shares only the family name.
 			var p = proposal();
-			String[] names = {"Marit Nyberg", "Oskar Nyberg", "Nora Nyberg", "Elias Nyberg", "Freja Nyberg", "Vilhelm Nyberg"};
+			String[] names = {"Marit Nyberg", "Oskar Nyberg", "Nora Nyberg", "Elias Nyberg", "Freja Nyberg",
+					"Vilhelm Nyberg"};
 			for (int i = 0; i < names.length; i++) {
-				p.entity("c" + i, names[i], "person").fact(fact("self", "parent_of", "c" + i, "father", null, null, null,
-						null, null, null));
+				p.entity("c" + i, names[i], "person")
+						.fact(fact("self", "parent_of", "c" + i, "father", null, null, null, null, null, null));
 			}
 			RememberOutcome o = remember(e, "My children are Marit, Oskar, Nora, Elias, Freja and Vilhelm.", p);
-			assertTrue(o.applied().questions().isEmpty(), "no ambiguity against the father: " + o.applied().questions());
+			assertTrue(o.applied().questions().isEmpty(),
+					"no ambiguity against the father: " + o.applied().questions());
 			assertEquals(6, o.applied().facts().size());
 			assertEquals(6, o.applied().entities().stream().filter(x -> "created".equals(x.resolution())).count());
 			// A bare first name that a known full name starts with is still an ambiguity.
-			RememberOutcome anna = remember(e, "Marit called.", proposal().entity("e1", "Marit", "person")
-					.fact("self", "knows", "e1"));
+			RememberOutcome anna = remember(e, "Marit called.",
+					proposal().entity("e1", "Marit", "person").fact("self", "knows", "e1"));
 			assertEquals(1, anna.applied().questions().size(), "'Marit' vs 'Marit Nyberg' stays a question");
 		}
 	}
@@ -169,16 +169,17 @@ class QuestionsTest {
 	@Scenario("B2")
 	void answeringSeveralQuestionsInOneCallDoesNotCascade() {
 		try (Engine e = engine("b2-batch")) {
-			remember(e, "I met Anna Lindqvist.", proposal().entity("e1", "Anna Lindqvist", "person")
-					.fact("self", "knows", "e1"));
+			remember(e, "I met Anna Lindqvist.",
+					proposal().entity("e1", "Anna Lindqvist", "person").fact("self", "knows", "e1"));
 			// Two names that are both ambiguous against Anna Lindqvist, held in one call.
-			RememberOutcome held = remember(e, "Anna and Anna Karlsson came by.", proposal()
-					.entity("e1", "Anna", "person").entity("e2", "Anna Karlsson", "person")
-					.fact("self", "knows", "e1").fact("self", "knows", "e2"));
+			RememberOutcome held = remember(e, "Anna and Anna Karlsson came by.",
+					proposal().entity("e1", "Anna", "person").entity("e2", "Anna Karlsson", "person")
+							.fact("self", "knows", "e1").fact("self", "knows", "e2"));
 			assertEquals(2, held.applied().questions().size(), held.applied().toString());
 			String q1 = held.applied().questions().get(0).get("id").toString();
 			String q2 = held.applied().questions().get(1).get("id").toString();
-			RememberOutcome answered = remember(e, "Both new people.", null, new Resolve(q1, "new"), new Resolve(q2, "new"));
+			RememberOutcome answered = remember(e, "Both new people.", null, new Resolve(q1, "new"),
+					new Resolve(q2, "new"));
 			assertEquals(2, answered.resolved().size());
 			assertEquals(0, e.questions().openCount(), "answering one must not re-ask about the other");
 			Entity lindqvist = e.entities().byRef("Anna Lindqvist").orElseThrow();
@@ -194,10 +195,10 @@ class QuestionsTest {
 	@Scenario("B2")
 	void anExistingEntityIdIsAlwaysAnAcceptableAnswer() {
 		try (Engine e = engine("b2-anyid")) {
-			remember(e, "I met Anna Lindqvist.", proposal().entity("e1", "Anna Lindqvist", "person")
-					.fact("self", "knows", "e1"));
-			RememberOutcome held = remember(e, "Anna came by.", proposal().entity("e1", "Anna", "person")
-					.fact("self", "knows", "e1"));
+			remember(e, "I met Anna Lindqvist.",
+					proposal().entity("e1", "Anna Lindqvist", "person").fact("self", "knows", "e1"));
+			RememberOutcome held = remember(e, "Anna came by.",
+					proposal().entity("e1", "Anna", "person").fact("self", "knows", "e1"));
 			Entity other = e.entities().create("Anna Berg", "person", List.of(), null);
 			RememberOutcome answered = remember(e, "It was Anna Berg.", null,
 					new Resolve(questionId(held), other.ref()));
@@ -211,10 +212,10 @@ class QuestionsTest {
 	@Scenario("G2")
 	void consolidateClosesAQuestionWhoseSubjectNowExists() {
 		try (Engine e = engine("g2-stale")) {
-			remember(e, "I met Anna Lindqvist.", proposal().entity("e1", "Anna Lindqvist", "person")
-					.fact("self", "knows", "e1"));
-			RememberOutcome held = remember(e, "Anna Karlsson came by.", proposal().entity("e1", "Anna Karlsson", "person")
-					.fact("self", "knows", "e1"));
+			remember(e, "I met Anna Lindqvist.",
+					proposal().entity("e1", "Anna Lindqvist", "person").fact("self", "knows", "e1"));
+			RememberOutcome held = remember(e, "Anna Karlsson came by.",
+					proposal().entity("e1", "Anna Karlsson", "person").fact("self", "knows", "e1"));
 			assertEquals(1, held.applied().questions().size());
 			// Meanwhile the entity comes into being another way (a later observation, an answer elsewhere).
 			Entity created = e.entities().create("Anna Karlsson", "person", List.of(), null);
@@ -234,12 +235,12 @@ class QuestionsTest {
 	@Scenario("C3")
 	void placesNest() {
 		try (Engine e = engine("c3-nest")) {
-			RememberOutcome a = remember(e, "Schübelbach is in Switzerland.", proposal()
-					.entity("e1", "Schübelbach", "place").entity("e2", "Switzerland", "place")
-					.fact("e1", "located_in", "e2"));
-			RememberOutcome b = remember(e, "Schübelbach is in Kanton Schwyz.", proposal()
-					.entity("e1", "Schübelbach", "place").entity("e2", "Kanton Schwyz", "place")
-					.fact("e1", "located_in", "e2"));
+			RememberOutcome a = remember(e, "Schübelbach is in Switzerland.",
+					proposal().entity("e1", "Schübelbach", "place").entity("e2", "Switzerland", "place").fact("e1",
+							"located_in", "e2"));
+			RememberOutcome b = remember(e, "Schübelbach is in Kanton Schwyz.",
+					proposal().entity("e1", "Schübelbach", "place").entity("e2", "Kanton Schwyz", "place").fact("e1",
+							"located_in", "e2"));
 			assertTrue(b.applied().questions().isEmpty(), "containment nests, no conflict: " + b.applied().questions());
 			assertEquals("current", stored(e, a, 0).status());
 			assertEquals("current", stored(e, b, 0).status());
@@ -251,17 +252,18 @@ class QuestionsTest {
 	@Scenario("F1")
 	void aMissWithMatchingEventsIsNotAMiss() {
 		try (Engine e = engine("f1-events")) {
-			remember(e, "My daughter Marit was born in 2010 and my son Elias in 2012.", proposal()
-					.entity("e1", "Marit Nyberg", "person").entity("e2", "Elias Nyberg", "person")
-					.event("ev1", "born", "2010", "e1").event("ev2", "born", "2012", "e2")
-					.fact(fact("self", "parent_of", "e1", "father", null, null, null, null, null, null))
-					.fact(fact("self", "parent_of", "e2", "father", null, null, null, null, null, null)));
+			remember(e, "My daughter Marit was born in 2010 and my son Elias in 2012.",
+					proposal().entity("e1", "Marit Nyberg", "person").entity("e2", "Elias Nyberg", "person")
+							.event("ev1", "born", "2010", "e1").event("ev2", "born", "2012", "e2")
+							.fact(fact("self", "parent_of", "e1", "father", null, null, null, null, null, null))
+							.fact(fact("self", "parent_of", "e2", "father", null, null, null, null, null, null)));
 			RecallResult r = recall(e, "when were Mattias's children born");
 			// "children" is a cue for parent_of since the inverse lexicon (2026-09-10), so the verdict may match the
 			// children themselves; either way the birth events carry the answer and no MISS heads the block.
 			assertTrue("events".equals(r.structured().state()) || "matched".equals(r.structured().state()), r.text());
 			assertEquals(2, r.events().size(), r.text());
-			assertFalse(r.text().contains("MISS"), "the headline must not tell the assistant to say it does not know: " + r.text());
+			assertFalse(r.text().contains("MISS"),
+					"the headline must not tell the assistant to say it does not know: " + r.text());
 			assertTrue(r.text().contains("events: ") && r.text().contains("born(Marit Nyberg)"), r.text());
 		}
 	}
@@ -273,24 +275,27 @@ class QuestionsTest {
 			// Two names that are each a real ambiguity against something already known, held in one proposal
 			// with a fact tying them together: "Luzern" against the known "Luzern Süd", "Willisau" against the
 			// apartment's alias.
-			remember(e, "Luzern Süd is a district.", proposal().entity("e1", "Luzern Süd", "place")
-					.fact("self", "prefers", "e1"));
-			remember(e, "The Lindenhof apartment is ours.", proposal().entity("e1", "Lindenhof apartment", "place", "the Willisau apartment")
-					.fact("self", "owns", "e1"));
-			RememberOutcome held = remember(e, "Willisau is near Luzern.", proposal()
-					.entity("e1", "Willisau", "place").entity("e2", "Luzern", "place").fact("e1", "located_in", "e2"));
+			remember(e, "Luzern Süd is a district.",
+					proposal().entity("e1", "Luzern Süd", "place").fact("self", "prefers", "e1"));
+			remember(e, "The Lindenhof apartment is ours.", proposal()
+					.entity("e1", "Lindenhof apartment", "place", "the Willisau apartment").fact("self", "owns", "e1"));
+			RememberOutcome held = remember(e, "Willisau is near Luzern.", proposal().entity("e1", "Willisau", "place")
+					.entity("e2", "Luzern", "place").fact("e1", "located_in", "e2"));
 			assertEquals(2, held.applied().questions().size(), held.applied().questions().toString());
 			String willisau = held.applied().questions().stream().filter(q -> "Willisau".equals(q.get("subject")))
 					.findFirst().orElseThrow().get("id").toString();
 			String luzern = held.applied().questions().stream().filter(q -> "Luzern".equals(q.get("subject")))
 					.findFirst().orElseThrow().get("id").toString();
 			// Willisau first: its held fact names Luzern, which the second answer creates.
-			RememberOutcome answered = remember(e, "Both new.", null, new Resolve(willisau, "new"), new Resolve(luzern, "new"));
+			RememberOutcome answered = remember(e, "Both new.", null, new Resolve(willisau, "new"),
+					new Resolve(luzern, "new"));
 			assertEquals(0, e.questions().openCount(), "no follow-up question: " + answered.resolved());
 			Entity r = e.entities().byRef("Willisau").orElseThrow();
 			Entity l = e.entities().byRef("Luzern").orElseThrow();
-			assertTrue(e.facts().factsOf(r.id()).stream().anyMatch(f -> "located_in".equals(f.predicate())
-					&& f.objectId() == l.id()), "Willisau located_in Luzern landed on the new entity");
+			assertTrue(
+					e.facts().factsOf(r.id()).stream()
+							.anyMatch(f -> "located_in".equals(f.predicate()) && f.objectId() == l.id()),
+					"Willisau located_in Luzern landed on the new entity");
 			assertEquals(1, e.facts().factsOf(r.id()).size(), "exactly once");
 		}
 	}
@@ -299,10 +304,10 @@ class QuestionsTest {
 	@Scenario("J1")
 	void siblingKindsAndDegreesAreKnownQualifiers() {
 		try (Engine e = engine("j1-siblings")) {
-			RememberOutcome o = remember(e, "Erik is my twin, Sara my half-sister.", proposal()
-					.entity("e1", "Erik", "person").entity("e2", "Sara", "person")
-					.fact(fact("e1", "sibling_of", "self", "twin", null, null, null, null, null, null))
-					.fact(fact("e2", "sibling_of", "self", "half-sister", null, null, null, null, null, null)));
+			RememberOutcome o = remember(e, "Erik is my twin, Sara my half-sister.",
+					proposal().entity("e1", "Erik", "person").entity("e2", "Sara", "person")
+							.fact(fact("e1", "sibling_of", "self", "twin", null, null, null, null, null, null))
+							.fact(fact("e2", "sibling_of", "self", "half-sister", null, null, null, null, null, null)));
 			assertTrue(o.applied().warnings().isEmpty(), o.applied().warnings().toString());
 			assertEquals(2, o.applied().facts().size());
 			assertTrue(o.applied().facts().getFirst().rendering().contains("twin"), o.applied().facts().toString());
@@ -314,9 +319,9 @@ class QuestionsTest {
 	void anAliasOfAnEntityDeclaredDistinctIsNotAnAmbiguity() {
 		try (Engine e = engine("b2-alias")) {
 			// Declared together: the apartment carries the alias, Willisau is a place of its own.
-			RememberOutcome o = remember(e, "The Lindenhof apartment is in Willisau.", proposal()
-					.entity("e1", "Lindenhof apartment", "place", "the Willisau apartment").entity("e2", "Willisau", "place")
-					.fact("e1", "located_in", "e2"));
+			RememberOutcome o = remember(e, "The Lindenhof apartment is in Willisau.",
+					proposal().entity("e1", "Lindenhof apartment", "place", "the Willisau apartment")
+							.entity("e2", "Willisau", "place").fact("e1", "located_in", "e2"));
 			assertTrue(o.applied().questions().isEmpty(), "declared distinct: " + o.applied().questions());
 			assertEquals(1, o.applied().facts().size());
 		}
@@ -324,17 +329,17 @@ class QuestionsTest {
 			// The apartment was declared in an earlier call; declaring both again still asserts they are distinct.
 			remember(e, "We own the Lindenhof apartment.", proposal()
 					.entity("e1", "Lindenhof apartment", "place", "the Willisau apartment").fact("self", "owns", "e1"));
-			RememberOutcome o = remember(e, "The Lindenhof apartment is in Willisau.", proposal()
-					.entity("e1", "Lindenhof apartment", "place").entity("e2", "Willisau", "place")
-					.fact("e1", "located_in", "e2"));
+			RememberOutcome o = remember(e, "The Lindenhof apartment is in Willisau.",
+					proposal().entity("e1", "Lindenhof apartment", "place").entity("e2", "Willisau", "place").fact("e1",
+							"located_in", "e2"));
 			assertTrue(o.applied().questions().isEmpty(), "still distinct: " + o.applied().questions());
 			// Willisau alone, with nothing said about the apartment, is the boundary: the alias makes it a fair question.
 		}
 		try (Engine e = engine("b2-alias-alone")) {
 			remember(e, "We own the Lindenhof apartment.", proposal()
 					.entity("e1", "Lindenhof apartment", "place", "the Willisau apartment").fact("self", "owns", "e1"));
-			RememberOutcome o = remember(e, "Willisau is pretty.", proposal().entity("e1", "Willisau", "place")
-					.fact("self", "prefers", "e1"));
+			RememberOutcome o = remember(e, "Willisau is pretty.",
+					proposal().entity("e1", "Willisau", "place").fact("self", "prefers", "e1"));
 			assertEquals(1, o.applied().questions().size(), "nothing declared it distinct: " + o.applied().questions());
 		}
 	}
@@ -345,21 +350,22 @@ class QuestionsTest {
 		try (Engine e = engine("b2-typeword")) {
 			remember(e, "Kanton Schwyz is in Switzerland.", proposal().entity("e1", "Kanton Schwyz", "place")
 					.entity("e2", "Switzerland", "place").fact("e1", "located_in", "e2"));
-			RememberOutcome o = remember(e, "Willisau is in Kanton Luzern.", proposal().entity("e1", "Willisau", "place")
-					.entity("e2", "Kanton Luzern", "place").fact("e1", "located_in", "e2"));
+			RememberOutcome o = remember(e, "Willisau is in Kanton Luzern.",
+					proposal().entity("e1", "Willisau", "place").entity("e2", "Kanton Luzern", "place").fact("e1",
+							"located_in", "e2"));
 			assertTrue(o.applied().questions().isEmpty(), "'Kanton' identifies nothing: " + o.applied().questions());
 			assertEquals(2, e.entities().spot("Kanton Luzern").size() + e.entities().spot("Kanton Schwyz").size());
 			// The same for companies: "Acme AB" against "Beta AB".
-			remember(e, "I consult for Acme AB.", proposal().entity("e1", "Acme AB", "organization")
-					.fact("self", "member_of", "e1"));
-			RememberOutcome b = remember(e, "I also work with Beta AB.", proposal().entity("e1", "Beta AB", "organization")
-					.fact("self", "member_of", "e1"));
+			remember(e, "I consult for Acme AB.",
+					proposal().entity("e1", "Acme AB", "organization").fact("self", "member_of", "e1"));
+			RememberOutcome b = remember(e, "I also work with Beta AB.",
+					proposal().entity("e1", "Beta AB", "organization").fact("self", "member_of", "e1"));
 			assertTrue(b.applied().questions().isEmpty(), b.applied().questions().toString());
 			// A shared identifying token still asks: "Anna" against "Anna Lindqvist".
-			remember(e, "I met Anna Lindqvist.", proposal().entity("e1", "Anna Lindqvist", "person")
-					.fact("self", "knows", "e1"));
-			RememberOutcome c = remember(e, "Anna called.", proposal().entity("e1", "Anna", "person")
-					.fact("self", "knows", "e1"));
+			remember(e, "I met Anna Lindqvist.",
+					proposal().entity("e1", "Anna Lindqvist", "person").fact("self", "knows", "e1"));
+			RememberOutcome c = remember(e, "Anna called.",
+					proposal().entity("e1", "Anna", "person").fact("self", "knows", "e1"));
 			assertEquals(1, c.applied().questions().size());
 		}
 	}
@@ -599,15 +605,12 @@ class QuestionsTest {
 	void briefingWithoutAQuery() {
 		try (Engine e = engine("f10")) {
 			Instant t0 = Instant.parse("2026-01-01T00:00:00Z");
-			remember(e, "I work at Hooli and live in Zürich.", t0,
-					proposal().entity("e1", "Hooli", "organization").entity("e2", "Zürich", "place")
-							.fact("self", "works_at", "e1").fact("self", "lives_in", "e2"));
-			remember(e, "Mnemic is built on SQLite.", t0.plusSeconds(3600),
-					proposal().entity("e1", "Mnemic", "project").entity("e2", "SQLite", "technology")
-							.fact("e1", "uses", "e2"));
-			remember(e, "Kestrel targets Java.", t0.plusSeconds(7200),
-					proposal().entity("e1", "Kestrel", "project").entity("e2", "Java", "technology")
-							.fact("e1", "uses", "e2"));
+			remember(e, "I work at Hooli and live in Zürich.", t0, proposal().entity("e1", "Hooli", "organization")
+					.entity("e2", "Zürich", "place").fact("self", "works_at", "e1").fact("self", "lives_in", "e2"));
+			remember(e, "Mnemic is built on SQLite.", t0.plusSeconds(3600), proposal().entity("e1", "Mnemic", "project")
+					.entity("e2", "SQLite", "technology").fact("e1", "uses", "e2"));
+			remember(e, "Kestrel targets Java.", t0.plusSeconds(7200), proposal().entity("e1", "Kestrel", "project")
+					.entity("e2", "Java", "technology").fact("e1", "uses", "e2"));
 			remember(e, "I work at Acme.", t0.plusSeconds(9000), proposal().fact("works_at", "Acme"));
 			assertEquals(1, e.questions().openCount());
 

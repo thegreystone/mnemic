@@ -45,6 +45,11 @@ mvn -pl server test-compile failsafe:integration-test -Dnative.image.path=target
 The path to the native image is relative to `server/`, where failsafe runs (`target/...`, not `server/target/...`);
 `<version>` is the `revision` property of the parent POM, and the suffix is `.exe` on Windows only.
 
+Formatting is enforced by [Spotless](https://github.com/diffplug/spotless) with the Eclipse formatter profile in
+`config/formatter/mnemic-formatting.xml` (tabs, 120 columns). `spotless:check` runs in the `validate` phase, so an
+unformatted file fails `mvn package`; `mvn spotless:apply` reformats both modules. Point your IDE at the same
+profile (IntelliJ reads it through the Eclipse Code Formatter plugin) to avoid a round trip.
+
 `server/target/scenario-coverage.txt` lists which scenarios from [EVALUATION.md](EVALUATION.md) are implemented
 after every build. The native sanity IT starts the binary over stdio, exercises the legacy `initialize` and the
 stateless `server/discover` handshakes, and checks that `ServiceLoader` finds the model providers inside the

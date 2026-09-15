@@ -56,9 +56,8 @@ public class EngineProducer {
 
 	@Produces
 	@Singleton
-	Engine engine(
-			MnemicConfig config,
-			@ConfigProperty(name = "quarkus.application.version", defaultValue = "unknown") String version) {
+	Engine engine(MnemicConfig config, @ConfigProperty(name = "quarkus.application.version", defaultValue = "unknown")
+	String version) {
 		Path home = Path.of(config.home());
 		LOG.infof("Opening Mnemic data home at %s", home.toAbsolutePath());
 		ModelProposer proposer = null;
@@ -75,23 +74,19 @@ public class EngineProducer {
 			}
 		}
 		holder = embedderHolder(config);
-		Engine.Options options = Engine.Options.of(home, version)
-				.withSoftLimit(config.observation().softLimitChars())
+		Engine.Options options = Engine.Options.of(home, version).withSoftLimit(config.observation().softLimitChars())
 				.withOwner(config.owner().orElse(null), config.ownerIdentity())
-				.withProposer(proposer, config.proposer().batch())
-				.withVecLibrary(config.vecLibrary().orElse(null))
-				.withEmbedder(holder)
-				.withLang(Lang.of(config.language().orElse("en")));
+				.withProposer(proposer, config.proposer().batch()).withVecLibrary(config.vecLibrary().orElse(null))
+				.withEmbedder(holder).withLang(Lang.of(config.language().orElse("en")));
 		engine = new Engine(options);
 		return engine;
 	}
 
 	/**
-	 * The semantic channel's embedder, never in the way of the start: an explicit model and runtime are loaded in
-	 * the background; with none configured and {@code mnemic.embed=auto}, the runtime library comes out of the
-	 * build ({@link OrtLibrary}) and the model is fetched on first use into the models directory (pinned by hash)
-	 * and loaded when it is there; {@code off} keeps the channel out. Whatever happens, the engine answers
-	 * meanwhile without it.
+	 * The semantic channel's embedder, never in the way of the start: an explicit model and runtime are loaded in the
+	 * background; with none configured and {@code mnemic.embed=auto}, the runtime library comes out of the build
+	 * ({@link OrtLibrary}) and the model is fetched on first use into the models directory (pinned by hash) and loaded
+	 * when it is there; {@code off} keeps the channel out. Whatever happens, the engine answers meanwhile without it.
 	 */
 	private EmbedderHolder embedderHolder(MnemicConfig config) {
 		if ("off".equalsIgnoreCase(config.embed())) {
@@ -109,12 +104,13 @@ public class EngineProducer {
 			List<ModelFetcher.Item> plan = ModelFetcher.plan(modelsDir, config.embedModelUrl().orElse(null));
 			Path modelDir = plan.get(0).target().getParent();
 			if (!ModelFetcher.complete(plan)) {
-				LOG.infof("Semantic recall: fetching the embedding model (%d MB) into %s in the background; "
-						+ "status reports progress, MNEMIC_EMBED=off disables it", ModelFetcher.totalBytes(plan) >> 20, modelsDir);
+				LOG.infof(
+						"Semantic recall: fetching the embedding model (%d MB) into %s in the background; "
+								+ "status reports progress, MNEMIC_EMBED=off disables it",
+						ModelFetcher.totalBytes(plan) >> 20, modelsDir);
 			}
 			EmbedderHolder.LibrarySource library = config.ortLibrary().isPresent()
-					? () -> Path.of(config.ortLibrary().get())
-					: () -> OrtLibrary.install(modelsDir);
+					? () -> Path.of(config.ortLibrary().get()) : () -> OrtLibrary.install(modelsDir);
 			return new EmbedderHolder(modelsDir, plan, library, modelDir, ModelFetcher.MODEL_ID, this::backfill);
 		} catch (RuntimeException e) {
 			LOG.errorf("Semantic recall unavailable: %s", e.getMessage());
@@ -131,7 +127,8 @@ public class EngineProducer {
 		try {
 			int stale = e.vectors().dropOtherModels(embedder.id());
 			if (stale > 0) {
-				LOG.infof("Semantic recall: dropped %d vectors of another model; re-embedding with %s", stale, embedder.id());
+				LOG.infof("Semantic recall: dropped %d vectors of another model; re-embedding with %s", stale,
+						embedder.id());
 			}
 			int total = 0;
 			int n;
@@ -146,7 +143,8 @@ public class EngineProducer {
 		}
 	}
 
-	void close(@Disposes Engine engine) {
+	void close(@Disposes
+	Engine engine) {
 		engine.close();
 		if (holder != null) {
 			holder.close();

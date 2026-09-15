@@ -70,8 +70,8 @@ import java.util.Map;
 
 /**
  * Every service over one {@link Database}, and the operations that span them. Constructed once per process by CDI
- * ({@link EngineProducer}), or directly by scenario tests and the benchmark harness without any container, so the
- * same code path is measured and tested. The clock is injectable so scenarios about elapsed time are deterministic.
+ * ({@link EngineProducer}), or directly by scenario tests and the benchmark harness without any container, so the same
+ * code path is measured and tested. The clock is injectable so scenarios about elapsed time are deterministic.
  */
 public final class Engine implements AutoCloseable {
 
@@ -81,8 +81,8 @@ public final class Engine implements AutoCloseable {
 
 	/** How an engine is opened; {@link #of(Path, String)} gives the defaults, the {@code with} methods override. */
 	public record Options(Path home, String version, int observationSoftLimitChars, String ownerName, Clock clock,
-	                      ModelProposer proposer, int proposerBatch, List<String> ownerIdentity, String vecLibrary,
-	                      EmbedderHolder embedder, Lang lang) {
+			ModelProposer proposer, int proposerBatch, List<String> ownerIdentity, String vecLibrary,
+			EmbedderHolder embedder, Lang lang) {
 
 		public static Options of(Path home, String version) {
 			return new Options(home, version, 4000, null, Clock.systemUTC(), null, 20, List.of(), null,
@@ -90,14 +90,14 @@ public final class Engine implements AutoCloseable {
 		}
 
 		public Options withSoftLimit(int chars) {
-			return new Options(home, version, chars, ownerName, clock,
-					proposer, proposerBatch, ownerIdentity, vecLibrary, embedder, lang);
+			return new Options(home, version, chars, ownerName, clock, proposer, proposerBatch, ownerIdentity,
+					vecLibrary, embedder, lang);
 		}
 
 		/** {@code identity}: the owner's other names, addresses, and handles, seeded as aliases. */
 		public Options withOwner(String name, List<String> identity) {
-			return new Options(home, version, observationSoftLimitChars, name, clock,
-					proposer, proposerBatch, identity, vecLibrary, embedder, lang);
+			return new Options(home, version, observationSoftLimitChars, name, clock, proposer, proposerBatch, identity,
+					vecLibrary, embedder, lang);
 		}
 
 		public Options withOwner(String name) {
@@ -105,20 +105,22 @@ public final class Engine implements AutoCloseable {
 		}
 
 		public Options withClock(Clock clock) {
-			return new Options(home, version, observationSoftLimitChars, ownerName, clock,
-					proposer, proposerBatch, ownerIdentity, vecLibrary, embedder, lang);
+			return new Options(home, version, observationSoftLimitChars, ownerName, clock, proposer, proposerBatch,
+					ownerIdentity, vecLibrary, embedder, lang);
 		}
 
-		/** A server-side proposer for the hybrid mode, reading up to {@code batch} backlog observations per consolidate. */
+		/**
+		 * A server-side proposer for the hybrid mode, reading up to {@code batch} backlog observations per consolidate.
+		 */
 		public Options withProposer(ModelProposer proposer, int batch) {
-			return new Options(home, version, observationSoftLimitChars, ownerName, clock,
-					proposer, batch, ownerIdentity, vecLibrary, embedder, lang);
+			return new Options(home, version, observationSoftLimitChars, ownerName, clock, proposer, batch,
+					ownerIdentity, vecLibrary, embedder, lang);
 		}
 
 		/** The sqlite-vec loadable library to load at open. */
 		public Options withVecLibrary(String library) {
-			return new Options(home, version, observationSoftLimitChars, ownerName, clock,
-					proposer, proposerBatch, ownerIdentity, library, embedder, lang);
+			return new Options(home, version, observationSoftLimitChars, ownerName, clock, proposer, proposerBatch,
+					ownerIdentity, library, embedder, lang);
 		}
 
 		/** An embedder the caller owns and closes, so one model can serve many engines. */
@@ -128,38 +130,38 @@ public final class Engine implements AutoCloseable {
 
 		/** The embedder's lifecycle, which may deliver the embedder after the engine has started. */
 		public Options withEmbedder(EmbedderHolder holder) {
-			return new Options(home, version, observationSoftLimitChars, ownerName, clock,
-					proposer, proposerBatch, ownerIdentity, vecLibrary, holder, lang);
+			return new Options(home, version, observationSoftLimitChars, ownerName, clock, proposer, proposerBatch,
+					ownerIdentity, vecLibrary, holder, lang);
 		}
 
 		/** The language of the fact layer; a change re-renders every fact at open. */
 		public Options withLang(Lang lang) {
-			return new Options(home, version, observationSoftLimitChars, ownerName, clock,
-					proposer, proposerBatch, ownerIdentity, vecLibrary, embedder, lang);
+			return new Options(home, version, observationSoftLimitChars, ownerName, clock, proposer, proposerBatch,
+					ownerIdentity, vecLibrary, embedder, lang);
 		}
 	}
 
 	/**
-	 * The outcome of {@code remember}: the observation, what its proposal produced (empty without one), what
-	 * answering questions did, and who proposed: {@code assistant}, {@code server:<model id>}, or {@code none}.
+	 * The outcome of {@code remember}: the observation, what its proposal produced (empty without one), what answering
+	 * questions did, and who proposed: {@code assistant}, {@code server:<model id>}, or {@code none}.
 	 */
 	public record RememberOutcome(Remembered observation, Applied applied, List<Map<String, Object>> resolved,
-	                              String proposalSource) {
+			String proposalSource) {
 	}
 
 	/** What {@code consolidate} found and did (EXTRACTION.md, Layer 3). */
 	public record Consolidation(long pendingProposals, List<Map<String, Object>> backlog,
-	                            List<Map<String, Object>> openQuestions,
-	                            List<Map<String, Object>> suggestedRegistrations, List<Map<String, Object>> merges,
-	                            int reclosed, List<Map<String, Object>> proposed,
-	                            List<Map<String, Object>> resolvedQuestions, List<Map<String, Object>> review,
-	                            List<String> retired, int embedded, List<Map<String, Object>> duplicates) {
+			List<Map<String, Object>> openQuestions, List<Map<String, Object>> suggestedRegistrations,
+			List<Map<String, Object>> merges, int reclosed, List<Map<String, Object>> proposed,
+			List<Map<String, Object>> resolvedQuestions, List<Map<String, Object>> review, List<String> retired,
+			int embedded, List<Map<String, Object>> duplicates) {
 	}
 
 	/** The vector scheme: 2 since a fact about the owner carries a first-person vector too ({@link OwnerAlias}). */
 	static final String VECTOR_SCHEME = "2";
 	/** Bench knob: {@code -Dmnemic.owner-alias=false} embeds owner facts without the first-person vector. */
-	private static final boolean OWNER_ALIAS = !"false".equalsIgnoreCase(System.getProperty("mnemic.owner-alias", "true"));
+	private static final boolean OWNER_ALIAS = !"false"
+			.equalsIgnoreCase(System.getProperty("mnemic.owner-alias", "true"));
 
 	private final Options options;
 	private final Database db;
@@ -173,7 +175,8 @@ public final class Engine implements AutoCloseable {
 		this.options = options;
 		this.db = new Database(options.home().resolve(DB_FILE), options.vecLibrary());
 		this.observations = new ObservationService(db, options.observationSoftLimitChars());
-		this.knowledge = Knowledge.open(db, options.lang(), options.ownerName(), options.ownerIdentity(), options.clock());
+		this.knowledge = Knowledge.open(db, options.lang(), options.ownerName(), options.ownerIdentity(),
+				options.clock());
 		this.vectors = new VectorStore(db);
 		this.recall = new RecallService(db, knowledge.entities(), knowledge.predicates(), knowledge.facts(),
 				knowledge.events(), knowledge.containment(), TokenEstimator.CHARS_PER_TOKEN, options.clock(), vectors,
@@ -199,19 +202,19 @@ public final class Engine implements AutoCloseable {
 	 * stored even when the proposal fails validation.
 	 */
 	public RememberOutcome remember(
-			String text, Source source, Instant observedAt, Proposal proposal, Integer specVersion, String idempotencyKey) {
+		String text, Source source, Instant observedAt, Proposal proposal, Integer specVersion, String idempotencyKey) {
 		return remember(text, source, observedAt, proposal, specVersion, idempotencyKey, List.of());
 	}
 
 	/**
-	 * As above, answering open questions first: a {@code reinterpret} answer rejects the pending fact and this
-	 * call's proposal is what replaces it; other answers apply what the question held. An answer with no proposal
-	 * of its own has nothing to extract and does not join the backlog. In hybrid mode with a synchronous proposer,
-	 * the configured model reads an observation that arrived without a proposal.
+	 * As above, answering open questions first: a {@code reinterpret} answer rejects the pending fact and this call's
+	 * proposal is what replaces it; other answers apply what the question held. An answer with no proposal of its own
+	 * has nothing to extract and does not join the backlog. In hybrid mode with a synchronous proposer, the configured
+	 * model reads an observation that arrived without a proposal.
 	 */
 	public RememberOutcome remember(
-			String text, Source source, Instant observedAt, Proposal proposal, Integer specVersion, String idempotencyKey,
-			List<Resolve> resolves) {
+		String text, Source source, Instant observedAt, Proposal proposal, Integer specVersion, String idempotencyKey,
+		List<Resolve> resolves) {
 		boolean answerOnly = proposal == null && resolves != null && !resolves.isEmpty();
 		String proposalJson = proposal != null ? Json.write(proposal) : answerOnly ? "{}" : null;
 		Remembered r = observations.remember(text, source, observedAt, proposalJson, specVersion, idempotencyKey);
@@ -219,8 +222,8 @@ public final class Engine implements AutoCloseable {
 			return new RememberOutcome(r, Applied.NOTHING, List.of(), "none");
 		}
 		Observation obs = observations.get(r.observationId()).orElseThrow();
-		List<Map<String, Object>> resolved =
-				resolves == null || resolves.isEmpty() ? List.of() : knowledge.resolver().resolve(obs, resolves);
+		List<Map<String, Object>> resolved = resolves == null || resolves.isEmpty() ? List.of()
+				: knowledge.resolver().resolve(obs, resolves);
 		if (proposal != null) {
 			Applied applied = knowledge.factService().apply(obs, proposal);
 			embed(obs, applied);
@@ -243,8 +246,8 @@ public final class Engine implements AutoCloseable {
 	/**
 	 * A structured reading for an observation already stored without one (EVALUATION.md I5): a connector's email, a
 	 * note remembered in a hurry. The proposal is attached to that observation, its facts carry that observation as
-	 * their provenance, its rows are embedded, and it leaves the backlog. An observation that already has a reading
-	 * is refused: its facts are corrected, not proposed again.
+	 * their provenance, its rows are embedded, and it leaves the backlog. An observation that already has a reading is
+	 * refused: its facts are corrected, not proposed again.
 	 */
 	public Applied propose(long observationId, Proposal proposal) {
 		Observation obs = observations.get(observationId)
@@ -253,8 +256,9 @@ public final class Engine implements AutoCloseable {
 			throw MnemicException.conflict("obs-" + observationId + " is forgotten.", Map.of());
 		}
 		if (obs.proposalJson() != null && !"{}".equals(obs.proposalJson())) {
-			throw MnemicException.conflict("obs-" + observationId + " already has a structured reading; correct its facts "
-					+ "instead of proposing again.", Map.of("observation", obs.ref()));
+			throw MnemicException.conflict("obs-" + observationId
+					+ " already has a structured reading; correct its facts " + "instead of proposing again.",
+					Map.of("observation", obs.ref()));
 		}
 		observations.attachProposal(obs.id(), Json.write(proposal), Proposal.CURRENT_SPEC_VERSION, null);
 		Observation stored = observations.get(obs.id()).orElseThrow();
@@ -271,7 +275,9 @@ public final class Engine implements AutoCloseable {
 
 	// ── observations ────────────────────────────────────────────────────
 
-	/** Retires an observation that was wrong or superseded (EVALUATION.md D8); its facts are left to retract or correct. */
+	/**
+	 * Retires an observation that was wrong or superseded (EVALUATION.md D8); its facts are left to retract or correct.
+	 */
 	public Observation retireObservation(long observationId, String reason, Long supersededBy) {
 		Observation obs = observations.get(observationId)
 				.orElseThrow(() -> MnemicException.notFound("No observation obs-" + observationId));
@@ -279,7 +285,8 @@ public final class Engine implements AutoCloseable {
 			throw MnemicException.conflict("obs-" + observationId + " is forgotten.", Map.of());
 		}
 		if (obs.retired()) {
-			throw MnemicException.conflict("obs-" + observationId + " is already retired: " + obs.retiredReason(), Map.of());
+			throw MnemicException.conflict("obs-" + observationId + " is already retired: " + obs.retiredReason(),
+					Map.of());
 		}
 		if (supersededBy != null && observations.get(supersededBy).isEmpty()) {
 			throw MnemicException.notFound("No observation obs-" + supersededBy + " to supersede it");
@@ -337,7 +344,10 @@ public final class Engine implements AutoCloseable {
 		return corrected;
 	}
 
-	/** A correction record carries its change in itself: nothing to propose from its text, so it never joins the backlog. */
+	/**
+	 * A correction record carries its change in itself: nothing to propose from its text, so it never joins the
+	 * backlog.
+	 */
 	private Observation correctionRecord(String text, long factId) {
 		Remembered r = observations.remember(text, new Source("correction", "f-" + factId, null, null, null),
 				options.clock().instant(), "{}", null, null);
@@ -353,13 +363,14 @@ public final class Engine implements AutoCloseable {
 			throw MnemicException.invalidArgument("'replacement' must name what changes, e.g. {\"render\": "
 					+ "\"{object} is {subject}'s {qualifier|parent}\"} or {\"lexicon\": [\"mother\", \"father\"]}.");
 		}
-		var before = knowledge.predicates().get(name).orElseThrow(() -> MnemicException.notFound("No predicate " + name));
+		var before = knowledge.predicates().get(name)
+				.orElseThrow(() -> MnemicException.notFound("No predicate " + name));
 		var after = knowledge.predicates().update(name, replacement, reason);
 		int rerendered = knowledge.renderer().rerender(name);
 		var out = new LinkedHashMap<String, Object>();
 		out.put("predicate", name);
-		out.put("before", Map.of("render", before.render(), "lexicon", before.lexicon(), "qualifiers", before.qualifiers(),
-				"functional", before.functional()));
+		out.put("before", Map.of("render", before.render(), "lexicon", before.lexicon(), "qualifiers",
+				before.qualifiers(), "functional", before.functional()));
 		out.put("after", Map.of("render", after.render(), "lexicon", after.lexicon(), "qualifiers", after.qualifiers(),
 				"functional", after.functional()));
 		out.put("rerendered_facts", rerendered);
@@ -383,10 +394,10 @@ public final class Engine implements AutoCloseable {
 	}
 
 	/**
-	 * Housekeeping (EXTRACTION.md, Layer 3; EVALUATION.md G2, G3, J6): merges, re-closing, and the lists a caller
-	 * needs to finish what Mnemic cannot do alone. {@code dryRun} reports without changing anything; {@code retire}
-	 * names observations with nothing to propose (an answer, a note), taken out of the backlog. In hybrid mode the
-	 * configured model reads a batch of the backlog per call.
+	 * Housekeeping (EXTRACTION.md, Layer 3; EVALUATION.md G2, G3, J6): merges, re-closing, and the lists a caller needs
+	 * to finish what Mnemic cannot do alone. {@code dryRun} reports without changing anything; {@code retire} names
+	 * observations with nothing to propose (an answer, a note), taken out of the backlog. In hybrid mode the configured
+	 * model reads a batch of the backlog per call.
 	 */
 	public Consolidation consolidate(boolean dryRun, List<Long> retire) {
 		var retired = new ArrayList<String>();
@@ -447,8 +458,8 @@ public final class Engine implements AutoCloseable {
 	// ── the semantic channel's vectors ──────────────────────────────────
 
 	/**
-	 * The observation's text and each new fact's rendering, embedded as they are stored. A failure here never fails
-	 * the remember; consolidate backfills what is missing.
+	 * The observation's text and each new fact's rendering, embedded as they are stored. A failure here never fails the
+	 * remember; consolidate backfills what is missing.
 	 */
 	private void embed(Observation obs, Applied applied) {
 		Embedder embedder = options.embedder().get();
@@ -471,13 +482,14 @@ public final class Engine implements AutoCloseable {
 	}
 
 	/**
-	 * A fact's vectors: its rendering, and for a fact that names the owner the rendering as the owner would say it,
-	 * so a first-person question lands on it; the item scores by its better vector.
+	 * A fact's vectors: its rendering, and for a fact that names the owner the rendering as the owner would say it, so
+	 * a first-person question lands on it; the item scores by its better vector.
 	 */
 	private List<float[]> factVectors(Embedder embedder, String rendering) {
 		var out = new ArrayList<float[]>();
 		out.add(embedder.embed(rendering));
-		String mine = OWNER_ALIAS ? OwnerAlias.firstPerson(rendering, knowledge.entities().owner().name(), options.lang()) : null;
+		String mine = OWNER_ALIAS
+				? OwnerAlias.firstPerson(rendering, knowledge.entities().owner().name(), options.lang()) : null;
 		if (mine != null) {
 			out.add(embedder.embed(mine));
 		}
@@ -492,13 +504,13 @@ public final class Engine implements AutoCloseable {
 		}
 		int n = 0;
 		for (long id : vectors.missingObservations(embedder.id(), limit)) {
-			observations.get(id).ifPresent(o -> vectors.putChunks(VectorStore.OBSERVATION, id, embedder.id(),
-					embedder.embedChunks(o.text())));
+			observations.get(id).ifPresent(
+					o -> vectors.putChunks(VectorStore.OBSERVATION, id, embedder.id(), embedder.embedChunks(o.text())));
 			n++;
 		}
 		for (long id : vectors.missingFacts(embedder.id(), limit)) {
-			knowledge.facts().get(id).ifPresent(f -> vectors.putChunks(VectorStore.FACT, id, embedder.id(),
-					factVectors(embedder, f.rendering())));
+			knowledge.facts().get(id).ifPresent(
+					f -> vectors.putChunks(VectorStore.FACT, id, embedder.id(), factVectors(embedder, f.rendering())));
 			n++;
 		}
 		return n;

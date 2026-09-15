@@ -35,10 +35,10 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * The language of the fact layer (MNEMIC_LANGUAGE). Observations stay in whatever language they were
- * said; facts are rendered from templates, and the templates, the temporal suffixes, the words around a negation,
- * a restriction, or a closure, and the family qualifiers are the language's. Switching the store's language
- * re-renders every fact from what is stored; nothing is lost, since the words are never the record.
+ * The language of the fact layer (MNEMIC_LANGUAGE). Observations stay in whatever language they were said; facts are
+ * rendered from templates, and the templates, the temporal suffixes, the words around a negation, a restriction, or a
+ * closure, and the family qualifiers are the language's. Switching the store's language re-renders every fact from what
+ * is stored; nothing is lost, since the words are never the record.
  */
 public enum Lang {
 	EN("en"), DE("de");
@@ -105,38 +105,39 @@ public enum Lang {
 	}
 
 	public String closure(String subject, String verbPhrase, String type) {
-		return this == DE ? "Was " + subject + " an " + typePlural(type) + " " + verbPhrase + ", ist vollständig erfasst"
+		return this == DE
+				? "Was " + subject + " an " + typePlural(type) + " " + verbPhrase + ", ist vollständig erfasst"
 				: "what " + subject + " " + verbPhrase + " among " + typePlural(type) + " is completely recorded";
 	}
 
 	private static final Map<String, String> PLURAL_DE = Map.ofEntries(Map.entry("place", "Orten"),
-			Map.entry("country", "Ländern"), Map.entry("person", "Personen"), Map.entry("organization", "Organisationen"),
-			Map.entry("project", "Projekten"), Map.entry("product", "Produkten"), Map.entry("team", "Teams"),
-			Map.entry("thing", "Dingen"), Map.entry("technology", "Technologien"), Map.entry("domain", "Domains"),
-			Map.entry("event", "Ereignissen"));
+			Map.entry("country", "Ländern"), Map.entry("person", "Personen"),
+			Map.entry("organization", "Organisationen"), Map.entry("project", "Projekten"),
+			Map.entry("product", "Produkten"), Map.entry("team", "Teams"), Map.entry("thing", "Dingen"),
+			Map.entry("technology", "Technologien"), Map.entry("domain", "Domains"), Map.entry("event", "Ereignissen"));
 
 	public String typePlural(String type) {
 		if (this == DE) {
 			return PLURAL_DE.getOrDefault(type, type);
 		}
 		return switch (type) {
-			case "person" -> "people";
-			case "technology" -> "technologies";
-			default -> type.endsWith("s") ? type : type + "s";
+		case "person" -> "people";
+		case "technology" -> "technologies";
+		default -> type.endsWith("s") ? type : type + "s";
 		};
 	}
 
 	private static final Map<String, String> QUALIFIER_DE = Map.ofEntries(Map.entry("mother", "Mutter"),
 			Map.entry("father", "Vater"), Map.entry("parent", "Elternteil"), Map.entry("mom", "Mutter"),
 			Map.entry("dad", "Vater"), Map.entry("stepmother", "Stiefmutter"), Map.entry("stepfather", "Stiefvater"),
-			Map.entry("stepparent", "Stiefelternteil"), Map.entry("brother", "Bruder"), Map.entry("sister", "Schwester"),
-			Map.entry("sibling", "Geschwister"), Map.entry("half-brother", "Halbbruder"),
-			Map.entry("half-sister", "Halbschwester"), Map.entry("half-sibling", "Halbgeschwister"),
-			Map.entry("stepbrother", "Stiefbruder"), Map.entry("stepsister", "Stiefschwester"),
-			Map.entry("stepsibling", "Stiefgeschwister"), Map.entry("twin", "Zwilling"),
-			Map.entry("twin brother", "Zwillingsbruder"), Map.entry("twin sister", "Zwillingsschwester"),
-			Map.entry("wife", "Ehefrau"), Map.entry("husband", "Ehemann"), Map.entry("spouse", "Ehepartner"),
-			Map.entry("partner", "Partner"));
+			Map.entry("stepparent", "Stiefelternteil"), Map.entry("brother", "Bruder"),
+			Map.entry("sister", "Schwester"), Map.entry("sibling", "Geschwister"),
+			Map.entry("half-brother", "Halbbruder"), Map.entry("half-sister", "Halbschwester"),
+			Map.entry("half-sibling", "Halbgeschwister"), Map.entry("stepbrother", "Stiefbruder"),
+			Map.entry("stepsister", "Stiefschwester"), Map.entry("stepsibling", "Stiefgeschwister"),
+			Map.entry("twin", "Zwilling"), Map.entry("twin brother", "Zwillingsbruder"),
+			Map.entry("twin sister", "Zwillingsschwester"), Map.entry("wife", "Ehefrau"),
+			Map.entry("husband", "Ehemann"), Map.entry("spouse", "Ehepartner"), Map.entry("partner", "Partner"));
 
 	/** A family qualifier in the language's words; the stored value stays the vocabulary's (English) term. */
 	public String qualifier(String qualifier) {
