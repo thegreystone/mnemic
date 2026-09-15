@@ -33,7 +33,7 @@ import se.hirt.mnemic.Engine;
 import se.hirt.mnemic.Engine.RememberOutcome;
 import se.hirt.mnemic.Scenario;
 import se.hirt.mnemic.knowledge.Fact;
-import se.hirt.mnemic.knowledge.FactService.Resolve;
+import se.hirt.mnemic.knowledge.QuestionResolver.Resolve;
 import se.hirt.mnemic.knowledge.Predicate;
 import se.hirt.mnemic.observation.Source;
 import se.hirt.mnemic.proposal.Proposal.FactRef;
@@ -406,7 +406,7 @@ class FactsTest {
 			RememberOutcome later = remember(e, "I left Nordvik Virtual Machines in 2002.",
 					proposal().entity("e1", "Nordvik Virtual Machines", "organization").event("ev2", "left", "2002", "self", "e1"));
 			long id = Long.parseLong(later.applied().events().getFirst().id().substring(4));
-			var ev = e.facts().event(id).orElseThrow();
+			var ev = e.events().get(id).orElseThrow();
 			assertEquals("2002-01-01", ev.validStart(), ev.toString());
 			assertTrue(ev.rendering().contains("2002"), ev.rendering());
 			// A different date is a different event.

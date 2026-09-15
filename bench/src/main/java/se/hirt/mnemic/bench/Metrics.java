@@ -31,7 +31,7 @@ package se.hirt.mnemic.bench;
 import java.util.*;
 
 /**
- * The numbers the benchmark protocol reports (PLAN.md): means with bootstrap intervals, per-type slices, session
+ * The numbers the benchmark reports: means with bootstrap intervals, per-type slices, session
  * recall@k, latency percentiles, and the paired bootstrap that decides whether two runs differ. Bootstrap uses a fixed
  * seed so a report is reproducible from its inputs.
  */
@@ -44,7 +44,7 @@ public final class Metrics {
 	public record Estimate(double value, double low, double high, int n) {
 		@Override
 		public String toString() {
-			return String.format(java.util.Locale.ROOT, "%.3f [%.3f, %.3f] n=%d", value, low, high, n);
+			return String.format(Locale.ROOT, "%.3f [%.3f, %.3f] n=%d", value, low, high, n);
 		}
 	}
 
@@ -77,7 +77,7 @@ public final class Metrics {
 
 	/**
 	 * Paired bootstrap of the per-item difference {@code b - a} over items present in both runs. The interval excluding
-	 * zero is the bar for calling a change a gain (DECISIONS.md §5.1).
+	 * zero is the bar for calling a change a gain.
 	 */
 	public static Estimate pairedDifference(Map<String, Boolean> a, Map<String, Boolean> b) {
 		var diffs = new ArrayList<Double>();

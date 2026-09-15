@@ -31,6 +31,7 @@ package se.hirt.mnemic;
 import io.smallrye.config.ConfigMapping;
 import io.smallrye.config.WithDefault;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -60,7 +61,7 @@ public interface MnemicConfig {
 
 	/** Every configured identity of the owner, in one list: aliases, e-mail addresses, the GitHub handle, handles. */
 	default List<String> ownerIdentity() {
-		var out = new java.util.ArrayList<String>();
+		var out = new ArrayList<String>();
 		ownerAliases().ifPresent(out::addAll);
 		ownerEmails().ifPresent(out::addAll);
 		ownerGithub().ifPresent(out::add);
@@ -69,15 +70,15 @@ public interface MnemicConfig {
 	}
 
 	/**
-	 * P2 (PLAN.md, M4): the sqlite-vec loadable library (vec0.dll / vec0.so / vec0.dylib). When set, the store loads
-	 * it at open and {@code status} reports {@code vec}; when unset, nothing changes. Env: MNEMIC_VEC_LIBRARY.
+	 * The sqlite-vec loadable library (vec0.dll / vec0.so / vec0.dylib). When set, the store loads it at open and
+	 * {@code status} reports {@code vec}; when unset, vectors are scanned. Env: MNEMIC_VEC_LIBRARY.
 	 */
 	Optional<String> vecLibrary();
 
-	/** P3: the ONNX Runtime shared library; when set, {@code status} reports what the probe found. Env: MNEMIC_ORT_LIBRARY. */
+	/** The ONNX Runtime shared library; when set, {@code status} reports what the probe found. Env: MNEMIC_ORT_LIBRARY. */
 	Optional<String> ortLibrary();
 
-	/** M4: a directory holding the embedding model (model.onnx, tokenizer.json). Env: MNEMIC_EMBED_MODEL. */
+	/** A directory holding the embedding model (model.onnx, tokenizer.json). Env: MNEMIC_EMBED_MODEL. */
 	Optional<String> embedModel();
 
 	/**
@@ -90,7 +91,7 @@ public interface MnemicConfig {
 	/** Where fetched models live, shared by every data home: {@code ~/.mnemic/models}. Env: MNEMIC_MODELS_DIR. */
 	Optional<String> modelsDir();
 
-
+	/** A mirror laid out like the model's Hugging Face repository, in place of the published one. Env: MNEMIC_EMBED_MODEL_URL. */
 	Optional<String> embedModelUrl();
 
 	/** The language of the fact layer: en (default) or de. Observations stay verbatim. Env: MNEMIC_LANGUAGE. */

@@ -30,13 +30,17 @@ package se.hirt.mnemic.observation;
 
 import se.hirt.mnemic.persistence.Database;
 import se.hirt.mnemic.persistence.Row;
+import se.hirt.mnemic.persistence.Tx;
 import se.hirt.mnemic.protocol.Json;
 import se.hirt.mnemic.protocol.MnemicException;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * The verbatim store. Observations are never split, never rewritten, and only blanked by an explicit {@code forget}
@@ -126,14 +130,14 @@ public final class ObservationService {
 		return db.read(tx -> tx.queryLong("SELECT COUNT(*) FROM observation WHERE forgotten_at IS NULL"));
 	}
 
-	/** Retired observations: still stored, out of recall; status shows them beside the count so a corrected store does not look smaller. */
+	/** Retired observations: still stored, out of recall; shown beside the count so a corrected store does not look smaller. */
 	public long retiredCount() {
 		return db.read(tx -> tx.queryLong("SELECT COUNT(*) FROM observation WHERE forgotten_at IS NULL AND retired_at IS NOT NULL"));
 	}
 
 	/** The ids of the retired observations among the given ones. */
-	public java.util.Set<Long> retiredAmong(java.util.Collection<Long> ids) {
-		var out = new java.util.HashSet<Long>();
+	public Set<Long> retiredAmong(Collection<Long> ids) {
+		var out = new HashSet<Long>();
 		for (long id : ids) {
 			get(id).filter(Observation::retired).ifPresent(o -> out.add(id));
 		}
@@ -151,7 +155,6 @@ public final class ObservationService {
 		                                WHERE id = ? AND forgotten_at IS NULL AND retired_at IS NOT NULL""", id)) > 0;
 	}
 
-
 	/** Marks an observation as having nothing to propose ({@code {}}), so it leaves the backlog. */
 	public boolean retire(long id) {
 		return db.write(tx -> tx.update(
@@ -160,9 +163,9 @@ public final class ObservationService {
 	}
 
 	/**
-	 * Retires an observation that was recorded wrongly or superseded (2026-09-12, D8): the text and history stay,
-	 * the reason and the observation that supersedes it are recorded, it leaves the backlog and, unless history
-	 * is asked for, recall. Its facts are not touched. False when it is already retired or forgotten.
+	 * Retires an observation that was recorded wrongly or superseded (EVALUATION.md D8): the text and history stay,
+	 * the reason and the superseding observation are recorded, it leaves the backlog and, unless history is asked
+	 * for, recall. Its facts are not touched. False when it is already retired or forgotten.
 	 */
 	public boolean retire(long id, String reason, Long supersededBy) {
 		return db.write(tx -> tx.update("""
@@ -183,13 +186,13 @@ public final class ObservationService {
 				.stream().map(r -> r.lng("id")).toList();
 	}
 
-	private long pending(se.hirt.mnemic.persistence.Tx tx) {
+	private long pending(Tx tx) {
 		return tx.queryLong("SELECT COUNT(*) FROM observation WHERE proposal_json IS NULL AND forgotten_at IS NULL");
 	}
 
 	/**
 	 * Hard forget: blanks the text (the FTS trigger removes the index entry) and leaves a dated tombstone
-	 * (EVALUATION.md D2). Derived facts are removed by their own services in later milestones.
+	 * (EVALUATION.md D2). What was derived from it is removed by the fact layer before this is called.
 	 */
 	public boolean forget(long id) {
 		return db.write(tx -> tx.update(

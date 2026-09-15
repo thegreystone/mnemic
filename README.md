@@ -259,7 +259,8 @@ stores; and package-manager installs (Homebrew, winget).
 *engram*. Mnemic was designed under the working name "Engram" until 2026-09-07 and is not affiliated with any
 other project of that name.
 
-Design, decisions, benchmarks, and how to build and contribute: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+Design, benchmarks, and how to build and contribute: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md); how the code is
+put together: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## License
 

@@ -29,7 +29,8 @@
 package se.hirt.mnemic;
 
 import se.hirt.mnemic.Engine.RememberOutcome;
-import se.hirt.mnemic.knowledge.FactService.Resolve;
+import se.hirt.mnemic.knowledge.Lang;
+import se.hirt.mnemic.knowledge.QuestionResolver.Resolve;
 import se.hirt.mnemic.observation.ObservationService.Remembered;
 import se.hirt.mnemic.observation.Source;
 import se.hirt.mnemic.proposal.Proposal;
@@ -55,7 +56,7 @@ public final class TestHomes {
 	public static final int SOFT_LIMIT = 4000;
 	public static final String OWNER = "Mattias Sandell";
 
-	/** Placeholder identities, never the author's real ones (2026-09-10): a surname, an address, a GitHub handle. */
+	/** Placeholder identities, never the author's real ones: a surname, an address, a GitHub handle. */
 	public static final List<String> OWNER_IDENTITY = List.of("Sandell", "mattias@example.com", "sandell-example",
 			"@sandell_example");
 
@@ -71,7 +72,12 @@ public final class TestHomes {
 	}
 
 	public static Engine engine(Path home) {
-		return new Engine(home, "test", SOFT_LIMIT, OWNER, Clock.systemUTC(), null, 20, OWNER_IDENTITY);
+		return new Engine(options(home));
+	}
+
+	/** The options every test engine starts from: the fictional owner, their identities, the soft limit. */
+	public static Engine.Options options(Path home) {
+		return Engine.Options.of(home, "test").withSoftLimit(SOFT_LIMIT).withOwner(OWNER, OWNER_IDENTITY);
 	}
 
 	public static Engine engine(String name) {
@@ -79,15 +85,13 @@ public final class TestHomes {
 	}
 
 	/** A store whose fact layer is rendered in {@code lang}. */
-	public static Engine engine(Path home, se.hirt.mnemic.knowledge.Lang lang) {
-		return new Engine(home, "test", SOFT_LIMIT, OWNER, Clock.systemUTC(), null, 20, OWNER_IDENTITY, null,
-				(se.hirt.mnemic.embed.Embedder) null, lang);
+	public static Engine engine(Path home, Lang lang) {
+		return new Engine(options(home).withLang(lang));
 	}
 
 	/** An engine whose clock is fixed, for scenarios that reason about elapsed time (EVALUATION.md C7). */
 	public static Engine engine(String name, Instant now) {
-		return new Engine(fresh(name), "test", SOFT_LIMIT, OWNER, Clock.fixed(now, ZoneOffset.UTC), null, 20,
-				OWNER_IDENTITY);
+		return new Engine(options(fresh(name)).withClock(Clock.fixed(now, ZoneOffset.UTC)));
 	}
 
 	/** {@code remember(observation: "...")} with default source and observation time, no proposal. */

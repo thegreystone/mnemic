@@ -35,7 +35,7 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * The language of the fact layer (MNEMIC_LANGUAGE, 2026-09-11). Observations stay in whatever language they were
+ * The language of the fact layer (MNEMIC_LANGUAGE). Observations stay in whatever language they were
  * said; facts are rendered from templates, and the templates, the temporal suffixes, the words around a negation,
  * a restriction, or a closure, and the family qualifiers are the language's. Switching the store's language
  * re-renders every fact from what is stored; nothing is lost, since the words are never the record.

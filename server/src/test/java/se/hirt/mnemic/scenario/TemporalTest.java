@@ -115,7 +115,7 @@ class TemporalTest {
 					proposal().entity("e1", "Switzerland", "place")
 							.event("ev1", "moved", "twelve years ago", "self", "e1")
 							.fact(fact("self", "lives_in", "e1", null, null, null, null, null, List.of("ev1"), null)));
-			var ev = e.facts().event(Long.parseLong(o.applied().events().getFirst().id().substring(4))).orElseThrow();
+			var ev = e.events().get(Long.parseLong(o.applied().events().getFirst().id().substring(4))).orElseThrow();
 			assertEquals("2014-01-01", ev.validStart());
 			assertEquals("year", ev.validStartPrecision());
 			Fact f = stored(e, o, 0);
@@ -447,7 +447,7 @@ class TemporalTest {
 			}
 			RecallResult r = recall(e, "where did Mattias work", Instant.parse("2015-06-01T00:00:00Z"));
 			assertTrue(r.structured().matched(), r.text());
-			assertEquals("Initrode", e.facts().entityName(r.structured().facts().getFirst().objectId()));
+			assertEquals("Initrode", e.entities().nameOf(r.structured().facts().getFirst().objectId()));
 			RecallResult after = recall(e, "where did Mattias work", Instant.parse("2019-06-01T00:00:00Z"));
 			assertEquals("miss", after.structured().state(), "the interval ended in 2018: " + after.text());
 		}

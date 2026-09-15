@@ -38,6 +38,7 @@ import se.hirt.mnemic.bench.Ingestor.Granularity;
 import se.hirt.mnemic.bench.Ingestor.Ingested;
 import se.hirt.mnemic.bench.LongMemEval.Question;
 import se.hirt.mnemic.model.ModelProvider;
+import se.hirt.mnemic.proposal.ModelProposer;
 import se.hirt.mnemic.recall.RecallResult;
 
 import java.io.BufferedWriter;
@@ -50,7 +51,7 @@ import java.time.Instant;
 import java.util.*;
 
 /**
- * The benchmark CLI (PLAN.md, Benchmark protocol). A run directory holds {@code config.json}, {@code retrieval.jsonl}
+ * The benchmark CLI. A run directory holds {@code config.json}, {@code retrieval.jsonl}
  * (one line per question: ranked sessions, recall@k, latency, context tokens, facts), {@code hypotheses.jsonl} in
  * LongMemEval's official format when a reader is set, {@code judged.jsonl} after {@code judge}, {@code errors.jsonl}
  * for questions that failed, and {@code metrics.json} after {@code metrics}. Models are named as
@@ -105,7 +106,6 @@ public final class Bench {
 		int limit = Integer.parseInt(o.getOrDefault("limit", "0"));
 		Set<String> types = o.containsKey("types") ? Set.of(o.get("types").split(",")) : Set.of();
 		boolean onlyAbstention = "true".equals(o.get("abstention")); // the 30 questions whose answer is "not known"
-		// M4: --embed-model <dir> --ort-library <lib> gives every engine of the run the semantic channel.
 		Embedder embedder = embedder(o);
 		String keyEnv = o.get("api-key-env");
 		Reader reader = o.containsKey("reader") && !"none".equals(o.get("reader")) ? new Reader(
@@ -161,8 +161,7 @@ public final class Bench {
 				}
 				Path home = homes.resolve(q.id());
 				RecallResult r;
-				try (Engine e = new Engine(home, "bench", Integer.MAX_VALUE, "the user", java.time.Clock.systemUTC(), null, 20,
-						List.of(), null, embedder)) {
+				try (Engine e = new Engine(options(home).withEmbedder(embedder))) {
 					try {
 						long t0 = System.nanoTime();
 						Ingested ing = Ingestor.ingest(e, q, granularity, proposer);
@@ -170,27 +169,7 @@ public final class Bench {
 						long t1 = System.nanoTime();
 						r = e.recall().recall(q.question(), q.date(), budget, k * 4);
 						long recallNs = System.nanoTime() - t1;
-						List<String> ranked = Ingestor.rankedSessions(r);
-						Set<String> answers = new HashSet<>(q.answerSessionIds());
-						var line = new LinkedHashMap<String, Object>();
-						line.put("question_id", q.id());
-						line.put("question_type", q.type());
-						line.put("abstention", q.isAbstention());
-						line.put("observations", ing.observations());
-						line.put("facts", ing.facts());
-						line.put("proposals_failed", ing.proposalsFailed());
-						line.put("ranked_sessions", ranked);
-						line.put("answer_sessions", q.answerSessionIds());
-						line.put("recall_at_5", Metrics.recallAtK(ranked, answers, 5));
-						line.put("recall_at_10", Metrics.recallAtK(ranked, answers, 10));
-						line.put("structured", r.structured().state());
-						line.put("candidates", r.candidates());
-						line.put("context_tokens", r.tokensUsed());
-						line.put("ingest_ms", ingestNs / 1_000_000);
-						line.put("recall_ms", recallNs / 1_000_000);
-						retrieval.write(LINE.writeValueAsString(line));
-						retrieval.newLine();
-						retrieval.flush();
+						writeLine(retrieval, retrievalLine(q, ing, r, ingestNs, recallNs));
 					} catch (RuntimeException | IOException ex) {
 						// One bad question must not void the other 499: record it and move on.
 						Files.writeString(out.resolve("errors.jsonl"), LINE.writeValueAsString(
@@ -204,17 +183,7 @@ public final class Bench {
 					}
 				}
 				if (reader != null) {
-					String hypothesis = reader.answer(q.question(), q.dateText(), r.text());
-					var h = new LinkedHashMap<String, Object>();
-					h.put("question_id", q.id());
-					h.put("question_type", q.type());
-					h.put("question", q.question());
-					h.put("answer", q.answer());
-					h.put("hypothesis", hypothesis);
-					h.put("context", r.text());
-					hyps.write(LINE.writeValueAsString(h));
-					hyps.newLine();
-					hyps.flush();
+					writeLine(hyps, hypothesisLine(q, reader.answer(q.question(), q.dateText(), r.text()), r.text()));
 				}
 				done++;
 				if (done % (proposer == null ? 25 : 5) == 0) {
@@ -235,6 +204,47 @@ public final class Bench {
 		metrics(Map.of("run", out.toString()));
 	}
 
+	/** One question's retrieval result: what was ingested, how the sessions ranked, and the recall figures. */
+	private static Map<String, Object> retrievalLine(Question q, Ingested ing, RecallResult r, long ingestNs, long recallNs) {
+		List<String> ranked = Ingestor.rankedSessions(r);
+		Set<String> answers = new HashSet<>(q.answerSessionIds());
+		var line = new LinkedHashMap<String, Object>();
+		line.put("question_id", q.id());
+		line.put("question_type", q.type());
+		line.put("abstention", q.isAbstention());
+		line.put("observations", ing.observations());
+		line.put("facts", ing.facts());
+		line.put("proposals_failed", ing.proposalsFailed());
+		line.put("ranked_sessions", ranked);
+		line.put("answer_sessions", q.answerSessionIds());
+		line.put("recall_at_5", Metrics.recallAtK(ranked, answers, 5));
+		line.put("recall_at_10", Metrics.recallAtK(ranked, answers, 10));
+		line.put("structured", r.structured().state());
+		line.put("candidates", r.candidates());
+		line.put("context_tokens", r.tokensUsed());
+		line.put("ingest_ms", ingestNs / 1_000_000);
+		line.put("recall_ms", recallNs / 1_000_000);
+		return line;
+	}
+
+	/** A reader's answer in LongMemEval's hypothesis format, with the context it saw. */
+	private static Map<String, Object> hypothesisLine(Question q, String hypothesis, String context) {
+		var h = new LinkedHashMap<String, Object>();
+		h.put("question_id", q.id());
+		h.put("question_type", q.type());
+		h.put("question", q.question());
+		h.put("answer", q.answer());
+		h.put("hypothesis", hypothesis);
+		h.put("context", context);
+		return h;
+	}
+
+	private static void writeLine(BufferedWriter w, Map<String, Object> line) throws IOException {
+		w.write(LINE.writeValueAsString(line));
+		w.newLine();
+		w.flush();
+	}
+
 	// ── show ────────────────────────────────────────────────────────────
 
 	/** One question end to end, printed: the recall block the reader would see, and where the answers ranked. */
@@ -252,7 +262,7 @@ public final class Bench {
 		Question q = LongMemEval.load(data).stream().filter(x -> x.id().startsWith(id)).findFirst()
 				.orElseThrow(() -> new IllegalArgumentException("No question " + id));
 		Path home = Files.createTempDirectory("mnemic-show");
-		try (Engine e = new Engine(home, "bench", Integer.MAX_VALUE, "the user")) {
+		try (Engine e = new Engine(options(home))) {
 			Ingested ing = Ingestor.ingest(e, q, granularity, proposer);
 			RecallResult r = e.recall().recall(q.question(), q.date(), budget, k * 4);
 			List<String> ranked = Ingestor.rankedSessions(r);
@@ -294,8 +304,8 @@ public final class Bench {
 	// ── rekey ───────────────────────────────────────────────────────────
 
 	/**
-	 * Copies cached replies from one model id to another for the questions a run covers: used once when the LM Studio
-	 * model id gained its publisher/architecture/quantization suffix, so replies cached under the bare alias stayed
+	 * Copies cached replies from one model id to another for the questions a run covers, so replies cached under an
+	 * earlier form of a model id (an LM Studio alias without its publisher/architecture/quantization suffix) stay
 	 * usable. Never overwrites an existing entry.
 	 */
 	static void rekey(Map<String, String> o) throws Exception {
@@ -306,7 +316,7 @@ public final class Bench {
 		Set<String> types = o.containsKey("types") ? Set.of(o.get("types").split(",")) : Set.of();
 		Granularity granularity = Granularity.valueOf(o.getOrDefault("granularity", "session").toUpperCase());
 		ProposalCache cache = new ProposalCache(Path.of(o.getOrDefault("cache", "cache/proposals")));
-		String spec = ApiProposer.spec();
+		String spec = ModelProposer.spec();
 		int seen = 0, copied = 0, missing = 0, present = 0, done = 0;
 		for (Question q : LongMemEval.load(data)) {
 			if (!types.isEmpty() && !types.contains(q.type())) {
@@ -317,7 +327,7 @@ public final class Bench {
 			}
 			for (String[] p : Ingestor.prompts(q, granularity)) {
 				seen++;
-				String user = ApiProposer.userMessage(p[0], p[1]);
+				String user = ModelProposer.userMessage(p[0], p[1]);
 				var reply = cache.get(ProposalCache.key(from, spec, user));
 				if (reply.isEmpty()) {
 					missing++;
@@ -483,10 +493,7 @@ public final class Bench {
 		return ids;
 	}
 
-	/**
-	 * One JSON object per line is what the harness writes; a stream of pretty-printed objects is what an IDE
-	 * "reformat" once turned 22 result files into. Both read the same way.
-	 */
+	/** One JSON object per line is what the harness writes; a reformatted stream of pretty-printed objects reads too. */
 	static List<JsonNode> readLines(Path file) throws IOException {
 		var out = new ArrayList<JsonNode>();
 		if (!Files.exists(file)) {
@@ -513,12 +520,17 @@ public final class Bench {
 	}
 
 	/** The shared in-process embedder for a run, or null: {@code --embed-model <dir> --ort-library <lib>}. */
-	static Embedder embedder(Map<String, String> o) throws java.io.IOException {
+	static Embedder embedder(Map<String, String> o) throws IOException {
 		if (!o.containsKey("embed-model")) {
 			return null;
 		}
 		Path dir = Path.of(o.get("embed-model"));
 		return new Embedder(Path.of(require(o, "ort-library")), dir, dir.getFileName().toString());
+	}
+
+	/** A bench engine: no soft limit on observation length, the owner is "the user". */
+	static Engine.Options options(Path home) {
+		return Engine.Options.of(home, "bench").withSoftLimit(Integer.MAX_VALUE).withOwner("the user");
 	}
 
 	private static String require(Map<String, String> o, String key) {
@@ -534,7 +546,7 @@ public final class Bench {
 			return;
 		}
 		try (var walk = Files.walk(dir)) {
-			walk.sorted(java.util.Comparator.reverseOrder()).forEach(p -> {
+			walk.sorted(Comparator.reverseOrder()).forEach(p -> {
 				try {
 					Files.deleteIfExists(p);
 				} catch (IOException ignored) {

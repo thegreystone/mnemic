@@ -80,12 +80,10 @@ public final class Names {
 		return tokens(s).stream().filter(t -> t.length() > 1 && !STOPWORDS.contains(t)).toList();
 	}
 
-	/** Canonical entity type for common synonyms; unknown types pass through lowercased. */
 	/**
 	 * Words that say what kind of thing an entity is rather than which one: "Kanton Luzern" and "Kanton Schwyz"
 	 * share "kanton" and nothing that identifies. Dropped from the identity tokens of a name of that type before
-	 * fuzzy matching (a shared classifier scored 0.5, question threshold, on every canton pair, 2026-09-10).
-	 * English, German, Swedish, and the usual company suffixes.
+	 * fuzzy matching. English, German, Swedish, and the usual company suffixes.
 	 */
 	private static final Map<String, Set<String>> TYPE_WORDS = Map.of(
 			"place", Set.of("kanton", "canton", "county", "province", "region", "state", "district", "lake", "mount",
@@ -129,6 +127,7 @@ public final class Names {
 		return kept.isEmpty() ? contentTokens(name) : kept; // "Kanton" alone stays "kanton"
 	}
 
+	/** Canonical entity type for common synonyms; unknown types pass through lowercased. */
 	public static String type(String type) {
 		if (type == null || type.isBlank()) {
 			return "unknown";

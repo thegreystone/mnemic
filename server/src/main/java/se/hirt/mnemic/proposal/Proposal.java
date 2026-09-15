@@ -30,32 +30,34 @@ package se.hirt.mnemic.proposal;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.quarkus.runtime.annotations.RegisterForReflection;
 import se.hirt.mnemic.protocol.MnemicException;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 
 /**
- * The caller's structured reading of an observation, under extraction spec version 1 (EXTRACTION.md, Layer 1). Three
- * flat arrays with string refs, no unions (DECISIONS.md §3.5). A proposal is a claim to be checked, never truth; every
- * field is optional except what a fact minimally needs.
+ * The caller's structured reading of an observation, under extraction spec version 1 (EXTRACTION.md, Layer 1): flat
+ * arrays with string refs, no unions. A proposal is a claim to be checked, never truth; every field is optional
+ * except what a fact minimally needs.
  * <p>
  * Subjects and objects are written as an entity ref ({@code "e1"}), an inline entity name ({@code "Anna Lindqvist"}),
  * or {@code "self"} / {@code "I"} / {@code "me"} for the owner. Objects of predicates whose range is {@code literal}
  * are plain strings.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
-/*
- * Jackson builds these records by reflection; the native image has no metadata for them unless it is asked.
- * Without this, remember with a proposal failed only in the binary ("cannot construct instance of Proposal"),
- * which the JVM tests never saw (2026-09-09).
- */
-@io.quarkus.runtime.annotations.RegisterForReflection(targets = {Proposal.class, Proposal.EntityRef.class,
-		Proposal.EventRef.class, Proposal.FactRef.class, Proposal.ValidTime.class, Proposal.Derivation.class,
-		Proposal.PredicateDef.class})
+// Jackson builds these records reflectively, which the native image only allows for registered types.
+@RegisterForReflection(targets = {Proposal.class, Proposal.EntityRef.class, Proposal.EventRef.class,
+		Proposal.FactRef.class, Proposal.ValidTime.class, Proposal.Derivation.class, Proposal.PredicateDef.class})
 public record Proposal(@JsonProperty("spec_version") Integer specVersion, List<EntityRef> entities,
                        List<EventRef> events, List<FactRef> facts, List<PredicateDef> predicates,
                        List<ClosureRef> closures) {
@@ -90,9 +92,9 @@ public record Proposal(@JsonProperty("spec_version") Integer specVersion, List<E
 	public static Parsed parseWithWarnings(String json) {
 		try {
 			return parsed(MAPPER.readTree(json));
-		} catch (com.fasterxml.jackson.core.JsonProcessingException truncated) {
-			// A reply cut off by the model's output limit (21 of 22 failures in the first local pilot): keep every
-			// complete top-level element, drop the partial one, close what is open. Nothing is invented.
+		} catch (JsonProcessingException truncated) {
+			// A reply cut off by the model's output limit: keep every complete top-level element, drop the partial
+			// one, close what is open. Nothing is invented.
 			String repaired = repairTruncated(json);
 			if (repaired != null) {
 				try {
@@ -116,14 +118,13 @@ public record Proposal(@JsonProperty("spec_version") Integer specVersion, List<E
 	public static Parsed fromWithWarnings(Map<String, Object> map) {
 		try {
 			return parsed(MAPPER.valueToTree(map));
-		} catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+		} catch (JsonProcessingException e) {
 			throw MnemicException.invalidArgument("'proposal' is not a valid proposal: " + e.getMessage());
 		}
 	}
 
-	private static Parsed parsed(com.fasterxml.jackson.databind.JsonNode root)
-			throws com.fasterxml.jackson.core.JsonProcessingException {
-		com.fasterxml.jackson.databind.JsonNode tree = normalise(root);
+	private static Parsed parsed(JsonNode root) throws JsonProcessingException {
+		JsonNode tree = normalise(root);
 		List<String> warnings = unknownKeys(tree);
 		return new Parsed(MAPPER.treeToValue(tree, Proposal.class), warnings);
 	}
@@ -141,28 +142,27 @@ public record Proposal(@JsonProperty("spec_version") Integer specVersion, List<E
 			"derivation", Set.of("kind"));
 
 	/**
-	 * Keys the spec does not define are ignored by the reader, and a caller that sent {@code certainty: "believed"}
-	 * believed the nuance had landed (2026-09-10). Every ignored key is named, with the keys that exist, so silence
-	 * is never the answer.
+	 * Keys the spec does not define are ignored by the reader; every ignored key is named, with the keys that exist
+	 * there, so a caller learns that a nuance it sent did not land.
 	 */
-	static List<String> unknownKeys(com.fasterxml.jackson.databind.JsonNode root) {
-		var out = new java.util.ArrayList<String>();
+	static List<String> unknownKeys(JsonNode root) {
+		var out = new ArrayList<String>();
 		if (root == null || !root.isObject()) {
 			return out;
 		}
 		unknownIn(root, "", "proposal", out);
 		for (String section : List.of("entities", "events", "facts", "predicates", "closures")) {
-			com.fasterxml.jackson.databind.JsonNode list = root.get(section);
+			JsonNode list = root.get(section);
 			if (list == null || !list.isArray()) {
 				continue;
 			}
 			int i = 0;
-			for (com.fasterxml.jackson.databind.JsonNode item : list) {
+			for (JsonNode item : list) {
 				String where = section + "[" + i++ + "]";
 				if (item.isObject()) {
 					unknownIn(item, section, where, out);
 					for (String nested : List.of("valid_time", "derivation")) {
-						com.fasterxml.jackson.databind.JsonNode n = item.get(nested);
+						JsonNode n = item.get(nested);
 						if (n != null && n.isObject()) {
 							unknownIn(n, nested, where + "." + nested, out);
 						}
@@ -174,14 +174,14 @@ public record Proposal(@JsonProperty("spec_version") Integer specVersion, List<E
 	}
 
 	private static void unknownIn(
-			com.fasterxml.jackson.databind.JsonNode node, String kind, String where, List<String> out) {
+			JsonNode node, String kind, String where, List<String> out) {
 		Set<String> known = KNOWN.get(kind);
-		var names = new java.util.ArrayList<String>();
+		var names = new ArrayList<String>();
 		node.fieldNames().forEachRemaining(names::add);
 		for (String name : names) {
 			if (!known.contains(name)) {
 				out.add("Unknown key '" + name + "' on " + where + " was ignored; keys the spec defines there: "
-						+ String.join(", ", new java.util.TreeSet<>(known)) + ".");
+						+ String.join(", ", new TreeSet<>(known)) + ".");
 			}
 		}
 	}
@@ -240,27 +240,25 @@ public record Proposal(@JsonProperty("spec_version") Integer specVersion, List<E
 	/**
 	 * Shapes models produce that the spec does not ask for but that have one honest reading: a fact whose
 	 * {@code object} (or {@code subject}) is a list becomes one fact per element; a repeated key keeps its last value
-	 * (Jackson's tree reader already does); a bare string for {@code derivation} is its kind. Measured on the first
-	 * Haiku pilot: 5 of 7 parse failures.
+	 * (Jackson's tree reader already does); a bare string for {@code derivation} is its kind; {@code confidence} and
+	 * {@code certainty} are read as {@code caller_confidence}.
 	 */
-	static com.fasterxml.jackson.databind.JsonNode normalise(com.fasterxml.jackson.databind.JsonNode root) {
+	static JsonNode normalise(JsonNode root) {
 		if (root == null || !root.isObject()) {
 			return root;
 		}
-		com.fasterxml.jackson.databind.JsonNode facts = root.get("facts");
+		JsonNode facts = root.get("facts");
 		if (facts == null || !facts.isArray()) {
 			return root;
 		}
 		var expanded = MAPPER.createArrayNode();
-		for (com.fasterxml.jackson.databind.JsonNode f : facts) {
-			// "derivation": "explicit" for {"kind": "explicit"}: Gemma 3 12B did this in 27 of 29 failures.
+		for (JsonNode f : facts) {
 			if (f.isObject() && f.get("derivation") != null && f.get("derivation").isTextual()) {
-				((com.fasterxml.jackson.databind.node.ObjectNode) f).set("derivation",
+				((ObjectNode) f).set("derivation",
 						MAPPER.createObjectNode().put("kind", f.get("derivation").asText()));
 			}
-			// "confidence": 0.4 and "certainty": "believed" are the one thing the spec calls caller_confidence.
 			if (f.isObject()) {
-				var o = (com.fasterxml.jackson.databind.node.ObjectNode) f;
+				var o = (ObjectNode) f;
 				if (o.get("caller_confidence") == null) {
 					if (o.get("confidence") != null && o.get("confidence").isNumber()) {
 						o.put("caller_confidence", o.get("confidence").asDouble());
@@ -279,16 +277,16 @@ public record Proposal(@JsonProperty("spec_version") Integer specVersion, List<E
 			expanded.addAll(expand(f, "subject"));
 		}
 		var result = MAPPER.createArrayNode();
-		for (com.fasterxml.jackson.databind.JsonNode f : expanded) {
+		for (JsonNode f : expanded) {
 			result.addAll(expand(f, "object"));
 		}
-		((com.fasterxml.jackson.databind.node.ObjectNode) root).set("facts", result);
+		((ObjectNode) root).set("facts", result);
 		return root;
 	}
 
 	/** Words a caller uses for how sure the user was, as a number the spec defines. */
 	static Double certainty(String word) {
-		return switch (word.trim().toLowerCase(java.util.Locale.ROOT)) {
+		return switch (word.trim().toLowerCase(Locale.ROOT)) {
 			case "stated", "firm", "certain", "sure", "confirmed", "known" -> 1.0;
 			case "believed", "belief", "thinks", "think", "unsure", "uncertain", "probable", "likely", "recollection" -> 0.5;
 			case "guess", "guessed", "maybe", "possible", "unlikely", "speculation" -> 0.3;
@@ -296,16 +294,16 @@ public record Proposal(@JsonProperty("spec_version") Integer specVersion, List<E
 		};
 	}
 
-	private static List<com.fasterxml.jackson.databind.JsonNode> expand(
-			com.fasterxml.jackson.databind.JsonNode fact,
+	private static List<JsonNode> expand(
+			JsonNode fact,
 			String field) {
-		com.fasterxml.jackson.databind.JsonNode v = fact.get(field);
+		JsonNode v = fact.get(field);
 		if (v == null || !v.isArray() || !fact.isObject()) {
 			return List.of(fact);
 		}
-		var out = new java.util.ArrayList<com.fasterxml.jackson.databind.JsonNode>();
-		for (com.fasterxml.jackson.databind.JsonNode item : v) {
-			var copy = ((com.fasterxml.jackson.databind.node.ObjectNode) fact).deepCopy();
+		var out = new ArrayList<JsonNode>();
+		for (JsonNode item : v) {
+			var copy = ((ObjectNode) fact).deepCopy();
 			copy.set(field, item);
 			out.add(copy);
 		}

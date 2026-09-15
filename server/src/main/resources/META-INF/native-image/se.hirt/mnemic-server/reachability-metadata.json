@@ -1,5 +1,5 @@
 {
-  "comment": "P3/M4: every foreign downcall signature OrtProbe and OrtRuntime use, registered ahead of time for the native image. 'long long' is int64 and size_t on the platforms built.",
+  "comment": "Every foreign downcall signature OrtProbe and OrtRuntime use, registered ahead of time for the native image. 'long long' is int64 and size_t on the platforms built.",
   "foreign": {
     "downcalls": [
       {

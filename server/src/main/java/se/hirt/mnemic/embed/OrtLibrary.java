@@ -43,11 +43,11 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * The ONNX Runtime shared library, carried inside the build (2026-09-11). Code is never downloaded at run time:
- * the library for the platform the binary was built on is unpacked from the runtime's Maven Central artifact
- * when the server is built, pinned here by SHA-256 (a test fails the build when the artifact and the pin
- * disagree), and written to the models directory on first start because a shared library has to be a file
- * before the loader can open it. What is fetched at run time is the model, which is data.
+ * The ONNX Runtime shared library, carried inside the build. Code is never downloaded at run time: the library
+ * for the platform the binary was built on is unpacked from the runtime's Maven Central artifact when the server
+ * is built, pinned here by SHA-256 (a test fails the build when the artifact and the pin disagree), and written
+ * to the models directory on first start because a shared library has to be a file before the loader can open
+ * it. What is fetched at run time is the model, which is data.
  */
 public final class OrtLibrary {
 

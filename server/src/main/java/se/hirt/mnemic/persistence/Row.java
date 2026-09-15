@@ -72,14 +72,6 @@ public final class Row {
 		return v == null ? null : ((Number) v).intValue();
 	}
 
-	public double dbl(String column) {
-		return ((Number) columns.get(column)).doubleValue();
-	}
-
-	public boolean has(String column) {
-		return columns.containsKey(column);
-	}
-
 	public Map<String, Object> asMap() {
 		return new LinkedHashMap<>(columns);
 	}

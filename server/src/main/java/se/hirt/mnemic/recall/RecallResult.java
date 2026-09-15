@@ -38,7 +38,7 @@ import java.util.List;
 /**
  * What {@code recall} returns: the structured-probe outcome, events touching the spotted entities, the ranked and
  * budgeted hits (an observation window with the facts that anchored it), and the text block the model reads
- * (EXTRACTION.md, Channel provenance and the structured miss; DECISIONS.md §2.1).
+ * (EXTRACTION.md, Channel provenance and the structured miss).
  *
  * @param candidates
  * 		number of distinct observations any channel produced before the budget
@@ -50,15 +50,12 @@ public record RecallResult(String query, Instant asOf, Structured structured, Li
 
 	/**
 	 * The structured channel's verdict. {@code state} is {@code matched} (entity and predicate resolved, fact found),
-	 * {@code miss} (both resolved, no such fact; the primary guard against near-miss answers), {@code entity} (an
-	 * entity was spotted without a predicate cue; its facts are the channel), or {@code unresolved} (no entity in the
-	 * query).
-	 */
-	/** {@code chain}: containment facts reached from the matched objects (a town's canton, its country). */
-	/**
-	 * {@code bounds}: the negations, restrictions, and closures on the probed subject and predicate (family Q);
-	 * {@code decidedBy} and {@code basis} ({@code negation}, {@code restriction}, {@code closure},
-	 * {@code functional}) when the state is {@code known_false}; {@code notes} are appended to the verdict line.
+	 * {@code miss} (both resolved, no such fact; the primary guard against near-miss answers), {@code future},
+	 * {@code known_false} (decided by {@code decidedBy} on {@code basis}: negation, restriction, closure, or
+	 * functional), {@code events}, {@code entity} (an entity was spotted without a predicate cue; its facts are the
+	 * channel), or {@code unresolved} (no entity in the query). {@code chain} holds containment facts reached from the
+	 * matched objects (a town's canton, its country); {@code bounds} the negations, restrictions, and closures on the
+	 * probed subject and predicate; {@code notes} are appended to the verdict line.
 	 */
 	public record Structured(String state, String entity, String entityName, String predicate, String qualifier,
 	                         List<Fact> facts, List<Fact> nearMisses, List<Fact> chain, List<Fact> bounds,
@@ -67,13 +64,6 @@ public record RecallResult(String query, Instant asOf, Structured structured, Li
 		                  List<Fact> facts, List<Fact> nearMisses, List<Fact> chain) {
 			this(state, entity, entityName, predicate, qualifier, facts, nearMisses, chain, List.of(), null, null,
 					List.of(), List.of());
-		}
-
-		public Structured(String state, String entity, String entityName, String predicate, String qualifier,
-		                  List<Fact> facts, List<Fact> nearMisses, List<Fact> chain, List<Fact> bounds,
-		                  Fact decidedBy, String basis, List<String> notes) {
-			this(state, entity, entityName, predicate, qualifier, facts, nearMisses, chain, bounds, decidedBy, basis,
-					notes, List.of());
 		}
 
 		public boolean matched() {

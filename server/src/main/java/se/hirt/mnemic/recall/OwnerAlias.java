@@ -39,7 +39,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * The owner alias for the vector channel (2026-09-11, from the embedder bake-off). A first-person question sits
+ * The owner alias for the vector channel. A first-person question sits
  * far from a third-person fact rendering ("which company employs me?" against "Mattias works at Hooli") and no
  * embedding model knows who "I" is; the other channels have the owner's alias table, the vectors did not.
  *

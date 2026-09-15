@@ -44,9 +44,8 @@ import java.util.Map;
 /**
  * Anthropic's Messages API over {@code java.net.http}, no SDK: one POST, {@code x-api-key} and
  * {@code anthropic-version} headers, {@code system} as a top-level field, the text blocks of the reply joined.
- * Modelled on the raw client in JMC's AI view (openjdk/jmc#715), which keeps the native image free of OkHttp.
- * Retries on 429, 529, and 5xx with backoff, since the bench sends eight requests at once. The id stays
- * {@code anthropic:<model>} so replies cached by the earlier SDK-based provider keep their keys.
+ * Retries on 429, 529, and 5xx with backoff, since the bench sends eight requests at once. The id is
+ * {@code anthropic:<model>}; the bench's proposal cache is keyed by it.
  */
 public final class AnthropicHttpProvider implements ModelProvider {
 

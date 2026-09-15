@@ -39,15 +39,17 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.text.Normalizer;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * A Unigram (sentencepiece) tokenizer read from a Hugging Face {@code tokenizer.json}, pure Java (DECISIONS.md
- * §4: no native tokenizer). This is the tokenizer of XLM-RoBERTa and so of the granite multilingual embedders:
- * NFKC normalisation, the Metaspace pre-tokenizer (spaces become {@code ▁} and one is prefixed), then Viterbi
- * segmentation over the whole text by piece log-probabilities, unknown characters falling to {@code <unk>}.
+ * A Unigram (sentencepiece) tokenizer read from a Hugging Face {@code tokenizer.json}, in pure Java so the native
+ * image needs no tokenizer library. This is the tokenizer of XLM-RoBERTa and so of the granite multilingual
+ * embedders: NFKC normalisation, the Metaspace pre-tokenizer (spaces become {@code ▁} and one is prefixed), then
+ * Viterbi segmentation over the whole text by piece log-probabilities, unknown characters falling to {@code <unk>}.
  * Special tokens are added as the post-processor template says: {@code <s>} before, {@code </s>} after.
  *
  * <p>The precompiled character map inside the file's normalizer (sentencepiece's own NFKC table) is not
@@ -158,7 +160,7 @@ public final class Unigram implements Tokenizer {
 		double[] best = new double[n + 1];
 		int[] backPiece = new int[n + 1];
 		int[] backStart = new int[n + 1];
-		java.util.Arrays.fill(best, Double.NEGATIVE_INFINITY);
+		Arrays.fill(best, Double.NEGATIVE_INFINITY);
 		best[0] = 0;
 		for (int start = 0; start < n; start++) {
 			if (best[start] == Double.NEGATIVE_INFINITY) {
@@ -194,7 +196,7 @@ public final class Unigram implements Tokenizer {
 		for (int at = n; at > 0; at = backStart[at]) {
 			out.add(backPiece[at]);
 		}
-		java.util.Collections.reverse(out);
+		Collections.reverse(out);
 		return out;
 	}
 }

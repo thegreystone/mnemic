@@ -29,18 +29,21 @@
 package se.hirt.mnemic.bench;
 
 import se.hirt.mnemic.model.ChatModel;
+import se.hirt.mnemic.proposal.ModelProposer;
 import se.hirt.mnemic.proposal.Proposal;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
+import java.io.UncheckedIOException;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.IntStream;
 
 /**
  * Plays the assistant's part in the benchmark: sends each observation with the extraction spec to a model and parses
@@ -50,6 +53,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  * in production.
  */
 public final class ApiProposer implements AutoCloseable {
+
+	private static final int MAX_CONSECUTIVE_ERRORS = 10;
 
 	private final ChatModel model;
 	private final String spec;
@@ -62,8 +67,7 @@ public final class ApiProposer implements AutoCloseable {
 	private final AtomicInteger refreshed = new AtomicInteger();
 	private final AtomicInteger errors = new AtomicInteger();
 	private final AtomicInteger consecutiveErrors = new AtomicInteger();
-	private static final int MAX_CONSECUTIVE_ERRORS = 10;
-	private final java.util.concurrent.ConcurrentHashMap<String, CompletableFuture<String>> inFlight = new java.util.concurrent.ConcurrentHashMap<>();
+	private final ConcurrentHashMap<String, CompletableFuture<String>> inFlight = new ConcurrentHashMap<>();
 
 	public ApiProposer(ChatModel model) {
 		this(model, null, 1);
@@ -76,7 +80,7 @@ public final class ApiProposer implements AutoCloseable {
 	/** {@code refreshFailed}: a cached reply that does not parse is requested again and overwritten. */
 	public ApiProposer(ChatModel model, ProposalCache cache, int workers, boolean refreshFailed) {
 		this.model = model;
-		this.spec = loadSpec();
+		this.spec = ModelProposer.spec();
 		this.cache = cache;
 		this.refreshFailed = refreshFailed;
 		this.workers = Executors.newFixedThreadPool(Math.max(1, workers), r -> {
@@ -108,39 +112,21 @@ public final class ApiProposer implements AutoCloseable {
 		return errors.get();
 	}
 
-	private static String firstLine(String s) {
-		if (s == null) {
-			return "";
-		}
-		int nl = s.indexOf('\n');
-		String line = nl >= 0 ? s.substring(0, nl) : s;
-		return line.length() > 200 ? line.substring(0, 200) + "…" : line;
-	}
-
 	/** Cached replies that did not parse and were requested again ({@code --refresh-failed}). */
 	public int refreshed() {
 		return refreshed.get();
 	}
 
-	/** The user turn sent with the spec; part of the cache key, so it must not change casually. */
-	public static String userMessage(String observation, String observedAt) {
-		return "Observation date: " + observedAt + "\n\nObservation:\n\"\"\"\n" + observation + "\n\"\"\"\n\n" + "Reply with the JSON object only.";
-	}
-
-	public static String spec() {
-		return loadSpec();
-	}
-
 	public Optional<Proposal> propose(String observation, String observedAt) throws IOException, InterruptedException {
 		attempted.incrementAndGet();
-		String user = userMessage(observation, observedAt);
+		String user = ModelProposer.userMessage(observation, observedAt);
 		String reply = null;
 		String key = cache == null ? null : ProposalCache.key(model.id(), spec, user);
 		if (cache != null) {
 			reply = cache.get(key).orElse(null);
 			if (reply != null && refreshFailed && parse(reply).isEmpty()) {
 				refreshed.incrementAndGet();
-				reply = null; // ask again; the new reply replaces the file
+				reply = null;
 			}
 			if (reply != null) {
 				cached.incrementAndGet();
@@ -154,7 +140,7 @@ public final class ApiProposer implements AutoCloseable {
 				try {
 					reply = owner.get();
 					cached.incrementAndGet();
-				} catch (java.util.concurrent.ExecutionException e) {
+				} catch (ExecutionException e) {
 					throw new IOException(e.getCause());
 				}
 			} else {
@@ -197,7 +183,7 @@ public final class ApiProposer implements AutoCloseable {
 
 	private static Optional<Proposal> parse(String reply) {
 		try {
-			return Optional.of(Proposal.parse(extractJson(reply)));
+			return Optional.of(Proposal.parse(ModelProposer.extractJson(reply)));
 		} catch (RuntimeException e) {
 			return Optional.empty();
 		}
@@ -205,12 +191,12 @@ public final class ApiProposer implements AutoCloseable {
 
 	/** Starts every proposal on the worker pool; results arrive in the order given. */
 	public List<CompletableFuture<Optional<Proposal>>> prefetch(List<String> observations, List<String> observedAt) {
-		return java.util.stream.IntStream.range(0, observations.size())
+		return IntStream.range(0, observations.size())
 				.mapToObj(i -> CompletableFuture.supplyAsync(() -> {
 					try {
 						return propose(observations.get(i), observedAt.get(i));
 					} catch (IOException e) {
-						throw new java.io.UncheckedIOException(e);
+						throw new UncheckedIOException(e);
 					} catch (InterruptedException e) {
 						Thread.currentThread().interrupt();
 						throw new IllegalStateException(e);
@@ -228,30 +214,12 @@ public final class ApiProposer implements AutoCloseable {
 		}
 	}
 
-	/** Strips code fences and takes the outermost object, the way every extraction harness ends up doing. */
-	static String extractJson(String reply) {
-		String s = reply.trim();
-		if (s.startsWith("```")) {
-			int nl = s.indexOf('\n');
-			s = nl >= 0 ? s.substring(nl + 1) : s;
-			int fence = s.lastIndexOf("```");
-			if (fence >= 0) {
-				s = s.substring(0, fence);
-			}
+	private static String firstLine(String s) {
+		if (s == null) {
+			return "";
 		}
-		int start = s.indexOf('{');
-		int end = s.lastIndexOf('}');
-		return start >= 0 && end > start ? s.substring(start, end + 1) : s;
-	}
-
-	static String loadSpec() {
-		try (InputStream in = ApiProposer.class.getClassLoader().getResourceAsStream("protocol/extraction-spec.md")) {
-			if (in == null) {
-				throw new IllegalStateException("protocol/extraction-spec.md missing from the server jar");
-			}
-			return new String(in.readAllBytes(), StandardCharsets.UTF_8);
-		} catch (IOException e) {
-			throw new IllegalStateException(e);
-		}
+		int nl = s.indexOf('\n');
+		String line = nl >= 0 ? s.substring(0, nl) : s;
+		return line.length() > 200 ? line.substring(0, 200) + "…" : line;
 	}
 }

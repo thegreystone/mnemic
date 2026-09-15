@@ -32,8 +32,8 @@ import java.util.Locale;
 import java.util.regex.Pattern;
 
 /**
- * Classifies a wrong answer (Memento's {@code diagnose_failures.py} idea, PLAN.md): the reference answer was in the
- * context the reader saw (ANSWER_ERROR) or it was not (RETRIEVAL_MISS). Abstention items are ABSTENTION_MISS when the
+ * Classifies a wrong answer: the reference answer was in the context the reader saw (ANSWER_ERROR) or it was not
+ * (RETRIEVAL_MISS). Abstention items are ABSTENTION_MISS when the
  * reader answered instead of declining. The heuristic is a substring check, so treat it as a triage signal.
  */
 public final class Diagnose {

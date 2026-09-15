@@ -35,7 +35,7 @@ import org.junit.jupiter.api.Test;
 import se.hirt.mnemic.Engine;
 import se.hirt.mnemic.Engine.RememberOutcome;
 import se.hirt.mnemic.Scenario;
-import se.hirt.mnemic.knowledge.FactService.Resolve;
+import se.hirt.mnemic.knowledge.QuestionResolver.Resolve;
 import se.hirt.mnemic.observation.Source;
 import se.hirt.mnemic.proposal.Proposal;
 import se.hirt.mnemic.recall.RecallResult;

@@ -38,14 +38,15 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.PriorityQueue;
 
 /**
- * Vectors beside the rows they describe (schema 15): one per item and model, so two embedders can coexist and a
+ * Vectors beside the rows they describe: one row per item chunk and model, so two embedders can coexist and a
  * change of model is an incremental re-embedding, never a migration. Search is a scan over the model's vectors
  * with a dot product, which is exact and, at the sizes a personal store reaches, faster than an index would be
- * to maintain; sqlite-vec (P2) takes over when a store outgrows it.
+ * to maintain.
  */
 public final class VectorStore {
 
@@ -66,7 +67,7 @@ public final class VectorStore {
 		putChunks(kind, id, model, List.of(vector));
 	}
 
-	/** Replaces the item's vectors under the model with one row per chunk (schema 16). */
+	/** Replaces the item's vectors under the model with one row per chunk. */
 	public void putChunks(String kind, long id, String model, List<float[]> vectors) {
 		db.write(tx -> {
 			tx.update("DELETE FROM embedding WHERE item_kind = ? AND item_id = ? AND model = ?", kind, id, model);
@@ -110,7 +111,7 @@ public final class VectorStore {
 	/** The {@code k} nearest items of the model to {@code query}, best first; an item scores by its best chunk. */
 	public List<Hit> search(String model, float[] query, int k) {
 		List<Row> rows = db.read(tx -> tx.query("SELECT item_kind, item_id, vec FROM embedding WHERE model = ?", model));
-		var bestByItem = new java.util.HashMap<String, Hit>();
+		var bestByItem = new HashMap<String, Hit>();
 		for (Row r : rows) {
 			byte[] blob = (byte[]) r.get("vec");
 			float score = dot(query, blob);
@@ -132,11 +133,6 @@ public final class VectorStore {
 		var out = new ArrayList<>(best);
 		out.sort((a, b) -> Float.compare(b.score(), a.score()));
 		return out;
-	}
-
-	/** Rows under the model, chunks included. */
-	public long rows(String model) {
-		return count(model);
 	}
 
 	private static float dot(float[] q, byte[] blob) {

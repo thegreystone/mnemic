@@ -45,18 +45,19 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.function.LongConsumer;
 
 /**
- * Fetches the embedding model on first use (PLAN.md M4, 2026-09-11): the model graph and its tokenizer from the
- * publisher's Hugging Face repository. Data only; the runtime library that executes it is part of the build
- * ({@link OrtLibrary}). Every file is pinned by SHA-256 and written beside its target under a {@code .part}
- * name until the hash checks, so a partial or tampered download never becomes a model. One lock file per models
- * directory keeps two servers on one machine from fetching the same 313 MB twice. Nothing here blocks a
- * server's start: {@link EmbedderHolder} runs it in the background.
+ * Fetches the embedding model on first use: the model graph and its tokenizer from the publisher's Hugging Face
+ * repository. Data only; the runtime library that executes it is part of the build ({@link OrtLibrary}). Every
+ * file is pinned by SHA-256 and written beside its target under a {@code .part} name until the hash checks, so a
+ * partial or tampered download never becomes a model. One lock file per models directory keeps two servers on
+ * one machine from fetching the same files twice. Nothing here blocks a server's start: {@link EmbedderHolder}
+ * runs it in the background.
  */
 public final class ModelFetcher {
 
@@ -68,7 +69,7 @@ public final class ModelFetcher {
 		}
 	}
 
-	/** The default model since the bake-off of 2026-09-11 (BENCHMARKS.md): granite's 311m multilingual r2. */
+	/** The default model, chosen in the embedder bake-off (BENCHMARKS.md): granite's 311m multilingual r2. */
 	public static final String MODEL_ID = "granite-embedding-311m-multilingual-r2";
 
 	/** The quantised build is tuned for x86 (AVX2); an ARM machine takes the full-precision graph. */
@@ -196,7 +197,7 @@ public final class ModelFetcher {
 				}
 			}
 			return HexFormat.of().formatHex(md.digest());
-		} catch (java.security.NoSuchAlgorithmException e) {
+		} catch (NoSuchAlgorithmException e) {
 			throw new IllegalStateException(e);
 		}
 	}

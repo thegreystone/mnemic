@@ -35,7 +35,7 @@ import se.hirt.mnemic.Engine.RememberOutcome;
 import se.hirt.mnemic.Scenario;
 import se.hirt.mnemic.knowledge.Entity;
 import se.hirt.mnemic.knowledge.Fact;
-import se.hirt.mnemic.knowledge.FactService.Resolve;
+import se.hirt.mnemic.knowledge.QuestionResolver.Resolve;
 import se.hirt.mnemic.knowledge.Question;
 import se.hirt.mnemic.proposal.Proposal.PredicateDef;
 import se.hirt.mnemic.recall.RecallResult;

@@ -62,12 +62,12 @@ public final class PredicateRegistry {
 		}
 	}
 
-	/** A predicate cue found in a query, with the qualifier when the trigger term was a qualifier ("mother"). */
 	/**
-	 * {@code direction}: which side of the predicate the spotted entity is on. {@code object} for a qualifier or a
-	 * lexicon term of a same-type relation ("Mattias's father", "Mattias's parents": the term names the subject, so
-	 * the entity is the object); {@code subject} for an inverse term ("Mattias's children"); {@code any} otherwise,
-	 * in which case the probe decides by the entity's type against domain and range.
+	 * A predicate cue found in a query, with the qualifier when the trigger term was one ("mother"). {@code direction}
+	 * is the side of the predicate the spotted entity is on: {@code object} for a qualifier or a lexicon term of a
+	 * same-type relation ("Mattias's father": the term names the subject, so the entity is the object),
+	 * {@code subject} for an inverse term ("Mattias's children"), {@code any} otherwise, in which case the probe
+	 * decides by the entity's type against domain and range.
 	 */
 	public record Cue(Predicate predicate, String qualifier, String term, String direction) {
 	}
@@ -78,11 +78,10 @@ public final class PredicateRegistry {
 	private static final int SIMILAR_MIN_OVERLAP = 2;
 
 	private final Database db;
+	private final Lang lang;
+	/** The negation templates of the language, by predicate; empty for the base language. */
+	private final Map<String, String> negated = new HashMap<>();
 	private Map<String, Predicate> cache;
-
-	public PredicateRegistry(Database db) {
-		this(db, Lang.EN);
-	}
 
 	/** {@code lang}: the store's language; its templates and cue words are loaded over the base (English) ones. */
 	public PredicateRegistry(Database db, Lang lang) {
@@ -91,10 +90,6 @@ public final class PredicateRegistry {
 		seedIfMissing();
 		seedRendersIfMissing();
 	}
-
-	private final Lang lang;
-	/** The negation templates of the language, by predicate; empty for the base language. */
-	private final Map<String, String> negated = new HashMap<>();
 
 	public Lang lang() {
 		return lang;
@@ -204,11 +199,10 @@ public final class PredicateRegistry {
 	 * (registered on first use), a similar existing predicate (same domain/range, at least two content tokens shared
 	 * across name, description, and lexicon, J2), an ambiguous one (exactly one token shared, J3), or a new
 	 * registration when a definition was supplied. Similar and ambiguous are both returned as a candidate for the
-	 * caller to confirm, never applied: token overlap cannot see meaning, and on 2026-09-10 a defined
-	 * {@code real_estate_confined_to} ("the subject owns no property anywhere else") was silently mapped to
-	 * {@code owns} and stored "Mattias owns Switzerland". Confirming a similar candidate records the name as an alias,
-	 * so it is asked once. A bare unknown name without a definition becomes an {@code x:} predicate with a warning,
-	 * so nothing is lost.
+	 * caller to confirm, never applied: token overlap cannot see meaning, and a restriction defined by the caller
+	 * would otherwise be mapped onto the relation it restricts. Confirming a similar candidate records the name as
+	 * an alias, so it is asked once. A bare unknown name without a definition becomes an {@code x:} predicate with a
+	 * warning, so nothing is lost.
 	 */
 	public synchronized Resolution resolve(String name, PredicateDef def, Long observationId, List<String> warnings) {
 		if (name == null || name.isBlank()) {
@@ -236,8 +230,10 @@ public final class PredicateRegistry {
 		return new Resolution(registerExtended("x:" + name, observationId), "extended", null);
 	}
 
-	/** Predicate cues in a query: lexicon terms and qualifier terms, longest terms first, one cue per predicate. */
-	/** Terms are compared token by token, so a hyphenated qualifier (half-brother) matches the query's tokens. */
+	/**
+	 * Predicate cues in a query: lexicon and qualifier terms, longest first, one cue per predicate. Terms are
+	 * compared token by token, so a hyphenated qualifier (half-brother) matches the query's tokens.
+	 */
 	public synchronized List<Cue> cues(String query) {
 		String q = " " + String.join(" ", Names.tokens(query)) + " ";
 		var out = new LinkedHashMap<String, Cue>();
@@ -281,7 +277,7 @@ public final class PredicateRegistry {
 			var m = new LinkedHashMap<String, Object>();
 			m.put("predicate", r.str("predicate"));
 			m.put("uses", r.lng("n"));
-			m.put("observations", java.util.Arrays.stream(r.str("obs").split(",")).map(x -> "obs-" + x).toList());
+			m.put("observations", Arrays.stream(r.str("obs").split(",")).map(x -> "obs-" + x).toList());
 			return (Map<String, Object>) m;
 		}).toList());
 	}

@@ -34,7 +34,7 @@ import se.hirt.mnemic.Engine.RememberOutcome;
 import se.hirt.mnemic.Scenario;
 import se.hirt.mnemic.knowledge.Fact;
 import se.hirt.mnemic.knowledge.FactService.Corrected;
-import se.hirt.mnemic.knowledge.FactService.History;
+import se.hirt.mnemic.knowledge.FactQueries.History;
 import se.hirt.mnemic.protocol.MnemicException;
 import se.hirt.mnemic.recall.RecallResult;
 

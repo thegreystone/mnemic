@@ -36,8 +36,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * A question Mnemic could not answer by itself and put to the caller (DECISIONS.md §2.7): an ambiguous entity, an
- * ambiguous predicate, a conflict on a functional predicate, or a type mismatch. It stays open until answered or
+ * A question Mnemic could not answer by itself and put to the caller: an ambiguous entity, an ambiguous predicate, a
+ * conflict on a functional predicate, a type mismatch, or a containment gap. It stays open until answered or
  * dismissed; what it holds is applied only then.
  *
  * @param candidates

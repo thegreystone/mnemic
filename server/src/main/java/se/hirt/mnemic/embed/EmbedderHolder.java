@@ -41,12 +41,12 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 /**
- * The embedder's lifecycle, so a server starts in milliseconds whether or not the model is on disk (2026-09-11).
- * States: {@code off} (disabled), {@code downloading} with a percentage and the bytes, {@code loading},
- * {@code ready}, and {@code failed} with the reason. The engine and recall read {@link #get()} on every use and
- * take whatever is there; when the embedder arrives, the next remember embeds and {@code consolidate} backfills,
- * and the holder itself embeds what is missing once the model is ready, so an existing store catches up on its
- * own. The runtime library is never fetched: it comes from the build ({@link OrtLibrary}) or from configuration.
+ * The embedder's lifecycle, so a server starts in milliseconds whether or not the model is on disk. States:
+ * {@code off} (disabled), {@code downloading} with a percentage and the bytes, {@code loading}, {@code ready}, and
+ * {@code failed} with the reason. The engine and recall read {@link #get()} on every use and take whatever is
+ * there; once the embedder arrives, {@code onReady} embeds what was stored before it, so an existing store catches
+ * up on its own. The runtime library is never fetched: it comes from the build ({@link OrtLibrary}) or from
+ * configuration.
  */
 public final class EmbedderHolder implements AutoCloseable {
 
@@ -149,18 +149,12 @@ public final class EmbedderHolder implements AutoCloseable {
 		return out;
 	}
 
-	/** Waits for the worker, for tests; returns whether the embedder is ready. */
+	/** Waits up to {@code millis} for the background load; returns whether the embedder is ready. */
 	public boolean await(long millis) throws InterruptedException {
 		if (worker != null) {
 			worker.join(millis);
 		}
 		return embedder.get() != null;
-	}
-
-	/** Whether the files the plan names are all in place. */
-	public static boolean present(Path library, Path modelDir) {
-		return library != null && modelDir != null && Files.exists(library) && Files.exists(modelDir.resolve("model.onnx"))
-				&& Files.exists(modelDir.resolve("tokenizer.json"));
 	}
 
 	@Override

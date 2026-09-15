@@ -38,7 +38,6 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Locale;
-import java.util.Optional;
 
 /**
  * The hybrid mode (README, "Hybrid mode"): a model the server is configured with reads an observation that
@@ -97,8 +96,7 @@ public final class ModelProposer {
 	}
 
 	public Result propose(String text, Instant observedAt) {
-		String user = "Observation date: " + observedAt.toString().substring(0, 10) + "\n\nObservation:\n\"\"\"\n"
-				+ text + "\n\"\"\"\n\nReply with the JSON object only.";
+		String user = userMessage(text, observedAt.toString().substring(0, 10));
 		String reply;
 		try {
 			reply = model.chat(SPEC, user);
@@ -121,8 +119,17 @@ public final class ModelProposer {
 		}
 	}
 
+	/**
+	 * The user turn sent with the spec. The benchmark's proposal cache keys on it, so a change here invalidates
+	 * every cached reply.
+	 */
+	public static String userMessage(String observation, String observedAt) {
+		return "Observation date: " + observedAt + "\n\nObservation:\n\"\"\"\n" + observation + "\n\"\"\"\n\n"
+				+ "Reply with the JSON object only.";
+	}
+
 	/** Strips code fences and takes the outermost object. */
-	static String extractJson(String reply) {
+	public static String extractJson(String reply) {
 		String s = reply == null ? "" : reply.trim();
 		if (s.startsWith("```")) {
 			int nl = s.indexOf('\n');
@@ -159,9 +166,5 @@ public final class ModelProposer {
 		} catch (IOException e) {
 			throw new IllegalStateException(e);
 		}
-	}
-
-	public static Optional<ModelProposer> none() {
-		return Optional.empty();
 	}
 }

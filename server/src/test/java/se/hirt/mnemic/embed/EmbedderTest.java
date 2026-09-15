@@ -87,7 +87,7 @@ class EmbedderTest {
 			assertTrue(sameTopic > otherTopic + 0.1, "bank vs accounts " + sameTopic + ", bank vs printer " + otherTopic);
 			// Cross-language: a German or Swedish question lands nearer both English facts about the person than an
 			// unrelated English sentence. Which of the two facts wins is a coin toss on facts this short that share
-			// the name (0.760 vs 0.761 on 2026-09-11), which is what the bake-off is for; the numbers are printed.
+			// the name, which is what the bake-off is for; the numbers are printed.
 			float[] de = e.embed("Wo arbeitet Mattias?");
 			float[] sv = e.embed("Var bor Mattias?");
 			float[] job = e.embed("Mattias Sandell works at Hooli");

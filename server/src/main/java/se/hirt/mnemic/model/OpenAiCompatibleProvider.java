@@ -37,8 +37,10 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
  * Chat completions over the OpenAI wire format, which LM Studio, Ollama, OpenAI, and most hosted providers speak.
@@ -51,7 +53,6 @@ public final class OpenAiCompatibleProvider implements ModelProvider {
 
 	private static final ObjectMapper MAPPER = new ObjectMapper();
 
-	/** ServiceLoader requires a public no-arg constructor. */
 	public OpenAiCompatibleProvider() {
 	}
 
@@ -89,7 +90,7 @@ public final class OpenAiCompatibleProvider implements ModelProvider {
 			String loaded = describeLoaded(endpoint, spec.model());
 			if (loaded.isEmpty() && serverAnswers(endpoint)) {
 				// The server is up but nothing is loaded under that name: LM Studio would load something on demand,
-				// and the cache key would be the bare alias (a Q8 run once reused a Q4's replies this way).
+				// and the cache key would be the bare alias rather than the weights behind it.
 				throw new IllegalStateException(
 						"LM Studio has no model loaded as '" + spec.model() + "'. Load one " + "first: lms load <model> --identifier " + spec.model());
 			}
@@ -114,10 +115,9 @@ public final class OpenAiCompatibleProvider implements ModelProvider {
 
 	/**
 	 * An LM Studio identifier ({@code lms load ... --identifier proposer}) is an alias: two different models loaded
-	 * under it in turn are indistinguishable by name, and the first run with a 27B silently reused a 9B's cached
-	 * proposals. The model id therefore carries what the server reports about the loaded model ({@code /api/v0/models}:
-	 * publisher, architecture, quantization), so the cache key follows the weights. Empty when the endpoint does not
-	 * answer or the model is not loaded.
+	 * under it in turn are indistinguishable by name. The model id therefore carries what the server reports about
+	 * the loaded model ({@code /api/v0/models}: publisher, architecture, quantization), so a cache key follows the
+	 * weights. Empty when the endpoint does not answer or the model is not loaded.
 	 */
 	static String describeLoaded(String endpoint, String model) {
 		try {
@@ -145,9 +145,9 @@ public final class OpenAiCompatibleProvider implements ModelProvider {
 
 	/**
 	 * Reasoning models think before they answer; for extraction that is tokens spent on a fixed task. Local endpoints
-	 * get {@code reasoning_effort} from {@code mnemic.reasoning_effort} (default {@code none}; LM Studio honours it,
-	 * verified 2026-09-07 with Qwen 3.5), and a server that rejects the field gets the request again without it. Set
-	 * the property to {@code low}, {@code medium}, or {@code high} to let the model think.
+	 * get {@code reasoning_effort} from {@code mnemic.reasoning_effort} (default {@code none}), and a server that
+	 * rejects the field gets the request again without it. Set the property to {@code low}, {@code medium}, or
+	 * {@code high} to let the model think.
 	 */
 	static String reasoningEffort() {
 		String v = System.getProperty("mnemic.reasoning_effort",
@@ -155,7 +155,7 @@ public final class OpenAiCompatibleProvider implements ModelProvider {
 		return v == null || v.isBlank() ? "none" : v.trim();
 	}
 
-	private static final java.util.regex.Pattern THINK = java.util.regex.Pattern.compile(
+	private static final Pattern THINK = Pattern.compile(
 			"(?s)<think>.*?</think>\\s*|(?s)<thinking>.*?</thinking>\\s*");
 
 	/** Removes a thinking block a model may put in front of its answer when the server does not separate it. */
@@ -212,7 +212,7 @@ public final class OpenAiCompatibleProvider implements ModelProvider {
 
 		private HttpResponse<String> send(String system, String user, boolean withReasoning)
 				throws IOException, InterruptedException {
-			var payload = new java.util.LinkedHashMap<String, Object>();
+			var payload = new LinkedHashMap<String, Object>();
 			payload.put("model", model);
 			payload.put("temperature", 0);
 			payload.put("max_tokens", local ? 6144 : 4096); // local models write pretty-printed JSON; give them room

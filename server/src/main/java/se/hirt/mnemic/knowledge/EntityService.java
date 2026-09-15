@@ -40,7 +40,7 @@ import java.util.*;
 /**
  * Entities and their aliases: the owner, the resolution ladder, query-time spotting, and merges.
  * <p>
- * The ladder (EXTRACTION.md, Entity resolution; DECISIONS.md §2.8): first-person references → the owner; exact
+ * The ladder (EXTRACTION.md, Entity resolution): first-person references → the owner; exact
  * normalised match of the name or any proposed alias, with type compatibility; then a fuzzy step gated by name entropy
  * (nothing shorter than three letters, nothing made only of stopwords) scoring shared name tokens and character
  * trigrams. At or above {@value #MERGE} the entity is reused and the name added as an alias; between
@@ -67,10 +67,6 @@ public final class EntityService {
 
 	private final Database db;
 	private final Entity owner;
-
-	public EntityService(Database db, String ownerName) {
-		this(db, ownerName, List.of());
-	}
 
 	/** {@code ownerIdentity}: configured aliases, e-mail addresses, and handles, seeded as aliases of the owner. */
 	public EntityService(Database db, String ownerName, List<String> ownerIdentity) {
@@ -226,8 +222,7 @@ public final class EntityService {
 				long shared = tokens.stream().filter(at::contains).count();
 				double tokenScore = shared == 0 ? 0 : (double) shared / Math.max(tokens.size(), at.size());
 				// "Oskar Nyberg" against "Konrad Nyberg": two full names whose leading tokens differ share a
-				// family name, not an identity. That is not an ambiguity (six siblings produced six questions
-				// against their father, 2026-09-09). "Anna" against "Anna Lindqvist" stays ambiguous.
+				// family name, not an identity. "Anna" against "Anna Lindqvist" stays ambiguous.
 				if (tokens.size() >= 2 && at.size() >= 2 && !tokens.getFirst().equals(at.getFirst())
 						&& !tokens.getFirst().startsWith(at.getFirst()) && !at.getFirst().startsWith(tokens.getFirst())) {
 					tokenScore = Math.min(tokenScore, AMBIGUOUS - 0.1);
@@ -369,6 +364,11 @@ public final class EntityService {
 				.map(e -> e.mergedInto() == null ? e : get(tx, e.mergedInto())));
 	}
 
+	/** The entity's name, or its ref when there is no such entity. */
+	public String nameOf(long id) {
+		return get(id).map(Entity::name).orElse("ent-" + id);
+	}
+
 	/** {@code ent-12}, or a name/alias (first match by id). */
 	public Optional<Entity> byRef(String ref) {
 		if (ref == null || ref.isBlank()) {
@@ -493,11 +493,10 @@ public final class EntityService {
 			var aliases = new LinkedHashSet<String>(List.of(name, "I", "me", "my", "myself", "self", "the user"));
 			String[] parts = name.split("\\s+");
 			if (parts.length > 1 && !"the user".equals(name)) {
-				aliases.add(parts[0]); // a first name; "the" is not one (review, 2026-09-11)
+				aliases.add(parts[0]); // a first name; "the" is not one
 			}
 			// The configured identity (nicknames, addresses, handles): a commit author or an issue mention names
-			// the owner too. Only a name of the owner's own is a first-name alias; "Sandell" alone is not added
-			// unless configured, since a surname is shared with family.
+			// the owner too. A surname alone is not an alias unless configured, since it is shared with family.
 			aliases.addAll(ownerIdentity);
 			addAliases(tx, id, new ArrayList<>(aliases), null);
 			return new Entity(id, name, "person", null, null);

@@ -41,21 +41,24 @@ import java.util.function.Function;
 
 /**
  * The one SQLite file per data home (DESIGN.md, Persistence). All work in this process is serialised through one
- * connection and a lock; SQLite's own WAL locking handles the second MCP client process on the same data home
- * (DECISIONS.md §4: WAL, {@code busy_timeout}, {@code BEGIN IMMEDIATE} for writes so two writers fail fast instead of
- * upgrade-deadlocking).
+ * connection and a lock; SQLite's own WAL locking handles a second MCP client process on the same data home, with
+ * {@code busy_timeout} and {@code BEGIN IMMEDIATE} for writes so two writers fail fast instead of upgrade-deadlocking.
  */
 public final class Database implements AutoCloseable {
 
 	private final Path file;
 	private final Connection conn;
 	private final ReentrantLock lock = new ReentrantLock();
+	/** How many migrations this open applied; the engine re-renders every fact after any. */
+	private final int migrated;
+	/** The loaded sqlite-vec version, or null when no library was configured. */
+	private String vecVersion;
 
 	public Database(Path file) {
 		this(file, null);
 	}
 
-	/** {@code vecLibrary}: the sqlite-vec loadable library, loaded into this connection when given (P2). */
+	/** {@code vecLibrary}: the sqlite-vec loadable library, loaded into this connection when given. */
 	public Database(Path file, String vecLibrary) {
 		this.file = file;
 		try {
@@ -74,12 +77,11 @@ public final class Database implements AutoCloseable {
 				st.execute("PRAGMA journal_mode = WAL");
 				st.execute("PRAGMA foreign_keys = ON");
 				st.execute("PRAGMA synchronous = NORMAL");
-				// forget must leave no residue in the file (DECISIONS.md §2.12): overwrite freed pages with zeros.
+				// forget must leave no residue in the file: overwrite freed pages with zeros.
 				st.execute("PRAGMA secure_delete = ON");
 			}
-			// Auto-commit stays on; every unit of work opens its own explicit transaction below, so no lock is ever
-			// held between calls. A lazily opened IMMEDIATE transaction once blocked a second process from opening
-			// the file at all.
+			// Auto-commit stays on; every unit of work opens its own explicit transaction, so no lock is ever held
+			// between calls and a second process can always open the file.
 			if (vecLibrary != null && !vecLibrary.isBlank()) {
 				try (var ps = conn.prepareStatement("SELECT load_extension(?, 'sqlite3_vec_init')")) {
 					ps.setString(1, vecLibrary.replace('\\', '/'));
@@ -146,29 +148,23 @@ public final class Database implements AutoCloseable {
 		}
 	}
 
-	/** Current schema version, for {@code status} and for tests. */
-	private int migrated;
-	private String vecVersion;
-
-	/** The loaded sqlite-vec version, or null when no library was configured (P2). */
 	public String vecVersion() {
 		return vecVersion;
 	}
 
-	/** How many migrations this open applied: the engine re-renders every fact after any (2026-09-10). */
 	public int migrated() {
 		return migrated;
 	}
 
-	private static int versionOrZero(java.sql.Connection conn) {
+	private static int versionOrZero(Connection conn) {
 		try (var st = conn.createStatement(); var rs = st.executeQuery("SELECT COALESCE(MAX(version), 0) FROM schema_version")) {
 			return rs.next() ? rs.getInt(1) : 0;
-		} catch (java.sql.SQLException e) {
+		} catch (SQLException e) {
 			return 0; // no schema_version table yet: a new file
 		}
 	}
 
-	/** A store-level setting the engine keeps beside the data (store_meta, schema 17), or null. */
+	/** A store-level setting kept beside the data ({@code store_meta}), or null. */
 	public String meta(String key) {
 		return read(tx -> tx.queryOne("SELECT value FROM store_meta WHERE key = ?", key).map(r -> r.str("value")).orElse(null));
 	}
@@ -181,10 +177,7 @@ public final class Database implements AutoCloseable {
 		return read(tx -> tx.queryLong("SELECT COALESCE(MAX(version), 0) FROM schema_version"));
 	}
 
-	/**
-	 * Rebuilds every derived index from canonical tables (EVALUATION.md H2: indexes are disposable). External-content
-	 * FTS5 tables support this natively; later vector tables will be re-derived here too.
-	 */
+	/** Rebuilds every FTS index from its canonical table (EVALUATION.md H2: indexes are disposable). */
 	public void rebuildIndexes() {
 		write(tx -> {
 			tx.execute("INSERT INTO observation_fts(observation_fts) VALUES ('rebuild')");

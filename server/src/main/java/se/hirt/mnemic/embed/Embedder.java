@@ -38,11 +38,12 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 
 /**
- * The in-process embedder (PLAN.md M4): a sentence-embedding model run through ONNX Runtime, the tokenizer read
- * from the model's own {@code tokenizer.json}. One instance per store, one session, used from one thread at a
- * time (the engine serialises its work). {@link #id()} names the model so vectors are keyed by what made them.
+ * The in-process embedder: a sentence-embedding model run through ONNX Runtime, the tokenizer read from the
+ * model's own {@code tokenizer.json}. One instance per store, one session, used from one thread at a time (the
+ * engine serialises its work). {@link #id()} names the model so vectors are keyed by what made them.
  *
  * <p>Pooling, prefixes, and normalisation follow the model card through a {@link Spec}: the granite embedders
  * take the first token (CLS) of the last hidden state, the e5 and MiniLM families the mean over the tokens, e5
@@ -61,7 +62,7 @@ public final class Embedder implements AutoCloseable {
 
 		/** The spec for a model by its id (its Hugging Face name without the organisation). */
 		public static Spec forModel(String id) {
-			String m = id == null ? "" : id.toLowerCase(java.util.Locale.ROOT);
+			String m = id == null ? "" : id.toLowerCase(Locale.ROOT);
 			if (m.startsWith("multilingual-e5") || m.startsWith("e5-")) {
 				return new Spec("mean", "query: ", "passage: ");
 			}

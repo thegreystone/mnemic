@@ -39,10 +39,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 /**
- * A text-to-ids tokenizer read from a model's own {@code tokenizer.json} (2026-09-11, the embedder bake-off).
- * Two families cover every candidate: {@link Unigram} (sentencepiece, the XLM-R vocabulary most multilingual
- * embedders share) and {@link Bpe} (byte-level merges, the ModernBERT-based granite r2 models). The file says
- * which; {@link #load(Path)} reads that and nothing else about the model.
+ * A text-to-ids tokenizer read from a model's own {@code tokenizer.json}. Two families cover every candidate
+ * embedder: {@link Unigram} (sentencepiece, the XLM-R vocabulary most multilingual embedders share) and
+ * {@link Bpe} (byte-level merges, the ModernBERT-based granite r2 models). The file says which.
  */
 public interface Tokenizer {
 

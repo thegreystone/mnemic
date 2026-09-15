@@ -36,19 +36,29 @@ import se.hirt.mnemic.bench.LongMemEval.Question;
 import se.hirt.mnemic.model.ChatModel;
 import se.hirt.mnemic.model.ModelProvider;
 import se.hirt.mnemic.model.ModelSpec;
+import se.hirt.mnemic.proposal.ModelProposer;
 import se.hirt.mnemic.recall.RecallResult;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 /** The harness without any network: loader, ingestion, retrieval metrics, diagnosis, bootstrap, model SPI. */
 class HarnessTest {
+
+	private static Engine.Options benchOptions(String name) throws IOException {
+		return Bench.options(Files.createTempDirectory(name));
+	}
 
 	private static Path fixture() {
 		return Path.of("src", "test", "resources", "longmemeval_fixture.json");
@@ -88,7 +98,7 @@ class HarnessTest {
 	@Test
 	void sessionGranularityFindsTheAnswerSession() throws Exception {
 		Question q = LongMemEval.load(fixture()).getFirst();
-		try (Engine e = new Engine(Files.createTempDirectory("bench-session"), "test", Integer.MAX_VALUE, "the user")) {
+		try (Engine e = new Engine(benchOptions("bench-session"))) {
 			assertEquals(3, Ingestor.ingest(e, q, Granularity.SESSION));
 			RecallResult r = e.recall().recall(q.question(), q.date(), 4000, 40);
 			List<String> ranked = Ingestor.rankedSessions(r);
@@ -101,7 +111,7 @@ class HarnessTest {
 	@Test
 	void turnGranularityKeepsSessionProvenance() throws Exception {
 		Question q = LongMemEval.load(fixture()).getFirst();
-		try (Engine e = new Engine(Files.createTempDirectory("bench-turn"), "test", Integer.MAX_VALUE, "the user")) {
+		try (Engine e = new Engine(benchOptions("bench-turn"))) {
 			assertEquals(6, Ingestor.ingest(e, q, Granularity.TURN));
 			RecallResult r = e.recall().recall(q.question(), q.date(), 4000, 40);
 			assertEquals("s-beta", Ingestor.rankedSessions(r).getFirst(), r.text());
@@ -118,7 +128,7 @@ class HarnessTest {
 		                  {"spec_version": 1, "entities": [{"ref": "e1", "name": "Lisbon", "type": "place"}],
 		                   "facts": [{"subject": "self", "predicate": "lives_in", "object": "e1"}]}""";
 		ApiProposer proposer = new ApiProposer(scripted("```json\n" + proposal + "\n```"));
-		try (Engine e = new Engine(Files.createTempDirectory("bench-prop"), "test", Integer.MAX_VALUE, "the user")) {
+		try (Engine e = new Engine(benchOptions("bench-prop"))) {
 			Ingested ing = Ingestor.ingest(e, q, Granularity.SESSION, proposer);
 			assertEquals(3, ing.observations());
 			assertEquals(3, ing.facts(), "one lives_in per session (the scripted proposer repeats itself)");
@@ -128,7 +138,7 @@ class HarnessTest {
 			assertTrue(r.structured().matched(), r.text());
 		}
 		ApiProposer broken = new ApiProposer(scripted("I cannot help with that."));
-		try (Engine e = new Engine(Files.createTempDirectory("bench-broken"), "test", Integer.MAX_VALUE, "the user")) {
+		try (Engine e = new Engine(benchOptions("bench-broken"))) {
 			Ingested ing = Ingestor.ingest(e, q, Granularity.SESSION, broken);
 			assertEquals(3, ing.observations(), "observations are stored even when proposals fail");
 			assertEquals(0, ing.facts());
@@ -139,7 +149,7 @@ class HarnessTest {
 	@Test
 	void proposalCacheServesRepeatsAndPrefetchKeepsOrder() throws Exception {
 		Path dir = Files.createTempDirectory("mnemic-cache");
-		var calls = new java.util.concurrent.atomic.AtomicInteger();
+		var calls = new AtomicInteger();
 		ChatModel counting = new ChatModel() {
 			@Override
 			public String id() {
@@ -175,7 +185,7 @@ class HarnessTest {
 		assertTrue(Files.walk(dir).anyMatch(f -> f.toString().endsWith(".txt")), "cache files on disk");
 
 		// A reply that does not parse stays cached (and keeps failing) unless refresh-failed asks again.
-		var broken = new java.util.concurrent.atomic.AtomicBoolean(true);
+		var broken = new AtomicBoolean(true);
 		ChatModel flaky = new ChatModel() {
 			@Override
 			public String id() {
@@ -217,8 +227,8 @@ class HarnessTest {
 			}
 
 			@Override
-			public String chat(String system, String user) throws java.io.IOException {
-				throw new java.io.IOException("Model endpoint returned 400: context size exceeded");
+			public String chat(String system, String user) throws IOException {
+				throw new IOException("Model endpoint returned 400: context size exceeded");
 			}
 		};
 		try (ApiProposer p = new ApiProposer(refusing, new ProposalCache(dir), 1)) {
@@ -271,14 +281,14 @@ class HarnessTest {
 		ChatModel lm = ModelProvider.resolve("lmstudio:qwen3-4b@http://127.0.0.1:9/v1", null);
 		assertEquals("lmstudio:qwen3-4b", lm.id());
 		assertThrows(IllegalArgumentException.class, () -> ModelProvider.resolve("nosuch:model", null));
-		assertEquals("{\"a\": 1}", ApiProposer.extractJson("Sure!\n```json\n{\"a\": 1}\n```\nDone."));
-		assertFalse(ApiProposer.loadSpec().isBlank(), "spec ships in the server jar");
+		assertEquals("{\"a\": 1}", ModelProposer.extractJson("Sure!\n```json\n{\"a\": 1}\n```\nDone."));
+		assertFalse(ModelProposer.spec().isBlank(), "spec ships in the server jar");
 	}
 
 	@Test
 	void asOfExcludesSessionsAfterTheQuestionDate() throws Exception {
 		Question q = LongMemEval.load(fixture()).getFirst();
-		try (Engine e = new Engine(Files.createTempDirectory("bench-asof"), "test", Integer.MAX_VALUE, "the user")) {
+		try (Engine e = new Engine(benchOptions("bench-asof"))) {
 			Ingestor.ingest(e, q, Granularity.SESSION);
 			RecallResult before = e.recall().recall("Lisbon job", Instant.parse("2023-05-10T00:00:00Z"), 4000, 40);
 			assertTrue(before.hits().isEmpty(), "the Lisbon session is dated 2023-05-15: " + before.text());
@@ -308,7 +318,7 @@ class HarnessTest {
 
 	@Test
 	void bootstrapIntervalsAndPairedDifference() {
-		var labels = new java.util.ArrayList<Boolean>();
+		var labels = new ArrayList<Boolean>();
 		for (int i = 0; i < 100; i++) {
 			labels.add(i < 80);
 		}
@@ -316,8 +326,8 @@ class HarnessTest {
 		assertEquals(0.8, acc.value(), 1e-9);
 		assertTrue(acc.low() > 0.7 && acc.high() < 0.9, acc.toString());
 
-		var a = new java.util.LinkedHashMap<String, Boolean>();
-		var b = new java.util.LinkedHashMap<String, Boolean>();
+		var a = new LinkedHashMap<String, Boolean>();
+		var b = new LinkedHashMap<String, Boolean>();
 		for (int i = 0; i < 200; i++) {
 			a.put("q" + i, i < 100);
 			b.put("q" + i, i < 130);

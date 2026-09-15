@@ -40,12 +40,6 @@ public record Observation(long id, String text, Source source, Instant observedA
                           String proposalJson, Integer specVersion, boolean forgotten, String retiredAt,
                           String retiredReason, Long supersededBy) {
 
-	/** The shape before retirement existed (schema 18): not forgotten, not retired. */
-	public Observation(long id, String text, Source source, Instant observedAt, Instant recordedAt, String proposalJson,
-			Integer specVersion, boolean forgotten) {
-		this(id, text, source, observedAt, recordedAt, proposalJson, specVersion, forgotten, null, null, null);
-	}
-
 	public String ref() {
 		return "obs-" + id;
 	}

@@ -18,6 +18,9 @@ Two Maven modules under `mnemic-parent`:
   bake-off, and the proposal cache. It resolves models through the server's SPI and defines no providers of its
   own.
 
+How the code is organised, package by package, with the write path and the read path through the engine:
+[ARCHITECTURE.md](ARCHITECTURE.md).
+
 Design documents:
 
 - [DESIGN.md](DESIGN.md) — goals, deployment model, knowledge model, technology choices
@@ -40,8 +43,7 @@ mvn -pl server test-compile failsafe:integration-test -Dnative.image.path=target
 ```
 
 The path to the native image is relative to `server/`, where failsafe runs (`target/...`, not `server/target/...`);
-`<version>` is the parent POM's version, `0.2.1-SNAPSHOT` at the time of writing, and the suffix is `.exe` on
-Windows only.
+`<version>` is the `revision` property of the parent POM, and the suffix is `.exe` on Windows only.
 
 `server/target/scenario-coverage.txt` lists which scenarios from [EVALUATION.md](EVALUATION.md) are implemented
 after every build. The native sanity IT starts the binary over stdio, exercises the legacy `initialize` and the

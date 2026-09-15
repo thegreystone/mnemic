@@ -37,6 +37,7 @@ import se.hirt.mnemic.proposal.Proposal;
 import se.hirt.mnemic.recall.RecallResult;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -48,7 +49,7 @@ import java.util.concurrent.ExecutionException;
 /**
  * Turns a question's haystack into observations, optionally with proposals from an {@link ApiProposer} (the
  * facts-as-keys ablation), and a recall result back into session ids for retrieval metrics. Granularity is the first
- * ablation the literature asks for (PLAN.md): sessions index best, turns read best.
+ * ablation the literature asks for: sessions index best, turns read best.
  */
 public final class Ingestor {
 
@@ -71,7 +72,6 @@ public final class Ingestor {
 		}
 	}
 
-	/** Ingests every haystack session in order; with a proposer, each observation carries its proposal. */
 	/** One observation to store: the text, its provenance, and when it was observed. */
 	private record Item(String text, Source source, Instant observedAt) {
 	}
@@ -105,6 +105,7 @@ public final class Ingestor {
 		return items;
 	}
 
+	/** Ingests every haystack session in order; with a proposer, each observation carries its proposal. */
 	public static Ingested ingest(Engine engine, Question q, Granularity granularity, ApiProposer proposer)
 			throws IOException, InterruptedException {
 		int failedBefore = proposer == null ? 0 : proposer.failed();
@@ -123,7 +124,7 @@ public final class Ingestor {
 					proposal = proposals.get(i).get().orElse(null);
 				} catch (ExecutionException e) {
 					Throwable cause = e.getCause();
-					if (cause instanceof java.io.UncheckedIOException uio) {
+					if (cause instanceof UncheckedIOException uio) {
 						throw uio.getCause();
 					}
 					throw new IllegalStateException(cause);

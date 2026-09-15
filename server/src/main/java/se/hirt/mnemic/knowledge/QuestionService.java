@@ -37,7 +37,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-/** Storage for the question queue. Resolution logic lives in {@link FactService}, which can apply what is held. */
+/** Storage for the question queue; {@link QuestionResolver} applies what an answered question held. */
 public final class QuestionService {
 
 	private final Database db;

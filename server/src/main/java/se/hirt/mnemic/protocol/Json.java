@@ -31,7 +31,6 @@ package se.hirt.mnemic.protocol;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -39,12 +38,10 @@ import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.Map;
 
-/** One shared mapper; canonical (sorted-key) output for hashes. */
+/** The one shared JSON mapper, and the SHA-256 text hash used for content and cache keys. */
 public final class Json {
 
 	private static final ObjectMapper MAPPER = new ObjectMapper();
-	private static final ObjectMapper CANONICAL = new ObjectMapper().enable(
-			SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS);
 
 	private Json() {
 	}
@@ -57,24 +54,12 @@ public final class Json {
 		}
 	}
 
-	public static String writeOrNull(Object value) {
-		return value == null ? null : write(value);
-	}
-
 	public static Map<String, Object> readMap(String json) {
 		try {
 			return MAPPER.readValue(json, new TypeReference<Map<String, Object>>() {
 			});
 		} catch (JsonProcessingException e) {
 			throw MnemicException.internal("Failed to parse JSON", e);
-		}
-	}
-
-	public static String hash(Object value) {
-		try {
-			return hashBytes(CANONICAL.writeValueAsBytes(value));
-		} catch (JsonProcessingException e) {
-			throw MnemicException.internal("Failed to hash value", e);
 		}
 	}
 

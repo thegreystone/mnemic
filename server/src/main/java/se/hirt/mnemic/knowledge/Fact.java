@@ -31,11 +31,13 @@ package se.hirt.mnemic.knowledge;
 import se.hirt.mnemic.persistence.Row;
 
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 
 /**
  * A structured assertion with subject, predicate, object (entity or literal), optional qualifier and scope, valid time
  * with precision and provenance, status, derivation kind, and its anchor in the source observation (DESIGN.md,
- * Knowledge model; DECISIONS.md §2.1, §2.6).
+ * Knowledge model).
  * <p>
  * {@code status} is what happened to the row: {@code current} (accepted), {@code superseded} (replaced because an event
  * or a later fact closed it), {@code corrected} (replaced by {@code correct}), {@code pending} (held behind an open
@@ -72,8 +74,7 @@ public record Fact(long id, long subjectId, String predicate, Long objectId, Str
 
 	/**
 	 * {@code current}, {@code future}, {@code ended}, or the non-current status. Future when the valid start is after
-	 * today: a recorded plan ("owns the Zenit 4 from 2026-09-17") is not yet so, and a verdict that called it
-	 * current asserted a delivery a week early (2026-09-10). Ended when the flag is set or the end has passed.
+	 * today: a recorded plan is not yet so. Ended when the flag is set or the end has passed.
 	 */
 	public String state(Instant now) {
 		if (!current()) {
@@ -90,8 +91,7 @@ public record Fact(long id, long subjectId, String predicate, Long objectId, Str
 
 	/**
 	 * A plan whose date has passed without a word since: the start is on record, it is not in the future, and the
-	 * last confirmation predates it. "Collect the car on the 17th" read as current on the 18th on the strength of
-	 * the plan alone (2026-09-10). A restatement after the date, or a correction, clears it.
+	 * last confirmation predates it. A restatement after the date, or a correction, clears it.
 	 */
 	public boolean due(Instant now) {
 		return current() && !ended && validStart != null && validStart.compareTo(day(now)) <= 0
@@ -100,8 +100,9 @@ public record Fact(long id, long subjectId, String predicate, Long objectId, Str
 
 	/** Days from {@code now} until the valid start, for a future fact. */
 	public long daysUntilStart(Instant now) {
-		return java.time.temporal.ChronoUnit.DAYS.between(java.time.LocalDate.parse(day(now)),
-				java.time.LocalDate.parse(validStart.length() >= 10 ? validStart.substring(0, 10) : validStart + "-01-01".substring(validStart.length() - 4)));
+		String start = validStart.length() >= 10 ? validStart.substring(0, 10)
+				: validStart + "-01-01".substring(validStart.length() - 4);
+		return ChronoUnit.DAYS.between(LocalDate.parse(day(now)), LocalDate.parse(start));
 	}
 
 	/** True when the interval may contain {@code asOf}: unknown bounds do not exclude (EVALUATION.md C9). */

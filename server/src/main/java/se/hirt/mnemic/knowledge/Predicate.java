@@ -29,6 +29,8 @@
 package se.hirt.mnemic.knowledge;
 
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -39,7 +41,7 @@ import java.util.Set;
  * @param functionalScope
  *        {@code null}, or {@code "scope"} meaning functional per (subject, scope entity)
  * @param volatility
- * 		low | medium | high; drives the staleness annotation, never ranking (DECISIONS.md §2.2)
+ * 		low | medium | high; drives the staleness annotation, never ranking
  * @param render
  * 		template with {@code {subject} {object} {scope} {qualifier|default}} and optional {@code [[ ... ]]} segments that
  * 		vanish when a placeholder inside them is empty
@@ -82,8 +84,8 @@ public record Predicate(String name, String description, List<String> domain, Li
 		if (a == null || b == null) {
 			return false;
 		}
-		String x = a.trim().toLowerCase(java.util.Locale.ROOT);
-		String y = b.trim().toLowerCase(java.util.Locale.ROOT);
+		String x = a.trim().toLowerCase(Locale.ROOT);
+		String y = b.trim().toLowerCase(Locale.ROOT);
 		if (x.equals(y)) {
 			return true;
 		}
@@ -94,7 +96,6 @@ public record Predicate(String name, String description, List<String> domain, Li
 	public boolean sameType() {
 		return !domain.contains("*") && !range.contains("*") && domain.stream().anyMatch(range::contains);
 	}
-
 
 	public boolean isExtended() {
 		return name.startsWith("x:");
@@ -116,22 +117,15 @@ public record Predicate(String name, String description, List<String> domain, Li
 
 	private static final Set<String> AUXILIARY = Set.of("is", "are", "was", "were", "has", "had", "does", "did",
 			"can", "will", "would", "should");
-	private static final java.util.Map<String, String> IRREGULAR = java.util.Map.of("decided", "decide", "died",
-			"die", "has", "have", "moved", "move", "founded", "found", "married", "marry", "left", "leave");
+	private static final Map<String, String> IRREGULAR = Map.of("decided", "decide", "died", "die", "has", "have",
+			"moved", "move", "founded", "found", "married", "marry", "left", "leave");
 
 	/**
-	 * The negation of a rendered fact (family Q): "{subject} owns {object}" → "{subject} does not own {object}",
-	 * "{subject} is a member of {object}" → "{subject} is not a member of {object}", "{subject} was born in" →
-	 * "was not born in". A template that does not start with the subject, or a verb the rule cannot lemmatise,
-	 * falls back to "not: " before the positive rendering, so nothing reads as asserted.
-	 */
-	public String renderNegated(String subject, String object, String scope, String qualifier) {
-		return renderNegated(Lang.EN, null, subject, object, scope, qualifier);
-	}
-
-	/**
-	 * {@code negatedTemplate}: the language's own template for the negation when the registry has one; else the
-	 * English rule, or in another language the language's "not:" prefix, so nothing reads as asserted.
+	 * The negation of a rendered fact (EVALUATION.md, family Q): "{subject} owns {object}" → "{subject} does not own
+	 * {object}", "{subject} was born in" → "was not born in". {@code negatedTemplate} is the language's own template
+	 * when the registry has one; otherwise the English rule applies, and a template that does not start with the
+	 * subject, a verb the rule cannot lemmatise, or another language falls back to a "not:" prefix before the
+	 * positive rendering, so nothing reads as asserted.
 	 */
 	public String renderNegated(Lang lang, String negatedTemplate, String subject, String object, String scope,
 			String qualifier) {
@@ -152,7 +146,7 @@ public record Predicate(String name, String description, List<String> domain, Li
 		int sp = rest.indexOf(' ');
 		String word = sp < 0 ? rest : rest.substring(0, sp);
 		String after = sp < 0 ? "" : rest.substring(sp);
-		String lw = word.toLowerCase(java.util.Locale.ROOT);
+		String lw = word.toLowerCase(Locale.ROOT);
 		if (AUXILIARY.contains(lw)) {
 			return prefix + word + " not" + after;
 		}
@@ -185,19 +179,11 @@ public record Predicate(String name, String description, List<String> domain, Li
 	}
 
 	/** An exclusive restriction: "{subject} owns only within {object}". */
-	public String renderOnly(String subject, String bound, String scope, String qualifier) {
-		return renderOnly(Lang.EN, subject, bound, scope, qualifier);
-	}
-
 	public String renderOnly(Lang lang, String subject, String bound, String scope, String qualifier) {
 		return render(subject, lang.onlyWithin(bound), scope, qualifier);
 	}
 
 	/** A completeness marker: "what {subject} owns among places is completely recorded". */
-	public String renderClosure(String subject, String type) {
-		return renderClosure(Lang.EN, subject, type);
-	}
-
 	public String renderClosure(Lang lang, String subject, String type) {
 		return lang.closure(subject, verbPhrase(), type);
 	}
@@ -209,18 +195,9 @@ public record Predicate(String name, String description, List<String> domain, Li
 		return t.replaceAll("\\s+", " ").trim();
 	}
 
-	static String plural(String type) {
-		return switch (type) {
-			case "person" -> "people";
-			case "technology" -> "technologies";
-			default -> type.endsWith("s") ? type : type + "s";
-		};
-	}
-
 	/** Renders one fact; temporal suffixes are appended by the caller. */
 	public String render(String subject, String object, String scope, String qualifier) {
 		String out = render;
-		// optional segments first
 		var sb = new StringBuilder();
 		int i = 0;
 		while (i < out.length()) {

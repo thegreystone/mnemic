@@ -37,15 +37,12 @@ import se.hirt.mnemic.observation.Source;
 import se.hirt.mnemic.proposal.ModelProposer;
 import se.hirt.mnemic.proposal.ModelProposer.Mode;
 
-import java.time.Clock;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static se.hirt.mnemic.TestHomes.OWNER;
-import static se.hirt.mnemic.TestHomes.SOFT_LIMIT;
 import static se.hirt.mnemic.TestHomes.fresh;
 import static se.hirt.mnemic.TestHomes.proposal;
 
@@ -56,8 +53,7 @@ import static se.hirt.mnemic.TestHomes.proposal;
 class HybridProposerTest {
 
 	private static Engine engine(String name, String spec, Mode mode) {
-		return new Engine(fresh(name), "test", SOFT_LIMIT, OWNER, Clock.systemUTC(),
-				ModelProposer.configure(spec, null, mode));
+		return new Engine(TestHomes.options(fresh(name)).withProposer(ModelProposer.configure(spec, null, mode), 20));
 	}
 
 	@BeforeEach

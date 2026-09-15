@@ -41,14 +41,14 @@ import java.lang.foreign.ValueLayout;
 import java.lang.invoke.MethodHandle;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.Locale;
 
 /**
- * The ONNX Runtime C API over foreign-function downcalls, the twenty entries of {@code OrtApi} the embedder uses
- * and nothing else (PLAN.md M4, prototype P3). The API is a table of function pointers whose order is fixed by
- * {@code onnxruntime_c_api.h}; the indices below were read from the 1.30 header and hold for every later version,
- * since the table is append-only. Every distinct signature here is registered for the native image in
- * {@code reachability-metadata.json} ("foreign"); a new signature needs a new entry there, or the image throws at
- * the first call.
+ * The ONNX Runtime C API over foreign-function downcalls, the entries of {@code OrtApi} the embedder uses and
+ * nothing else. The API is a table of function pointers whose order is fixed by {@code onnxruntime_c_api.h}; the
+ * indices below were read from the 1.30 header and hold for every later version, since the table is append-only.
+ * Every distinct signature here is registered for the native image in {@code reachability-metadata.json}
+ * ("foreign"); a new signature needs a new entry there, or the image throws at the first call.
  *
  * <p>Status handling: nearly every call returns an {@code OrtStatus*}, null on success. {@link #check} turns a
  * non-null status into an exception carrying the runtime's message and releases it.
@@ -162,7 +162,7 @@ public final class OrtRuntime {
 	/** {@code ORTCHAR_T*}: wide (UTF-16) on Windows, UTF-8 elsewhere. */
 	private static MemorySegment pathStr(Arena a, Path p) {
 		String s = p.toAbsolutePath().toString();
-		if (System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win")) {
+		if (System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win")) {
 			byte[] utf16 = (s + "\0").getBytes(StandardCharsets.UTF_16LE);
 			MemorySegment seg = a.allocate(utf16.length);
 			MemorySegment.copy(MemorySegment.ofArray(utf16), 0, seg, 0, utf16.length);

@@ -29,9 +29,11 @@
 package se.hirt.mnemic;
 
 import se.hirt.mnemic.embed.Embedder;
+import se.hirt.mnemic.embed.EmbedderHolder;
 import se.hirt.mnemic.embed.ModelFetcher;
 import se.hirt.mnemic.embed.OrtLibrary;
-import se.hirt.mnemic.embed.EmbedderHolder;
+import se.hirt.mnemic.knowledge.Lang;
+import se.hirt.mnemic.proposal.ModelProposer;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Disposes;
@@ -40,15 +42,17 @@ import jakarta.inject.Singleton;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
-import se.hirt.mnemic.proposal.ModelProposer;
-
 import java.nio.file.Path;
+import java.util.List;
 
 /** CDI wiring: one {@link Engine} per process, opened on the configured data home. */
 @ApplicationScoped
 public class EngineProducer {
 
 	private static final Logger LOG = Logger.getLogger(EngineProducer.class);
+
+	private volatile EmbedderHolder holder;
+	private volatile Engine engine;
 
 	@Produces
 	@Singleton
@@ -70,13 +74,16 @@ public class EngineProducer {
 						e.getMessage());
 			}
 		}
-		EmbedderHolder holder = embedderHolder(config);
-		this.holder = holder;
-		Engine built = new Engine(home, version, config.observation().softLimitChars(), config.owner().orElse(null),
-				java.time.Clock.systemUTC(), proposer, config.proposer().batch(), config.ownerIdentity(),
-				config.vecLibrary().orElse(null), holder, se.hirt.mnemic.knowledge.Lang.of(config.language().orElse("en")));
-		this.engine = built;
-		return built;
+		holder = embedderHolder(config);
+		Engine.Options options = Engine.Options.of(home, version)
+				.withSoftLimit(config.observation().softLimitChars())
+				.withOwner(config.owner().orElse(null), config.ownerIdentity())
+				.withProposer(proposer, config.proposer().batch())
+				.withVecLibrary(config.vecLibrary().orElse(null))
+				.withEmbedder(holder)
+				.withLang(Lang.of(config.language().orElse("en")));
+		engine = new Engine(options);
+		return engine;
 	}
 
 	/**
@@ -96,10 +103,10 @@ public class EngineProducer {
 			if (config.ortLibrary().isPresent() && config.embedModel().isPresent()) {
 				Path dir = Path.of(config.embedModel().get());
 				Path library = Path.of(config.ortLibrary().get());
-				return new EmbedderHolder(modelsDir, java.util.List.of(), () -> library, dir, dir.getFileName().toString(),
+				return new EmbedderHolder(modelsDir, List.of(), () -> library, dir, dir.getFileName().toString(),
 						this::backfill);
 			}
-			java.util.List<ModelFetcher.Item> plan = ModelFetcher.plan(modelsDir, config.embedModelUrl().orElse(null));
+			List<ModelFetcher.Item> plan = ModelFetcher.plan(modelsDir, config.embedModelUrl().orElse(null));
 			Path modelDir = plan.get(0).target().getParent();
 			if (!ModelFetcher.complete(plan)) {
 				LOG.infof("Semantic recall: fetching the embedding model (%d MB) into %s in the background; "
@@ -138,9 +145,6 @@ public class EngineProducer {
 			LOG.warnf("Backfill of vectors stopped: %s", ex.getMessage());
 		}
 	}
-
-	private volatile EmbedderHolder holder;
-	private volatile Engine engine;
 
 	void close(@Disposes Engine engine) {
 		engine.close();

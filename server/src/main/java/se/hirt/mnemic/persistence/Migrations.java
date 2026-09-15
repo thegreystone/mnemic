@@ -36,6 +36,7 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.sql.*;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.regex.Pattern;
@@ -43,14 +44,17 @@ import java.util.regex.Pattern;
 /**
  * Forward-only, numbered SQL migrations embedded as classpath resources ({@code db/migration/Vnnn__name.sql}), recorded
  * in {@code schema_version}. No down-migrations. Checksums are verified so an edited already-applied migration fails
- * loudly, and a database written by a newer binary is refused (DECISIONS.md §4: forward-compat guard when two versions
- * share a data home).
+ * loudly, and a database written by a newer binary is refused, since two versions may share a data home.
  */
 final class Migrations {
 
 	/** Add new migrations here, in order. Never edit an applied one. */
-	static final List<String> MIGRATIONS = List.of("V001__observations.sql", "V002__facts.sql", "V003__time.sql",
-			"V004__questions.sql", "V005__event_keys.sql",
+	static final List<String> MIGRATIONS = List.of(
+			"V001__observations.sql",
+			"V002__facts.sql",
+			"V003__time.sql",
+			"V004__questions.sql",
+			"V005__event_keys.sql",
 			"V006__proposer.sql",
 			"V007__located_in_nests.sql",
 			"V008__sibling_qualifiers.sql",
@@ -157,8 +161,8 @@ final class Migrations {
 
 	/**
 	 * The fingerprint of an applied migration: the statements it executes with comments stripped, whitespace collapsed,
-	 * and spaces around {@code ( ) , ;} removed, so reformatting a file never locks a database out of its own schema (a
-	 * real incident in the sibling rpg-mcp project) while any DDL change still trips the guard.
+	 * and spaces around {@code ( ) , ;} removed, so reformatting a file never locks a database out of its own schema
+	 * while any DDL change still trips the guard.
 	 */
 	static String checksum(String sql) {
 		String canonical = String.join(";", splitStatements(sql)).replaceAll("\\s+", " ")
@@ -175,7 +179,7 @@ final class Migrations {
 			int i = line.indexOf("--");
 			return i >= 0 ? line.substring(0, i) : line;
 		}).reduce(new StringBuilder(), (sb, l) -> sb.append(l).append('\n'), StringBuilder::append).toString();
-		var out = new java.util.ArrayList<String>();
+		var out = new ArrayList<String>();
 		var current = new StringBuilder();
 		int depth = 0;
 		for (String piece : noComments.split(";")) {

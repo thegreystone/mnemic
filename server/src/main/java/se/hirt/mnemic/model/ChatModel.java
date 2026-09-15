@@ -33,8 +33,7 @@ import java.io.IOException;
 /**
  * The one thing Mnemic ever needs from a language model: a system prompt and a user message in, text out. Every vendor
  * lives behind a {@link ModelProvider}; nothing outside a provider names a vendor. The server uses this only for the
- * optional local-model tier (EXTRACTION.md, Local models) and never holds a provider key; the benchmark harness uses
- * the same interface for its reader, judge, and proposer.
+ * optional server-side proposer; the benchmark harness uses the same interface for its reader, judge, and proposer.
  */
 public interface ChatModel {
 

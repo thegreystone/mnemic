@@ -28,11 +28,7 @@
  */
 package se.hirt.mnemic.recall;
 
-/**
- * Token budgets are enforced against an estimate (DECISIONS.md §2.11: a calibrated ratio or the real tokenizer, never
- * an unmeasured guess). The character ratio is the M0 placeholder; the benchmark harness reports the true ratio for the
- * reader it uses so the constant can be calibrated.
- */
+/** Token budgets are enforced against an estimate: a calibrated character ratio, never an unmeasured guess. */
 public interface TokenEstimator {
 
 	int estimate(String text);

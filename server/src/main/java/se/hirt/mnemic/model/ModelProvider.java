@@ -36,8 +36,7 @@ import java.util.ServiceLoader;
  * The vendor plug-in point, loaded through {@link ServiceLoader} from
  * {@code META-INF/services/se.hirt.mnemic.model.ModelProvider}. A provider claims one or more
  * {@link ModelSpec#provider()} names and builds a {@link ChatModel} for a spec. Adding a vendor is one class with a
- * public no-arg constructor and one line in a services file; nothing else changes. The server ships only the key-free
- * OpenAI-compatible provider (LM Studio, Ollama); vendor SDKs live in the benchmark harness.
+ * public no-arg constructor and one line in the services file; no vendor SDK is on the class path.
  * <p>
  * Native image: GraalVM's {@code ServiceLoaderFeature} registers every provider whose service interface is reachable,
  * but Quarkus turns that feature off unless {@code quarkus.native.auto-service-loader-registration=true} is set (see

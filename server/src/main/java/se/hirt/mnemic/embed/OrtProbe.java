@@ -26,7 +26,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-package se.hirt.mnemic.model;
+package se.hirt.mnemic.embed;
 
 import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
@@ -38,17 +38,14 @@ import java.lang.invoke.MethodHandle;
 import java.nio.file.Path;
 
 /**
- * P3 (DECISIONS.md §5): foreign-function downcalls into the ONNX Runtime C API from inside the native image, the
- * path the in-process embedder will take. The probe loads {@code onnxruntime.dll} (or .so, .dylib), calls
- * {@code OrtGetApiBase()}, reads the two function pointers of {@code OrtApiBase}, and calls both: the version
- * string, and {@code GetApi(ORT_API_VERSION)} for the API table. Three downcalls with two distinct descriptors,
- * which the image registers ahead of time (reachability-metadata.json, "foreign"). No session is created here;
- * that is the embedder's job once the tokenizer exists.
+ * A diagnostic for a user-provided ONNX Runtime library, reported by {@code status}: loads it, calls
+ * {@code OrtGetApiBase()}, and reads the version string and whether {@code GetApi(ORT_API_VERSION)} serves the API
+ * table. Its downcall signatures are registered for the native image in {@code reachability-metadata.json}. No
+ * session is created here; that is {@link OrtRuntime}'s job.
  */
 public final class OrtProbe {
 
-	/** The ORT_API_VERSION the embedder will ask for; 1.30 serves it. */
-	static final int API_VERSION = 23;
+	static final int API_VERSION = OrtRuntime.API_VERSION;
 
 	private OrtProbe() {
 	}

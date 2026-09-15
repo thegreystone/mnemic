@@ -42,7 +42,6 @@ import se.hirt.mnemic.recall.RecallResult;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Clock;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -78,8 +77,7 @@ class SemanticRecallTest {
 	@Scenario("F2")
 	void aLongObservationIsFoundThroughAChunkBeyondItsOpening() throws Exception {
 		try (Embedder emb = embedder();
-				Engine e = new Engine(TestHomes.fresh("f2-chunks"), "test", TestHomes.SOFT_LIMIT, TestHomes.OWNER,
-						Clock.systemUTC(), null, 20, TestHomes.OWNER_IDENTITY, null, emb)) {
+				Engine e = new Engine(TestHomes.options(TestHomes.fresh("f2-chunks")).withEmbedder(emb))) {
 			e.remember(longObservation(), Source.user(), null, null, null, null);
 			e.remember("The 3D printer needs a new nozzle, the old one is clogged.", Source.user(), null, null, null, null);
 			assertTrue(e.vectors().count(emb.id()) > 3, "the long observation has several chunk vectors: " + e.vectors().count(emb.id()));
@@ -98,8 +96,7 @@ class SemanticRecallTest {
 	@Scenario("F2")
 	void theChannelFillsTheTailAndNeverDisplacesAnExactHit() throws Exception {
 		try (Embedder emb = embedder();
-				Engine e = new Engine(TestHomes.fresh("f2-tail"), "test", TestHomes.SOFT_LIMIT, TestHomes.OWNER,
-						Clock.systemUTC(), null, 20, TestHomes.OWNER_IDENTITY, null, emb)) {
+				Engine e = new Engine(TestHomes.options(TestHomes.fresh("f2-tail")).withEmbedder(emb))) {
 			// Several observations close in meaning to a banking question, and one exact match on a rare word.
 			e.remember("My accounts are at Nordbank, the savings and the salary account.", Source.user(), null, null, null, null);
 			e.remember("I moved my savings to a new bank last spring.", Source.user(), null, null, null, null);
@@ -122,14 +119,13 @@ class SemanticRecallTest {
 	void consolidateEmbedsWhatWasStoredBeforeTheModelAndForgetRemovesEveryChunk() throws Exception {
 		Path home = TestHomes.fresh("f2-backfill");
 		// Stored without an embedder: nothing embedded.
-		try (Engine plain = new Engine(home, "test", TestHomes.SOFT_LIMIT, TestHomes.OWNER)) {
+		try (Engine plain = new Engine(TestHomes.options(home))) {
 			plain.remember(longObservation(), Source.user(), null, null, null, null);
 			plain.remember("I work at Hooli.", Source.user(), null, proposal().entity("e1", "Hooli", "organization")
 					.fact("works_at", "e1").build(), null, null);
 		}
 		try (Embedder emb = embedder();
-				Engine e = new Engine(home, "test", TestHomes.SOFT_LIMIT, TestHomes.OWNER, Clock.systemUTC(), null, 20,
-						TestHomes.OWNER_IDENTITY, null, emb)) {
+				Engine e = new Engine(TestHomes.options(home).withEmbedder(emb))) {
 			assertEquals(0, e.vectors().count(emb.id()));
 			int embedded = e.consolidate(false).embedded();
 			assertEquals(3, embedded, "two observations and one fact backfilled");
@@ -164,8 +160,7 @@ class SemanticRecallTest {
 		var holder = new se.hirt.mnemic.embed.EmbedderHolder(models, plan, () -> se.hirt.mnemic.embed.OrtLibrary.install(models),
 				plan.get(0).target().getParent(), se.hirt.mnemic.embed.ModelFetcher.MODEL_ID, e -> {
 				});
-		try (Engine e = new Engine(TestHomes.fresh("f2-first-use"), "test", TestHomes.SOFT_LIMIT, TestHomes.OWNER,
-				Clock.systemUTC(), null, 20, TestHomes.OWNER_IDENTITY, null, holder, se.hirt.mnemic.knowledge.Lang.EN)) {
+		try (Engine e = new Engine(TestHomes.options(TestHomes.fresh("f2-first-use")).withEmbedder(holder))) {
 			// The engine works at once, without the channel.
 			e.remember("My accounts are at Nordbank, the savings and the salary account.", Source.user(), null, null, null, null);
 			assertTrue(recall(e, "Nordbank").hits().size() == 1);
@@ -189,8 +184,7 @@ class SemanticRecallTest {
 	@Scenario("F2")
 	void aParaphraseIsFoundThroughTheSemanticChannel() throws Exception {
 		try (Embedder emb = embedder();
-				Engine e = new Engine(TestHomes.fresh("f2-semantic"), "test", TestHomes.SOFT_LIMIT, TestHomes.OWNER,
-						Clock.systemUTC(), null, 20, TestHomes.OWNER_IDENTITY, null, emb)) {
+				Engine e = new Engine(TestHomes.options(TestHomes.fresh("f2-semantic")).withEmbedder(emb))) {
 			// Through the engine, as a client would: the observation is embedded as it is stored.
 			e.remember("My accounts are at Nordbank, the savings and the salary account.", Source.user(), null, null,
 					null, null);
@@ -223,8 +217,7 @@ class SemanticRecallTest {
 	@Scenario("F16")
 	void aFirstPersonQuestionReachesAThirdPersonFactThroughTheOwnerAlias() throws Exception {
 		try (Embedder emb = embedder();
-				Engine e = new Engine(TestHomes.fresh("f16-owner-alias"), "test", TestHomes.SOFT_LIMIT, TestHomes.OWNER,
-						Clock.systemUTC(), null, 20, TestHomes.OWNER_IDENTITY, null, emb)) {
+				Engine e = new Engine(TestHomes.options(TestHomes.fresh("f16-owner-alias")).withEmbedder(emb))) {
 			remember(e, "Hooli is where the paycheck comes from, since 2018.",
 					proposal().entity("e1", "Hooli", "organization").fact("works_at", "e1"));
 			e.remember("The 3D printer needs a new nozzle, the old one is clogged.", Source.user(), null, null, null, null);
@@ -249,8 +242,7 @@ class SemanticRecallTest {
 	@Scenario("D1")
 	void aCorrectionIsEmbeddedAtOnce() throws Exception {
 		try (Embedder emb = embedder();
-				Engine e = new Engine(TestHomes.fresh("d1-embed-correction"), "test", TestHomes.SOFT_LIMIT, TestHomes.OWNER,
-						Clock.systemUTC(), null, 20, TestHomes.OWNER_IDENTITY, null, emb)) {
+				Engine e = new Engine(TestHomes.options(TestHomes.fresh("d1-embed-correction")).withEmbedder(emb))) {
 			remember(e, "I live in Kilchberg.", proposal().entity("e1", "Kilchberg", "place").fact("lives_in", "e1"));
 			long before = e.vectors().count(emb.id());
 			long id = e.facts().factsOf(e.entities().owner().id()).getFirst().id();

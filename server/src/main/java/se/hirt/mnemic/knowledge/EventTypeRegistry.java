@@ -38,8 +38,9 @@ import java.time.Instant;
 import java.util.*;
 
 /**
- * Which event types open and close which predicates (DECISIONS.md §2.10). Three effects:
+ * Which event types open and close which predicates. Three effects:
  * <ul>
+ * <li>{@code opens}: the event supplies a fact the proposal did not state ({@code purchased} → {@code owns}).</li>
  * <li>{@code supersedes}: a fact derived from the event replaces the other current values of a functional predicate
  * ({@code joined} → the previous {@code works_at} ends at the event time; EVALUATION.md C1).</li>
  * <li>{@code closes}: the event ends the fact whose subject and object both take part ({@code left(Mattias, Initrode)}
@@ -73,6 +74,17 @@ public final class EventTypeRegistry {
 
 	public synchronized List<EventType> all() {
 		return List.copyOf(load().values());
+	}
+
+	/** Whether an event type opens, closes, or supersedes facts of the predicate. */
+	public boolean touches(String eventType, String predicate) {
+		return get(eventType).map(t -> t.opens().contains(predicate) || t.closes().contains(predicate)
+				|| t.supersedes().contains(predicate)).orElse(false);
+	}
+
+	/** Whether a fact opened by an event of this type replaces the predicate's other current values. */
+	public boolean supersedes(String eventType, String predicate) {
+		return get(eventType).map(t -> t.supersedes().contains(predicate)).orElse(false);
 	}
 
 	static List<EventType> seed() {
@@ -139,7 +151,7 @@ public final class EventTypeRegistry {
 		}
 		for (String stored : storedTypes) {
 			// A stored type is matched word by word: "purchased property" is named by "purchased", and by "buy"
-			// when a registered type with that lexicon term ("purchased") is one of its words (2026-09-10).
+			// when a registered type with that lexicon term ("purchased") is one of its words.
 			for (String word : Names.contentTokens(stored)) {
 				for (String tok : tokens) {
 					// "inherit" names the stored type "inherited": a prefix either way, four letters or more.

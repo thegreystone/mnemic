@@ -40,7 +40,7 @@ import java.util.function.Supplier;
 /**
  * Renders service results as the response envelope and failures as structured tool errors. A failure is an
  * {@code isError} result with a JSON {@code {"error": {code, message, retryable, details}}} body, never a thrown
- * exception (DECISIONS.md §3.1).
+ * exception, so the model can read the message and retry.
  */
 final class ToolSupport {
 

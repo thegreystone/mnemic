@@ -32,9 +32,8 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * A failure that is reported to the calling model as a structured tool error, never as a protocol error (DECISIONS.md
- * §3.1: validation failures are {@code isError: true} results with fix-it text so the model can retry). The message
- * must say what was wrong and what a valid call looks like.
+ * A failure reported to the calling model as a structured tool error ({@code isError: true} with fix-it text), never
+ * as a protocol error, so the model can retry. The message must say what was wrong and what a valid call looks like.
  */
 public final class MnemicException extends RuntimeException {
 
