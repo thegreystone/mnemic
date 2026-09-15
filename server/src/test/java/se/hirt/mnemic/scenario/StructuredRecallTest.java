@@ -134,7 +134,7 @@ class StructuredRecallTest {
 			var ev = e.events().get(f.eventId()).orElseThrow();
 			assertEquals("joined", ev.type());
 			assertEquals("2018-01-01", ev.validStart());
-			assertTrue(ev.rendering().startsWith("joined(Mattias Sandell, Hooli)"), ev.rendering());
+			assertTrue(ev.rendering().startsWith("Mattias Sandell joined Hooli"), ev.rendering());
 			assertTrue(f.rendering().endsWith("(since 2018)"), f.rendering());
 		}
 	}

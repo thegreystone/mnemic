@@ -47,6 +47,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static se.hirt.mnemic.TestHomes.fact;
 import static se.hirt.mnemic.TestHomes.proposal;
@@ -385,6 +386,41 @@ class VocabularyTest {
 			remember(e, "Definitions.", proposal().eventType(INHERITED).entityType(CANTON));
 			List<Map<String, Object>> after = e.consolidate(true).suggestedRegistrations();
 			assertEquals(List.of(), after, "once defined, nothing is left to suggest");
+		}
+	}
+
+	@Test
+	@Scenario("S17")
+	void anEventTypeTemplateRendersItsEvents() {
+		Path home = TestHomes.fresh("s17-render");
+		long eventId;
+		try (Engine e = TestHomes.engine(home)) {
+			RememberOutcome o = remember(e, "I inherited the cabin in 2019.", proposal()
+					.eventType(new EventTypeDef("inherited", "Subject inherited object.", List.of("owns"), List.of(),
+							List.of(), null, List.of("inherited", "inherit"), "{subject} inherited {object}"))
+					.entity("e1", "the cabin", "place").event("ev1", "inherited", "2019", "self", "e1"));
+			eventId = Long.parseLong(o.applied().events().getFirst().id().substring(4));
+			assertEquals("Mattias Sandell inherited the cabin (since 2019)",
+					e.events().get(eventId).orElseThrow().rendering());
+			RecallResult r = recall(e, "when did Mattias inherit the cabin");
+			assertTrue(r.text().contains("Mattias Sandell inherited the cabin (since 2019)"), r.text());
+			assertThrows(se.hirt.mnemic.protocol.MnemicException.class,
+					() -> e.correctEventType("inherited", Map.of("render", "came into {object}"), null),
+					"a template without the subject is refused");
+			Map<String, Object> corrected = e.correctEventType("inherited",
+					Map.of("render", "{subject} came into {object}"), "wording");
+			assertEquals(1, corrected.get("rerendered_events"));
+			assertEquals("Mattias Sandell came into the cabin (since 2019)",
+					e.events().get(eventId).orElseThrow().rendering());
+			RememberOutcome seed = remember(e, "I joined Hooli in 2018.",
+					proposal().entity("e1", "Hooli", "organization").event("ev1", "joined", "2018", "self", "e1"));
+			long joined = Long.parseLong(seed.applied().events().getFirst().id().substring(4));
+			assertEquals("Mattias Sandell joined Hooli (since 2018)", e.events().get(joined).orElseThrow().rendering(),
+					"seed types have templates too");
+		}
+		try (Engine e = TestHomes.engine(home)) {
+			assertEquals("Mattias Sandell came into the cabin (since 2019)",
+					e.events().get(eventId).orElseThrow().rendering(), "the corrected wording survives a restart");
 		}
 	}
 }

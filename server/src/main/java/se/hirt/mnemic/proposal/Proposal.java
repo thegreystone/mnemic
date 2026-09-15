@@ -148,11 +148,11 @@ Integer specVersion, List<EntityRef> entities, List<EventRef> events, List<FactR
 					"derivation", "caller_confidence", "negated", "only"),
 			"predicates",
 			Set.of("name", "description", "domain", "range", "functional", "functional_scope", "symmetric", "inverse",
-					"volatility", "lexicon", "render", "qualifiers", "aliases"),
+					"volatility", "lexicon", "render", "qualifiers", "aliases", "renders"),
 			"closures", Set.of("subject", "predicate", "type"), "valid_time", Set.of("start", "end", "precision"),
 			"derivation", Set.of("kind"), "event_types",
-			Set.of("name", "description", "opens", "closes", "supersedes", "ends_entity", "lexicon"), "entity_types",
-			Set.of("name", "description", "parent", "synonyms", "type_words"));
+			Set.of("name", "description", "opens", "closes", "supersedes", "ends_entity", "lexicon", "render"),
+			"entity_types", Set.of("name", "description", "parent", "synonyms", "type_words"));
 
 	/**
 	 * Keys the spec does not define are ignored by the reader; every ignored key is named, with the keys that exist
@@ -380,7 +380,12 @@ Integer specVersion, List<EntityRef> entities, List<EventRef> events, List<FactR
 	@JsonIgnoreProperties(ignoreUnknown = true)
 	public record EventTypeDef(String name, String description, List<String> opens, List<String> closes,
 			List<String> supersedes, @JsonProperty("ends_entity")
-			Boolean endsEntity, List<String> lexicon) {
+			Boolean endsEntity, List<String> lexicon, String render) {
+		public EventTypeDef(String name, String description, List<String> opens, List<String> closes,
+				List<String> supersedes, Boolean endsEntity, List<String> lexicon) {
+			this(name, description, opens, closes, supersedes, endsEntity, lexicon, null);
+		}
+
 		public EventTypeDef {
 			opens = opens == null ? List.of() : opens;
 			closes = closes == null ? List.of() : closes;
@@ -408,8 +413,19 @@ Integer specVersion, List<EntityRef> entities, List<EventRef> events, List<FactR
 	public record PredicateDef(String name, String description, String domain, String range, Boolean functional,
 			@JsonProperty("functional_scope")
 			String functionalScope, Boolean symmetric, String inverse, String volatility, List<String> lexicon,
-			String render, List<String> qualifiers, List<String> aliases) {
+			String render, List<String> qualifiers, List<String> aliases, Map<String, Object> renders) {
+		public PredicateDef(String name, String description, String domain, String range, Boolean functional,
+				String functionalScope, Boolean symmetric, String inverse, String volatility, List<String> lexicon,
+				String render, List<String> qualifiers, List<String> aliases) {
+			this(name, description, domain, range, functional, functionalScope, symmetric, inverse, volatility, lexicon,
+					render, qualifiers, aliases, null);
+		}
+
+		/**
+		 * {@code renders}: per-language templates, {@code {"de": {"render": ..., "negated": ..., "lexicon": [...]}}}.
+		 */
 		public PredicateDef {
+			renders = renders == null ? Map.of() : renders;
 			lexicon = lexicon == null ? List.of() : lexicon;
 			qualifiers = qualifiers == null ? List.of() : qualifiers;
 			aliases = aliases == null ? List.of() : aliases;

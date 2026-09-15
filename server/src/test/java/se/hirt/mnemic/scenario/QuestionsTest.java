@@ -244,7 +244,7 @@ class QuestionsTest {
 			assertTrue(b.applied().questions().isEmpty(), "containment nests, no conflict: " + b.applied().questions());
 			assertEquals("current", stored(e, a, 0).status());
 			assertEquals("current", stored(e, b, 0).status());
-			assertEquals(19, e.database().schemaVersion());
+			assertEquals(20, e.database().schemaVersion());
 		}
 	}
 
@@ -264,7 +264,7 @@ class QuestionsTest {
 			assertEquals(2, r.events().size(), r.text());
 			assertFalse(r.text().contains("MISS"),
 					"the headline must not tell the assistant to say it does not know: " + r.text());
-			assertTrue(r.text().contains("events: ") && r.text().contains("born(Marit Nyberg)"), r.text());
+			assertTrue(r.text().contains("events: ") && r.text().contains("Marit Nyberg was born"), r.text());
 		}
 	}
 

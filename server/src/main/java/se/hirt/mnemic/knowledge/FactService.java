@@ -408,12 +408,12 @@ public final class FactService {
 						+ "(for example opens owns, or closes works_at) and define it in your next remember; leave it if "
 						+ "it is a plain occurrence.",
 						Map.of("event_types",
-								List.of(skeleton("name", type, "description", "", "opens", List.of(), "closes",
-										List.of(), "supersedes", List.of(), "ends_entity", false, "lexicon",
+								List.of(skeleton("name", type, "description", "", "render",
+										"{subject} " + type.replace('_', ' ') + " {object}", "opens", List.of(),
+										"closes", List.of(), "supersedes", List.of(), "ends_entity", false, "lexicon",
 										List.of(type.replace('_', ' '))))));
 			}
-			String rendering = type + "(" + String.join(", ", participants.stream().map(Entity::name).toList()) + ")"
-					+ b.suffix(false, Lang.EN);
+			String rendering = events.render(type, participants.stream().map(Entity::name).toList(), b);
 			EventService.Stored stored = events.store(type, participants, b, rendering, a.obs);
 			String key = ev.ref() != null ? ev.ref() : "evt-" + stored.id();
 			a.eventIds.put(key, stored.id());

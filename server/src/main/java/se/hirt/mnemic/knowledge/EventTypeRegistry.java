@@ -41,9 +41,11 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Predicate;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
- * Which event types open and close which predicates. Three effects:
+ * Which event types open and close which predicates, and how an event reads. Three effects:
  * <ul>
  * <li>{@code opens}: the event supplies a fact the proposal did not state ({@code purchased} → {@code owns}).</li>
  * <li>{@code supersedes}: a fact derived from the event replaces the other current values of a functional predicate
@@ -53,14 +55,16 @@ import java.util.function.Predicate;
  * <li>{@code ends_entity}: the participant's open facts end and its {@code existed} interval closes ({@code died};
  * C11).</li>
  * </ul>
- * Seeded, extensible from a proposal, corrected through {@code correct}. An event of a type nobody registered is stored
- * as a plain occurrence with no effect on facts. The table is read once at start into a hash map and every write goes
- * to the database and the map in the same call.
+ * A type's {@code render} template turns the participants into a sentence ({@code {subject} bought {object}}); a type
+ * without one, or nobody registered, renders as {@code type(participants)}. Seeded, extensible from a proposal,
+ * corrected through {@code correct}. The table is read once at start into a hash map and every write goes to the
+ * database and the map in the same call.
  */
 public final class EventTypeRegistry {
 
 	public record EventType(String name, String description, List<String> opens, List<String> closes,
-			List<String> supersedes, boolean endsEntity, boolean seed, List<String> lexicon, Long definedBy) {
+			List<String> supersedes, boolean endsEntity, boolean seed, List<String> lexicon, Long definedBy,
+			String render) {
 	}
 
 	private final Database db;
@@ -96,6 +100,31 @@ public final class EventTypeRegistry {
 	}
 
 	/**
+	 * The sentence for an event: the type's template with {@code {subject}} the first participant and {@code {object}}
+	 * the others. A {@code [[ ... ]]} segment vanishes when there is no object ({@code {subject} was born[[ in
+	 * {object}]]}); a template that names no object gets the others in parentheses. Without a template,
+	 * {@code type(a, b)}.
+	 */
+	public synchronized String render(String type, List<String> participants) {
+		EventType t = byName.get(type);
+		String template = t == null ? null : t.render();
+		if (template == null || template.isBlank()) {
+			return type + "(" + String.join(", ", participants) + ")";
+		}
+		String subject = participants.isEmpty() ? "" : participants.getFirst();
+		String object = participants.size() < 2 ? "" : String.join(", ", participants.subList(1, participants.size()));
+		String out = OPTIONAL.matcher(template)
+				.replaceAll(m -> object.isEmpty() ? "" : Matcher.quoteReplacement(m.group(1)));
+		out = out.replace("{subject}", subject).replace("{object}", object);
+		if (!object.isEmpty() && !template.contains("{object}")) {
+			out += " (" + object + ")";
+		}
+		return out.replaceAll("\\s+", " ").trim();
+	}
+
+	private static final Pattern OPTIONAL = Pattern.compile("\\[\\[(.*?)]]");
+
+	/**
 	 * Registers a caller-defined type; an existing name is returned as it is. {@code registered} says which predicates
 	 * exist, since a type may only open, close, or supersede those.
 	 */
@@ -114,14 +143,15 @@ public final class EventTypeRegistry {
 			}
 		}
 		var t = new EventType(name, def.description(), def.opens(), def.closes(), def.supersedes(),
-				Boolean.TRUE.equals(def.endsEntity()), false, lower(def.lexicon()), observationId);
+				Boolean.TRUE.equals(def.endsEntity()), false, lower(def.lexicon()), observationId,
+				template(def.render()));
 		insert(t);
 		return t;
 	}
 
 	/**
-	 * Corrects {@code description}, {@code opens}, {@code closes}, {@code supersedes}, {@code ends_entity}, or
-	 * {@code lexicon}; every change is logged.
+	 * Corrects {@code description}, {@code opens}, {@code closes}, {@code supersedes}, {@code ends_entity},
+	 * {@code lexicon}, or {@code render}; every change is logged. The caller re-renders the type's events.
 	 */
 	public synchronized EventType update(
 		String name, Map<String, Object> replacement, String reason, Predicate<String> registered) {
@@ -132,6 +162,7 @@ public final class EventTypeRegistry {
 		List<String> supersedes = t.supersedes();
 		boolean endsEntity = t.endsEntity();
 		List<String> lexicon = t.lexicon();
+		String render = t.render();
 		var changes = new ArrayList<String[]>();
 		for (Map.Entry<String, Object> c : replacement.entrySet()) {
 			String old;
@@ -161,21 +192,25 @@ public final class EventTypeRegistry {
 				old = Vocabulary.json(lexicon);
 				lexicon = lower(Vocabulary.strings(c.getValue()));
 			}
+			case "render" -> {
+				old = render;
+				render = template(value);
+			}
 			default -> throw MnemicException.invalidArgument("Unknown event type property '" + c.getKey()
-					+ "'; correctable: description, opens, closes, supersedes, ends_entity, lexicon.");
+					+ "'; correctable: description, opens, closes, supersedes, ends_entity, lexicon, render.");
 			}
 			changes.add(new String[] {c.getKey(), old, value});
 		}
 		var updated = new EventType(t.name(), description, opens, closes, supersedes, endsEntity, t.seed(), lexicon,
-				t.definedBy());
+				t.definedBy(), render);
 		db.write(tx -> {
 			tx.update(
 					"""
-							UPDATE event_type SET description = ?, opens = ?, closes = ?, supersedes = ?, ends_entity = ?, lexicon = ?
-							WHERE name = ?""",
+							UPDATE event_type SET description = ?, opens = ?, closes = ?, supersedes = ?, ends_entity = ?, lexicon = ?,
+							                      render = ? WHERE name = ?""",
 					updated.description(), Vocabulary.json(updated.opens()), Vocabulary.json(updated.closes()),
 					Vocabulary.json(updated.supersedes()), updated.endsEntity() ? 1 : 0,
-					Vocabulary.json(updated.lexicon()), updated.name());
+					Vocabulary.json(updated.lexicon()), updated.render(), updated.name());
 			Vocabulary.logChanges(tx, "event_type", updated.name(), changes, reason);
 			return null;
 		});
@@ -185,6 +220,18 @@ public final class EventTypeRegistry {
 
 	public List<Map<String, Object>> changes(String name) {
 		return db.read(tx -> Vocabulary.changes(tx, "event_type", name));
+	}
+
+	/** A template must name the subject, or an event would read the same whoever took part. */
+	private static String template(String render) {
+		if (render == null || render.isBlank()) {
+			return null;
+		}
+		if (!render.contains("{subject}")) {
+			throw MnemicException.invalidArgument(
+					"An event type's render must contain {subject}, e.g. \"{subject} " + "inherited {object}\".");
+		}
+		return render.trim();
 	}
 
 	private static List<String> predicates(Object value, Predicate<String> registered) {
@@ -258,42 +305,44 @@ public final class EventTypeRegistry {
 		List<String> employment = List.of("works_at", "holds_role", "member_of");
 		return List.of(
 				type("joined", "Subject started at object organization.", List.of("works_at", "member_of"), List.of(),
-						List.of("works_at"), List.of("joined", "join", "started")),
+						List.of("works_at"), List.of("joined", "join", "started"), "{subject} joined {object}"),
 				type("hired", "Subject was hired by object organization.", List.of("works_at", "holds_role"), List.of(),
-						List.of("works_at"), List.of("hired")),
+						List.of("works_at"), List.of("hired"), "{subject} was hired by {object}"),
 				type("founded", "Subject founded object organization.", List.of("works_at", "owns"), List.of(),
-						List.of("works_at"), List.of("founded", "found")),
+						List.of("works_at"), List.of("founded", "found"), "{subject} founded {object}"),
 				type("left", "Subject left object organization.", List.of(), employment, List.of(),
-						List.of("left", "quit", "resigned")),
+						List.of("left", "quit", "resigned"), "{subject} left {object}"),
 				type("retired", "Subject retired from object organization.", List.of(), employment, List.of(),
-						List.of("retired", "retire")),
+						List.of("retired", "retire"), "{subject} retired from {object}"),
 				type("promoted", "Subject took a new role at object organization.", List.of("holds_role"), List.of(),
-						List.of("holds_role"), List.of("promoted", "promotion")),
+						List.of("holds_role"), List.of("promoted", "promotion"), "{subject} was promoted at {object}"),
 				type("moved", "Subject moved to object place.", List.of("lives_in"), List.of(), List.of("lives_in"),
-						List.of("moved", "move", "relocated")),
+						List.of("moved", "move", "relocated"), "{subject} moved to {object}"),
 				type("married", "Subject married object.", List.of("spouse_of"), List.of(), List.of("spouse_of"),
-						List.of("married", "marry", "wedding")),
+						List.of("married", "marry", "wedding"), "{subject} married {object}"),
 				type("divorced", "Subject and object divorced.", List.of(), List.of("spouse_of"), List.of(),
-						List.of("divorced", "divorce")),
+						List.of("divorced", "divorce"), "{subject} and {object} divorced"),
 				type("born", "Subject was born in object place.", List.of("born_in"), List.of(), List.of(),
-						List.of("born", "birth", "birthday")),
+						List.of("born", "birth", "birthday"), "{subject} was born[[ in {object}]]"),
 				type("decided", "Subject made a decision.", List.of("decided"), List.of(), List.of(),
-						List.of("decided", "decide", "decision")),
-				type("met", "Subject met object.", List.of("knows"), List.of(), List.of(), List.of("met", "meet")),
+						List.of("decided", "decide", "decision"), "{subject} decided"),
+				type("met", "Subject met object.", List.of("knows"), List.of(), List.of(), List.of("met", "meet"),
+						"{subject} met {object}"),
 				type("purchased", "Subject bought object.", List.of("owns"), List.of(), List.of(),
-						List.of("purchased", "purchase", "bought", "buy", "acquired", "acquire")),
+						List.of("purchased", "purchase", "bought", "buy", "acquired", "acquire"),
+						"{subject} bought {object}"),
 				type("sold", "Subject sold object.", List.of(), List.of("owns"), List.of(),
-						List.of("sold", "sell", "selling")),
+						List.of("sold", "sell", "selling"), "{subject} sold {object}"),
 				new EventType("died", "Subject died; open facts about the subject end.", List.of(), List.of(),
-						List.of(), true, true, List.of("died", "death", "passed"), null),
+						List.of(), true, true, List.of("died", "death", "passed"), null, "{subject} died"),
 				new EventType("dissolved", "Subject organization ceased to exist.", List.of(), List.of(), List.of(),
-						true, true, List.of("dissolved"), null));
+						true, true, List.of("dissolved"), null, "{subject} was dissolved"));
 	}
 
 	private static EventType type(
 		String name, String description, List<String> opens, List<String> closes, List<String> supersedes,
-		List<String> lexicon) {
-		return new EventType(name, description, opens, closes, supersedes, false, true, lexicon, null);
+		List<String> lexicon, String render) {
+		return new EventType(name, description, opens, closes, supersedes, false, true, lexicon, null, render);
 	}
 
 	// ── persistence ──────────────────────────────────────────────────────
@@ -304,17 +353,17 @@ public final class EventTypeRegistry {
 					new EventType(r.str("name"), r.str("description"), Vocabulary.list(r.str("opens")),
 							Vocabulary.list(r.str("closes")), Vocabulary.list(r.str("supersedes")),
 							r.lng("ends_entity") == 1, r.lng("seed") == 1, Vocabulary.list(r.str("lexicon")),
-							r.lngOrNull("defined_by")));
+							r.lngOrNull("defined_by"), r.str("render")));
 		}
 	}
 
 	private void insert(EventType t) {
 		db.write(tx -> tx.insert("""
 				INSERT INTO event_type(name, description, opens, closes, supersedes, ends_entity, lexicon, defined_by,
-				                       seed, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)""", t.name(), t.description(),
-				Vocabulary.json(t.opens()), Vocabulary.json(t.closes()), Vocabulary.json(t.supersedes()),
-				t.endsEntity() ? 1 : 0, Vocabulary.json(t.lexicon()), t.definedBy(), t.seed() ? 1 : 0,
-				Instant.now().toString()));
+				                       seed, render, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)""", t.name(),
+				t.description(), Vocabulary.json(t.opens()), Vocabulary.json(t.closes()),
+				Vocabulary.json(t.supersedes()), t.endsEntity() ? 1 : 0, Vocabulary.json(t.lexicon()), t.definedBy(),
+				t.seed() ? 1 : 0, t.render(), Instant.now().toString()));
 		byName.put(t.name(), t);
 	}
 }

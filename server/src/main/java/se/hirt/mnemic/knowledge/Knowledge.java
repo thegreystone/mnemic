@@ -51,7 +51,7 @@ public record Knowledge(EntityService entities, EntityTypeRegistry entityTypes, 
 		var questions = new QuestionService(db);
 		var renderer = new FactRenderer(db, predicates);
 		var ledger = new FactLedger(renderer);
-		var events = new EventService(db, eventTypes, ledger);
+		var events = new EventService(db, eventTypes, ledger, lang);
 		var facts = new FactQueries(db, predicates, clock);
 		var asks = new FactQuestions(questions, entities, facts);
 		var factService = new FactService(db, entities, predicates, eventTypes, events, questions, facts, asks,

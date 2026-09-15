@@ -166,12 +166,51 @@ public final class PredicateRegistry {
 		cache = null;
 	}
 
-	/** Records a caller-supplied template for a language ({@code renders} on a predicate definition). */
-	public synchronized void putRender(String predicate, String language, String render, String negatedTemplate) {
+	/**
+	 * Records a caller-supplied template for a language: {@code spec} is the template, or an object with
+	 * {@code render}, {@code negated}, {@code lexicon}, and {@code inverse_lexicon}. Applied when the store is in that
+	 * language.
+	 */
+	public synchronized void putRender(String predicate, String language, Object spec) {
+		String render = spec instanceof Map<?, ?> m ? text(m.get("render")) : text(spec);
+		if (render == null || render.isBlank()) {
+			throw MnemicException.invalidArgument(
+					"renders." + language + " needs a 'render' template, e.g. " + "\"{subject} betreut {object}\".");
+		}
+		String negated = spec instanceof Map<?, ?> m ? text(m.get("negated")) : null;
+		List<String> lexicon = spec instanceof Map<?, ?> m && m.get("lexicon") != null ? strings(m.get("lexicon"))
+				: List.of();
+		List<String> inverse = spec instanceof Map<?, ?> m && m.get("inverse_lexicon") != null
+				? strings(m.get("inverse_lexicon")) : List.of();
 		db.write(tx -> tx.update("""
 				INSERT OR REPLACE INTO predicate_render(name, language, render, negated, lexicon, inverse_lexicon)
-				VALUES (?,?,?,?,'[]','[]')""", predicate, language, render, negatedTemplate));
+				VALUES (?,?,?,?,?,?)""", predicate, language, render, negated, json(lexicon), json(inverse)));
 		cache = null;
+	}
+
+	private void putRenders(String predicate, Map<String, Object> renders) {
+		for (Map.Entry<String, Object> r : renders.entrySet()) {
+			putRender(predicate, language(r.getKey()), r.getValue());
+		}
+	}
+
+	/** The template on record for a language, or null. */
+	private String renderIn(String predicate, String language) {
+		return db.read(tx -> tx
+				.queryOne("SELECT render FROM predicate_render WHERE name = ? AND language = ?", predicate, language)
+				.map(r -> r.str("render")).orElse(null));
+	}
+
+	private static String language(String code) {
+		try {
+			return Lang.of(code).code();
+		} catch (IllegalArgumentException e) {
+			throw MnemicException.invalidArgument(e.getMessage());
+		}
+	}
+
+	private static String text(Object o) {
+		return o == null ? null : String.valueOf(o);
 	}
 
 	// ── read ─────────────────────────────────────────────────────────────
@@ -307,7 +346,8 @@ public final class PredicateRegistry {
 				def.volatility() == null ? "medium" : def.volatility(), def.lexicon(), render, def.qualifiers(),
 				def.aliases(), List.of(), observationId, false);
 		insert(p);
-		return p;
+		putRenders(name, def.renders());
+		return get(name).orElseThrow();
 	}
 
 	/**
@@ -355,8 +395,21 @@ public final class PredicateRegistry {
 				old = description;
 				description = String.valueOf(e.getValue());
 			}
+			case "renders" -> {
+				if (!(e.getValue() instanceof Map<?, ?> byLanguage)) {
+					throw MnemicException.invalidArgument("'renders' takes an object keyed by language, e.g. "
+							+ "{\"de\": {\"render\": \"{subject} betreut {object}\"}}.");
+				}
+				for (Map.Entry<?, ?> r : byLanguage.entrySet()) {
+					String language = language(String.valueOf(r.getKey()));
+					String before = renderIn(p.name(), language);
+					putRender(p.name(), language, r.getValue());
+					changes.add(new String[] {"renders." + language, before, renderIn(p.name(), language)});
+				}
+				continue;
+			}
 			default -> throw MnemicException.invalidArgument("Unknown predicate property '" + e.getKey()
-					+ "'; correctable: render, lexicon, inverse_lexicon, qualifiers, functional, volatility, description.");
+					+ "'; correctable: render, renders, lexicon, inverse_lexicon, qualifiers, functional, volatility, description.");
 			}
 			changes.add(new String[] {e.getKey(), old,
 					e.getValue() instanceof List<?> ? json(strings(e.getValue())) : String.valueOf(e.getValue())});

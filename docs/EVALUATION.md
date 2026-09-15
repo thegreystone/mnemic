@@ -1654,6 +1654,22 @@ arbeitet bei Initrode (2010 – 2018)" after the reopen with no change to the
 row, then the English rendering again; `store_meta` records the language
 the facts were last rendered in.
 
+### R4. A defined predicate carries templates for other languages
+
+```text
+# MNEMIC_LANGUAGE=de
+remember(text: "Ich betreue Anna.", proposal: { predicates: [ { name: "mentors", render: "{subject} mentors {object}",
+  renders: { de: { render: "{subject} betreut {object}", negated: "{subject} betreut {object} nicht", lexicon: ["betreut"] } } } ],
+  facts: [ mentors Anna Lindqvist ] })
+correct(predicate: "mentors", replacement: { renders: { de: "{subject} ist Mentor von {object}" } })
+```
+
+Expect: "Mattias Sandell betreut Anna Lindqvist", a negated fact from the
+German negation template, the German cue word reaching the predicate in a
+question, the correction re-rendering the facts and logged as `renders.de`,
+and a template for a language the store does not know refused with a
+warning.
+
 ### R3. An unknown language is refused
 
 Expect: `fr` is refused at start (not a known language); unset means `en`.
@@ -1784,6 +1800,15 @@ suggested.
 Expect: `suggested_registrations` names each unregistered event type and
 entity type the store holds with its number of uses, and drops an entry once
 the term is defined.
+
+### S17. An event type template renders its events
+
+Expect: with `render: "{subject} inherited {object}"`, the event reads
+"Mattias Sandell inherited the cabin (since 2019)" on the events line;
+correcting the template re-renders the type's events (`rerendered_events`)
+and survives a restart; a template without `{subject}` is refused; seed
+types have templates ("Mattias Sandell joined Hooli"). A type without a
+template renders as `type(participants)`.
 
 ### S5. A vocabulary correction is logged
 

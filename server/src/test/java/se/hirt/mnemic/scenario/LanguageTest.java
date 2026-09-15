@@ -38,10 +38,13 @@ import se.hirt.mnemic.Scenario;
 import se.hirt.mnemic.TestHomes;
 import se.hirt.mnemic.knowledge.Fact;
 import se.hirt.mnemic.knowledge.Lang;
+import se.hirt.mnemic.proposal.Proposal.FactRef;
+import se.hirt.mnemic.proposal.Proposal.PredicateDef;
 import se.hirt.mnemic.recall.RecallResult;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -127,6 +130,44 @@ class LanguageTest {
 		try (Engine e = TestHomes.engine("r3-default")) {
 			assertEquals("en", e.lang().code());
 			assertFalse(e.facts().get(1).isPresent());
+		}
+	}
+
+	@Test
+	@Scenario("R4")
+	void aDefinedPredicateCarriesTemplatesForOtherLanguages() {
+		try (Engine e = TestHomes.engine(TestHomes.fresh("r4-renders"), Lang.DE)) {
+			var mentors = new PredicateDef("mentors", "Subject guides the career of object.", "person", "person", false,
+					null, false, null, "medium", List.of("mentor", "mentors"), "{subject} mentors {object}", List.of(),
+					List.of(), Map.of("de", Map.of("render", "{subject} betreut {object}", "negated",
+							"{subject} betreut {object} nicht", "lexicon", List.of("betreut", "betreuen"))));
+			RememberOutcome o = remember(e, "Ich betreue Anna.", proposal().entity("e1", "Anna Lindqvist", "person")
+					.predicate(mentors).fact("self", "mentors", "e1"));
+			assertEquals(List.of(), o.applied().warnings());
+			assertEquals("Mattias Sandell betreut Anna Lindqvist", stored(e, o, 0).rendering());
+			RememberOutcome not = remember(e, "Oskar betreue ich nicht.",
+					proposal().entity("e1", "Oskar Nyberg", "person").fact(new FactRef("self", "mentors", "e1", null,
+							null, null, null, List.of(), null, null, Boolean.TRUE, null)));
+			assertEquals("Mattias Sandell betreut Oskar Nyberg nicht", stored(e, not, 0).rendering(),
+					"the language's own negation template");
+			RecallResult r = recall(e, "wer betreut Anna");
+			assertEquals("mentors", r.structured().predicate(),
+					"the German cue words reach the predicate: " + r.text());
+			assertEquals("matched", r.structured().state(), r.text());
+			Map<String, Object> corrected = e.correctPredicate("mentors",
+					Map.of("renders", Map.of("de", "{subject} ist Mentor von {object}")), "wording");
+			assertEquals(2, corrected.get("rerendered_facts"));
+			assertEquals("Mattias Sandell ist Mentor von Anna Lindqvist", stored(e, o, 0).rendering());
+			List<?> changes = (List<?>) corrected.get("changes");
+			assertEquals("renders.de", ((Map<?, ?>) changes.getFirst()).get("field"));
+			var french = new PredicateDef("coaches", "Subject coaches object.", "person", "person", false, null, false,
+					null, "medium", List.of(), "{subject} coaches {object}", List.of(), List.of(),
+					Map.of("fr", "{subject} entraîne {object}"));
+			RememberOutcome refused = remember(e, "Ich trainiere Anna.", proposal()
+					.entity("e1", "Anna Lindqvist", "person").predicate(french).fact("self", "coaches", "e1"));
+			assertEquals(0, refused.applied().facts().size());
+			assertTrue(refused.applied().warnings().getFirst().contains("Unsupported language"),
+					refused.applied().warnings().toString());
 		}
 	}
 }

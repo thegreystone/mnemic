@@ -51,12 +51,15 @@ final class ToolDescriptions {
 			+ "considering, related_to, knows, part_of, located_in) or are defined in 'predicates'. Vocabulary the "
 			+ "registry lacks is defined in the same proposal and kept for good: \"event_types\": [{\"name\": "
 			+ "\"inherited\", \"description\": ..., \"opens\": [\"owns\"], \"closes\": [], \"supersedes\": [], "
-			+ "\"ends_entity\": false, \"lexicon\": [\"inherited\", \"inherit\"]}] for an event type (what it opens, "
+			+ "\"ends_entity\": false, \"lexicon\": [\"inherited\", \"inherit\"], \"render\": \"{subject} inherited "
+			+ "{object}\"}] for an event type (what it opens, "
 			+ "closes, or supersedes must be registered predicates), and \"entity_types\": [{\"name\": \"canton\", "
 			+ "\"parent\": \"place\", \"synonyms\": [\"kanton\"], \"type_words\": [\"kanton\", \"canton\"]}] "
 			+ "for a kind of entity (parent nests it, so everything that accepts a place accepts a canton; type_words "
 			+ "say what kind of thing a name is rather than which one). Entity types are written in the 'type' of an "
-			+ "entity, e.g. {\"name\": \"Kanton Schwyz\", \"type\": \"canton\"}. A leaning, plan, or "
+			+ "entity, e.g. {\"name\": \"Kanton Schwyz\", \"type\": \"canton\"}. A predicate definition may carry "
+			+ "\"renders\": {\"de\": {\"render\": ..., \"negated\": ..., \"lexicon\": [...]}}, its template and cue words "
+			+ "in another language the store may be in. A leaning, plan, or "
 			+ "intention ('leaning toward the H2D') is 'considering', never 'decided'. The store has a language (status: "
 			+ "'language'): write literal objects, qualifiers, event types, and predicate definitions in it, whatever "
 			+ "language the conversation was in; names and the observation text stay as they are. What is NOT so has its "
@@ -121,15 +124,16 @@ final class ToolDescriptions {
 			+ "can be corrected too (pass valid_time to fix an end date an event set wrongly); a corrected or rejected one "
 			+ "cannot. To correct a predicate's definition instead (its render template, lexicon, qualifiers, functional "
 			+ "flag, description) pass 'predicate' with the name and 'replacement' with the changed keys; every fact under "
-			+ "it is re-rendered. To correct an event type (description, opens, closes, supersedes, ends_entity, lexicon) "
+			+ "it is re-rendered; 'renders' corrects the templates of other languages. To correct an event type "
+			+ "(description, opens, closes, supersedes, ends_entity, lexicon, render; its events are re-rendered) "
 			+ "or an entity type (description, parent, synonyms, type_words) pass 'event_type' or 'entity_type' with the "
 			+ "name and 'replacement' with the changed keys.";
 
 	static final String CORRECT_REPLACEMENT = "Fact: {object | subject | qualifier | scope | valid_time | ended | "
 			+ "caller_confidence}, or {\"wrong\": true} when the fact was never true: it is retracted with the reason, no "
 			+ "replacement, and leaves recall. Predicate: {render | lexicon | qualifiers | functional | volatility | "
-			+ "description}. Event type: {description | opens | closes | supersedes | ends_entity | lexicon}. Entity "
-			+ "type: {description | parent | synonyms | type_words}";
+			+ "description | renders}. Event type: {description | opens | closes | supersedes | ends_entity | lexicon | "
+			+ "render}. Entity " + "type: {description | parent | synonyms | type_words}";
 
 	static final String PROPOSE = "Give an observation already stored without a structured reading its facts: one that came "
 			+ "from a connector (an email, a document; connectors never carry a proposal) or one remembered without a "

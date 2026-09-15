@@ -437,6 +437,9 @@ public class MnemicTools {
 				if (t.endsEntity()) {
 					m.put("ends_entity", true);
 				}
+				if (t.render() != null) {
+					m.put("render", t.render());
+				}
 				m.put("origin", t.seed() ? "seed" : "defined");
 				if (t.definedBy() != null) {
 					m.put("defined_by", "obs-" + t.definedBy());

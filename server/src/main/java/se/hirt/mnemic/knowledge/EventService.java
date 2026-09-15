@@ -55,8 +55,10 @@ public final class EventService {
 	private final Database db;
 	private final EventTypeRegistry types;
 	private final FactLedger ledger;
+	private final Lang lang;
 
-	EventService(Database db, EventTypeRegistry types, FactLedger ledger) {
+	EventService(Database db, EventTypeRegistry types, FactLedger ledger, Lang lang) {
+		this.lang = lang;
 		this.db = db;
 		this.types = types;
 		this.ledger = ledger;
@@ -112,12 +114,39 @@ public final class EventService {
 	static List<Event> events(Tx tx, List<Row> rows) {
 		var out = new ArrayList<Event>();
 		for (Row r : rows) {
-			List<Long> parts = tx
-					.query("SELECT entity_id FROM event_participant WHERE event_id = ? ORDER BY entity_id", r.lng("id"))
-					.stream().map(x -> x.lng("entity_id")).toList();
+			List<Long> parts = tx.query(
+					"SELECT entity_id FROM event_participant WHERE event_id = ? ORDER BY position IS NULL, position, entity_id",
+					r.lng("id")).stream().map(x -> x.lng("entity_id")).toList();
 			out.add(Event.from(r, parts));
 		}
 		return out;
+	}
+
+	/** The sentence for an event of a type over these participants, with the store's temporal suffix. */
+	public String render(String type, List<String> participants, Bounds b) {
+		return types.render(type, participants) + b.suffix(false, lang);
+	}
+
+	/** Recomputes the renderings of every event of a type, after its template changed; the count. */
+	public int rerender(String type) {
+		return db.write(tx -> rerender(tx, tx.query("SELECT * FROM event WHERE type = ?", type)));
+	}
+
+	/** Every event, after a migration or a language change. */
+	public int rerenderAll() {
+		return db.write(tx -> rerender(tx, tx.query("SELECT * FROM event")));
+	}
+
+	private int rerender(Tx tx, List<Row> rows) {
+		int n = 0;
+		for (Event ev : events(tx, rows)) {
+			List<String> names = ev.participants().stream().map(id -> FactRenderer.nameIn(tx, id)).toList();
+			Bounds b = new Bounds(ev.validStart(), ev.validStartPrecision(), null, ev.validEnd(),
+					ev.validEndPrecision(), null);
+			tx.update("UPDATE event SET rendering = ? WHERE id = ?", render(ev.type(), names, b), ev.id());
+			n++;
+		}
+		return n;
 	}
 
 	/** An event on record that closes the predicate and has both the subject and the object as participants. */
@@ -162,8 +191,9 @@ public final class EventService {
 					                  valid_end_precision, rendering, created_at) VALUES (?,?,?,?,?,?,?,?)""", type,
 					obs.id(), b.start(), b.startPrecision(), b.end(), b.endPrecision(), rendering,
 					Instant.now().toString());
-			for (Entity e : participants) {
-				tx.update("INSERT OR IGNORE INTO event_participant(event_id, entity_id) VALUES (?,?)", eid, e.id());
+			for (int i = 0; i < participants.size(); i++) {
+				tx.update("INSERT OR IGNORE INTO event_participant(event_id, entity_id, position) VALUES (?,?,?)", eid,
+						participants.get(i).id(), i);
 			}
 			return eid;
 		});

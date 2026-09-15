@@ -188,6 +188,7 @@ public final class Engine implements AutoCloseable {
 			// A migration may change how facts read, and so does the language: every rendering follows from what is
 			// stored, since the words were never the record.
 			knowledge.renderer().rerenderAll();
+			knowledge.events().rerenderAll();
 			db.setMeta("language", options.lang().code());
 		}
 		if (!VECTOR_SCHEME.equals(db.meta("vector_scheme"))) {
@@ -386,12 +387,12 @@ public final class Engine implements AutoCloseable {
 				.orElseThrow(() -> MnemicException.notFound("No event type " + name));
 		var after = knowledge.eventTypes().update(name, replacement, reason,
 				p -> knowledge.predicates().get(p).isPresent());
+		int rerendered = knowledge.events().rerender(after.name());
 		var out = new LinkedHashMap<String, Object>();
 		out.put("event_type", after.name());
-		out.put("before", Map.of("opens", before.opens(), "closes", before.closes(), "supersedes", before.supersedes(),
-				"ends_entity", before.endsEntity(), "lexicon", before.lexicon()));
-		out.put("after", Map.of("opens", after.opens(), "closes", after.closes(), "supersedes", after.supersedes(),
-				"ends_entity", after.endsEntity(), "lexicon", after.lexicon()));
+		out.put("before", eventTypeMap(before));
+		out.put("after", eventTypeMap(after));
+		out.put("rerendered_events", rerendered);
 		out.put("changes", knowledge.eventTypes().changes(after.name()));
 		return out;
 	}
@@ -408,6 +409,17 @@ public final class Engine implements AutoCloseable {
 		out.put("after", typeMap(after));
 		out.put("changes", knowledge.entityTypes().changes(after.name()));
 		return out;
+	}
+
+	private static Map<String, Object> eventTypeMap(EventTypeRegistry.EventType t) {
+		var m = new LinkedHashMap<String, Object>();
+		m.put("opens", t.opens());
+		m.put("closes", t.closes());
+		m.put("supersedes", t.supersedes());
+		m.put("ends_entity", t.endsEntity());
+		m.put("lexicon", t.lexicon());
+		m.put("render", t.render());
+		return m;
 	}
 
 	private static Map<String, Object> typeMap(EntityTypeRegistry.EntityType t) {
