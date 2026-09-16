@@ -151,6 +151,13 @@ public final class TestHomes {
 		private final List<PredicateDef> predicates = new ArrayList<>();
 		private final List<EventTypeDef> eventTypes = new ArrayList<>();
 		private final List<EntityTypeDef> entityTypes = new ArrayList<>();
+		private final List<Proposal.ClosureRef> closures = new ArrayList<>();
+
+		/** {@code closures: [{subject, predicate, type}]}: a completeness marker. */
+		public P closure(String subject, String predicate, String type) {
+			closures.add(new Proposal.ClosureRef(subject, predicate, type));
+			return this;
+		}
 
 		public P entity(String ref, String name, String type) {
 			entities.add(new EntityRef(ref, name, type, List.of()));
@@ -200,7 +207,7 @@ public final class TestHomes {
 
 		public Proposal build() {
 			return new Proposal(Proposal.CURRENT_SPEC_VERSION, List.copyOf(entities), List.copyOf(events),
-					List.copyOf(facts), List.copyOf(predicates), List.of(), List.copyOf(eventTypes),
+					List.copyOf(facts), List.copyOf(predicates), List.copyOf(closures), List.copyOf(eventTypes),
 					List.copyOf(entityTypes));
 		}
 	}

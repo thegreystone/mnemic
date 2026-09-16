@@ -39,29 +39,33 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/**
- * The one container test: the tool envelope, the error shape, and a remember/recall round trip through the tool methods
- * themselves. Everything behavioural lives in the scenario tests.
- */
+/** The tool surface inside the container: seven tools, one id scheme, structured errors. */
 @QuarkusTest
 class MnemicToolsTest {
+
+	private static final Optional<String> NONE = Optional.empty();
 
 	@Inject
 	MnemicTools tools;
 
+	private ToolResponse remember(String text, Map<String, Object> proposal, String key) {
+		return tools.remember(Optional.of(text), NONE, NONE, NONE, Optional.empty(), NONE, NONE, proposal,
+				Optional.empty(), Optional.of(key), null);
+	}
+
 	@Test
 	void rememberThenRecallThroughTheTools() {
-		ToolResponse remembered = tools.remember("We decided to use SQLite for Mnemic.", Optional.empty(),
-				Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), null, Optional.empty(),
-				Optional.of("tools-test-1"), null);
+		ToolResponse remembered = remember("We decided to use SQLite for Mnemic.", null, "tools-test-1");
 		assertFalse(remembered.isError(), text(remembered));
 		Map<String, Object> result = result(remembered);
 		assertTrue(result.get("observation_id").toString().startsWith("obs-"), result.toString());
 
-		ToolResponse recalled = tools.recall(Optional.of("SQLite"), Optional.empty(), Optional.of(400),
-				Optional.empty(), Optional.empty());
+		ToolResponse recalled = tools.recall(Optional.of("SQLite"), NONE, Optional.of(400), Optional.empty(),
+				Optional.empty());
 		assertFalse(recalled.isError(), text(recalled));
 		String block = text(recalled);
 		assertTrue(block.startsWith("recall: \"SQLite\""), block);
@@ -71,8 +75,7 @@ class MnemicToolsTest {
 
 	@Test
 	void structuredErrors() {
-		ToolResponse blank = tools.remember("   ", Optional.empty(), Optional.empty(), Optional.empty(),
-				Optional.empty(), Optional.empty(), null, Optional.empty(), Optional.empty(), null);
+		ToolResponse blank = remember("   ", null, "tools-blank");
 		assertTrue(blank.isError());
 		assertEquals("INVALID_ARGUMENT", error(blank).get("code"));
 		assertTrue(error(blank).get("message").toString().contains("Example"), "fix-it text");
@@ -82,10 +85,18 @@ class MnemicToolsTest {
 		assertTrue(badDate.isError());
 		assertEquals("INVALID_ARGUMENT", error(badDate).get("code"));
 
-		ToolResponse badKind = tools.remember("hello", Optional.of("telepathy"), Optional.empty(), Optional.empty(),
-				Optional.empty(), Optional.empty(), null, Optional.empty(), Optional.empty(), null);
+		ToolResponse badKind = tools.remember(Optional.of("hello"), NONE, Optional.of("telepathy"), NONE,
+				Optional.empty(), NONE, NONE, null, Optional.empty(), NONE, null);
 		assertTrue(badKind.isError());
 		assertEquals("INVALID_ARGUMENT", error(badKind).get("code"));
+
+		ToolResponse nothing = tools.correct("banana", Map.of("object", "x"), NONE);
+		assertTrue(nothing.isError());
+		assertTrue(error(nothing).get("message").toString().contains("pred:"), text(nothing));
+
+		ToolResponse noRef = tools.inspect("", Optional.empty(), NONE);
+		assertTrue(noRef.isError());
+		assertEquals("INVALID_ARGUMENT", error(noRef).get("code"));
 	}
 
 	@Test
@@ -93,7 +104,7 @@ class MnemicToolsTest {
 		ToolResponse status = tools.status();
 		assertFalse(status.isError(), text(status));
 		Map<String, Object> result = result(status);
-		assertEquals(20, ((Number) result.get("schema_version")).intValue());
+		assertEquals(22, ((Number) result.get("schema_version")).intValue());
 		assertTrue(result.containsKey("pending_proposals"));
 		assertTrue(result.get("model_providers").toString().contains("openai-compatible"), result.toString());
 		// Every recall channel reports whether it answers; the test profile keeps the semantic one off and says so.
@@ -109,136 +120,237 @@ class MnemicToolsTest {
 		assertTrue(result.get("vec").toString().startsWith("scan"), result.get("vec").toString());
 		String ort = result.get("ort").toString();
 		assertTrue(ort.contains("not loaded") || ort.toLowerCase().contains("onnxruntime"), ort);
-		assertTrue(result.get("pending_proposal_ids") instanceof java.util.List, result.toString());
+		assertTrue(result.get("pending_proposal_ids") instanceof List, result.toString());
 	}
 
 	@Test
 	@Scenario("I5")
-	void aConnectorObservationGetsItsFactsThroughPropose() {
-		// A connector never carries a proposal; the assistant reads the observation and proposes for it.
+	void aConnectorObservationGetsItsFactsThroughRememberWithAnObservationId() {
+		// A connector never carries a proposal; the assistant reads the observation and attaches a reading.
 		ToolResponse stored = tools.remember(
-				"From: Dario. Payment received on 11 September; handover moved to 24 September.",
-				Optional.of("connector"), Optional.of("home/INBOX/943905"), Optional.empty(), Optional.empty(),
-				Optional.empty(), null, Optional.empty(), Optional.of("tools-propose-1"), null);
+				Optional.of("From: Dario. Payment received on 11 September; handover moved to 24 September."), NONE,
+				Optional.of("connector"), Optional.of("home/INBOX/943905"), Optional.empty(), NONE, NONE, null,
+				Optional.empty(), Optional.of("tools-propose-1"), null);
 		assertFalse(stored.isError(), text(stored));
 		String obs = (String) result(stored).get("observation_id");
 		long pendingBefore = ((Number) result(stored).get("pending_proposals")).longValue();
 		assertTrue(pendingBefore >= 1, "the connector observation waits for a reading");
+
 		Map<String, Object> proposal = Map.of("entities",
-				java.util.List.of(Map.of("ref", "e1", "name", "Dario", "type", "person")), "events",
-				java.util.List.of(Map.of("ref", "ev1", "type", "paid", "participants", java.util.List.of("self", "e1"),
-						"valid_time", Map.of("start", "2026-09-11"))));
-		ToolResponse proposed = tools.propose(obs, proposal);
-		assertFalse(proposed.isError(), text(proposed));
+				List.of(Map.of("ref", "e1", "name", "Dario", "type", "person")), "events",
+				List.of(Map.of("ref", "ev1", "type", "paid", "participants", List.of("self", "e1"), "valid_time",
+						Map.of("start", "2026-09-11"))));
+		ToolResponse attached = tools.remember(NONE, Optional.of(obs), NONE, NONE, Optional.empty(), NONE, NONE,
+				proposal, Optional.empty(), NONE, null);
+		assertFalse(attached.isError(), text(attached));
 		@SuppressWarnings("unchecked")
-		Map<String, Object> got = (Map<String, Object>) result(proposed).get("stored");
-		assertEquals(1, ((java.util.List<?>) got.get("events")).size(), got.toString());
-		assertEquals(pendingBefore - 1, ((Number) result(proposed).get("pending_proposals")).longValue(),
+		Map<String, Object> got = (Map<String, Object>) result(attached).get("stored");
+		assertEquals(1, ((List<?>) got.get("events")).size(), got.toString());
+		assertEquals(pendingBefore - 1, ((Number) result(attached).get("pending_proposals")).longValue(),
 				"it left the backlog");
-		// A second reading is refused: the facts exist and are corrected, not proposed again.
-		assertTrue(tools.propose(obs, proposal).isError());
+		// A second reading replaces the first: what it produced is taken back and listed, and the text keeps its id.
+		Map<String, Object> again = Map.of("entities", List.of(Map.of("ref", "e1", "name", "Dario", "type", "person")),
+				"facts", List.of(Map.of("subject", "self", "predicate", "knows", "object", "e1")));
+		ToolResponse reread = tools.remember(NONE, Optional.of(obs), NONE, NONE, Optional.empty(), NONE, NONE, again,
+				Optional.empty(), NONE, null);
+		assertFalse(reread.isError(), text(reread));
+		@SuppressWarnings("unchecked")
+		Map<String, Object> replaced = (Map<String, Object>) result(reread).get("replaced");
+		assertEquals(1, ((List<?>) replaced.get("events")).size(), replaced.toString());
+		assertEquals(0, ((List<?>) replaced.get("facts")).size());
+		assertEquals(0, replaced.get("reopened_facts"));
+		assertEquals(1, ((List<?>) ((Map<?, ?>) result(reread).get("stored")).get("facts")).size());
+		assertEquals(obs, result(reread).get("observation_id"));
+		assertFalse(text(tools.inspect(obs, Optional.empty(), NONE)).contains("evt-"), "the old event is gone");
+		// Text and observation_id together are refused, and so is an observation_id without a proposal.
+		assertTrue(tools.remember(Optional.of("x"), Optional.of(obs), NONE, NONE, Optional.empty(), NONE, NONE,
+				proposal, Optional.empty(), NONE, null).isError());
+		assertTrue(tools.remember(NONE, Optional.of(obs), NONE, NONE, Optional.empty(), NONE, NONE, null,
+				Optional.empty(), NONE, null).isError());
 		// The connector rule itself still holds at remember time.
-		ToolResponse refused = tools.remember("Another email.", Optional.of("connector"), Optional.of("home/INBOX/1"),
-				Optional.empty(), Optional.empty(), Optional.empty(), proposal, Optional.empty(),
+		ToolResponse refused = tools.remember(Optional.of("Another email."), NONE, Optional.of("connector"),
+				Optional.of("home/INBOX/1"), Optional.empty(), NONE, NONE, proposal, Optional.empty(),
 				Optional.of("tools-propose-2"), null);
 		assertTrue(refused.isError());
-		assertTrue(text(refused).contains("propose(observation_id, proposal)"), text(refused));
+		assertTrue(text(refused).contains("remember(observation_id, proposal)"), text(refused));
 	}
 
 	@Test
-	void retireKeepsTheFactsAndSaysSoAndCanBeUndone() {
+	void retiringAnObservationThroughCorrectKeepsTheFactsAndCanBeUndone() {
 		Map<String, Object> proposal = Map.of("entities",
-				java.util.List.of(Map.of("ref", "e1", "name", "Slack", "type", "technology")), "facts",
-				java.util.List.of(Map.of("subject", "self", "predicate", "uses", "object", "e1")));
-		ToolResponse stored = tools.remember("Dad is best reached on Slack.", Optional.empty(), Optional.empty(),
-				Optional.empty(), Optional.empty(), Optional.empty(), proposal, Optional.empty(),
-				Optional.of("tools-retire-1"), null);
+				List.of(Map.of("ref", "e1", "name", "Slack", "type", "technology")), "facts",
+				List.of(Map.of("subject", "self", "predicate", "uses", "object", "e1")));
+		ToolResponse stored = remember("Dad is best reached on Slack.", proposal, "tools-retire-1");
 		assertFalse(stored.isError(), text(stored));
 		String obs = (String) result(stored).get("observation_id");
-		ToolResponse r = tools.retire(obs, Optional.of("it was WhatsApp"), Optional.empty(), Optional.empty());
+
+		ToolResponse r = tools.correct(obs, Map.of("retired", true), Optional.of("it was WhatsApp"));
 		assertFalse(r.isError(), text(r));
 		assertEquals(obs, result(r).get("retired"));
-		assertEquals(1, ((java.util.List<?>) result(r).get("facts_citing")).size(), "the fact it produced is named");
+		assertEquals(1, ((List<?>) result(r).get("facts_citing")).size(), "the fact it produced is named");
 		assertTrue(result(r).containsKey("note"));
 		assertEquals(1L, ((Number) result(tools.status()).get("observations_retired")).longValue());
-		// The fact's history marks the observation as retired.
-		String factId = (String) ((java.util.List<Map<String, Object>>) ((Map<?, ?>) result(stored).get("stored"))
-				.get("facts")).getFirst().get("id");
-		ToolResponse h = tools.history("Mattias Sandell", Optional.of("uses"));
+		// The fact's history marks the observation as retired, and the observation says so itself.
+		ToolResponse h = tools.inspect("Mattias Sandell", Optional.of(true), Optional.of("uses"));
 		assertTrue(text(h).contains("observations_retired"), text(h));
+		ToolResponse o = tools.inspect(obs, Optional.empty(), NONE);
+		assertEquals(true, result(o).get("retired"), text(o));
+		assertEquals("it was WhatsApp", result(o).get("retired_reason"));
 		// Undo.
-		ToolResponse u = tools.retire(obs, Optional.empty(), Optional.empty(), Optional.of(true));
+		ToolResponse u = tools.correct(obs, Map.of("retired", false), NONE);
 		assertFalse(u.isError(), text(u));
 		assertEquals(obs, result(u).get("reinstated"));
 		assertEquals(0L, ((Number) result(tools.status()).get("observations_retired")).longValue());
+		// A replacement without 'retired' is refused with the shape spelled out.
+		assertTrue(tools.correct(obs, Map.of("text", "x"), NONE).isError());
 	}
 
 	@Test
-	void retractWithdrawsAFactThatWasNeverTrue() {
+	void withdrawingAFactThroughCorrect() {
 		Map<String, Object> proposal = Map.of("facts",
-				java.util.List.of(Map.of("subject", "self", "predicate", "decided", "object", "replace the printer")));
-		ToolResponse stored = tools.remember("I decided to replace the printer.", Optional.empty(), Optional.empty(),
-				Optional.empty(), Optional.empty(), Optional.empty(), proposal, Optional.empty(),
-				Optional.of("tools-retract-1"), null);
+				List.of(Map.of("subject", "self", "predicate", "decided", "object", "replace the printer")));
+		ToolResponse stored = remember("I decided to replace the printer.", proposal, "tools-retract-1");
 		assertFalse(stored.isError(), text(stored));
-		@SuppressWarnings("unchecked")
-		String factId = (String) ((java.util.List<Map<String, Object>>) ((Map<?, ?>) result(stored).get("stored"))
-				.get("facts")).getFirst().get("id");
-		ToolResponse r = tools.retract(factId, Optional.of("it was a leaning, never a decision"));
+		String factId = firstFactId(stored);
+
+		ToolResponse r = tools.correct(factId, Map.of("wrong", true),
+				Optional.of("it was a leaning, never a decision"));
 		assertFalse(r.isError(), text(r));
-		assertEquals("corrected", ((Map<?, ?>) result(r).get("retracted")).get("status"));
-		// Once withdrawn, it cannot be withdrawn or corrected again.
-		assertTrue(tools.retract(factId, Optional.empty()).isError());
+		assertEquals(true, result(r).get("retracted"));
+		assertEquals("corrected", ((Map<?, ?>) result(r).get("original")).get("standing"));
+		// Once withdrawn, it cannot be withdrawn or corrected again; inspect shows the reason.
+		assertTrue(tools.correct(factId, Map.of("wrong", true), NONE).isError());
+		ToolResponse f = tools.inspect(factId, Optional.empty(), NONE);
+		assertFalse(f.isError(), text(f));
+		assertEquals("corrected", result(f).get("standing"));
+		assertTrue(text(f).contains("it was a leaning, never a decision"), text(f));
 	}
 
 	@Test
-	void historyListsEveryConversationBehindAFact() {
+	void inspectShowsEveryConversationBehindAFact() {
 		Map<String, Object> proposal = Map.of("entities",
-				java.util.List.of(Map.of("ref", "e1", "name", "Hooli", "type", "organization")), "facts",
-				java.util.List.of(Map.of("subject", "self", "predicate", "works_at", "object", "e1")));
-		ToolResponse first = tools.remember("I work at Hooli.", Optional.empty(), Optional.empty(), Optional.empty(),
-				Optional.empty(), Optional.empty(), proposal, Optional.empty(), Optional.of("tools-history-1"), null);
-		assertFalse(first.isError(), text(first));
-		ToolResponse again = tools.remember("As I said, I work at Hooli.", Optional.empty(), Optional.empty(),
-				Optional.empty(), Optional.empty(), Optional.empty(), proposal, Optional.empty(),
-				Optional.of("tools-history-2"), null);
+				List.of(Map.of("ref", "e1", "name", "Hooli", "type", "organization")), "facts",
+				List.of(Map.of("subject", "self", "predicate", "works_at", "object", "e1")));
+		assertFalse(remember("I work at Hooli.", proposal, "tools-history-1").isError());
+		ToolResponse again = remember("As I said, I work at Hooli.", proposal, "tools-history-2");
 		assertFalse(again.isError(), text(again));
-		ToolResponse history = tools.history("Hooli", Optional.of("works_at"));
+
+		ToolResponse history = tools.inspect("Hooli", Optional.of(true), Optional.of("works_at"));
 		assertFalse(history.isError(), text(history));
 		String h = text(history);
 		assertTrue(h.contains("\"observations\":[\"obs-"), h);
-		int comma = h.indexOf("\"observations\":[\"obs-");
-		String list = h.substring(comma, h.indexOf("]", comma));
+		int at = h.indexOf("\"observations\":[\"obs-");
+		String list = h.substring(at, h.indexOf("]", at));
 		assertTrue(list.split("obs-").length - 1 >= 2, "two conversations behind the one fact: " + list);
+		// The same fact by its own id, with its columns.
+		ToolResponse f = tools.inspect(firstFactId(again), Optional.empty(), NONE);
+		assertFalse(f.isError(), text(f));
+		assertEquals("works_at", result(f).get("predicate"));
+		assertEquals("Hooli", ((Map<?, ?>) result(f).get("object")).get("name"));
 	}
 
 	@Test
-	void listPredicatesNamesTheRegistry() {
-		ToolResponse r = tools.list_predicates();
+	void correctTakesAnEntityThroughTheTool() {
+		ToolResponse stored = remember("I live in Kanton Luzern.",
+				Map.of("entities", List.of(Map.of("ref", "e1", "name", "Kanton Luzern", "type", "place")), "facts",
+						List.of(Map.of("subject", "self", "predicate", "lives_in", "object", "e1"))),
+				"tools-entity-1");
+		assertFalse(stored.isError(), text(stored));
+		@SuppressWarnings("unchecked")
+		String ent = (String) ((List<Map<String, Object>>) ((Map<?, ?>) result(stored).get("stored")).get("entities"))
+				.getFirst().get("id");
+		assertTrue(ent.startsWith("ent-"), ent);
+		ToolResponse c = tools.correct(ent, Map.of("aliases", List.of("Kanton Luzern", "LU")),
+				Optional.of("the canton"));
+		assertFalse(c.isError(), text(c));
+		assertEquals(ent, result(c).get("entity"));
+		assertTrue(((Map<?, ?>) result(c).get("after")).get("aliases").toString().contains("LU"), text(c));
+		assertTrue(text(tools.inspect(ent, Optional.empty(), NONE)).contains("LU"));
+		ToolResponse bad = tools.correct(ent, Map.of("remove_aliases", List.of("x")), NONE);
+		assertTrue(bad.isError());
+		assertTrue(error(bad).get("message").toString().contains("aliases"), text(bad));
+	}
+
+	@Test
+	void aFactHasOneStandingByItsDatesOrItsRecord() {
+		ToolResponse stored = remember("I worked at Initrode from 2019 to 2022.",
+				Map.of("entities", List.of(Map.of("ref", "e1", "name", "Initrode", "type", "organization")), "facts",
+						List.of(Map.of("subject", "self", "predicate", "works_at", "object", "e1", "valid_time",
+								Map.of("start", "2019", "end", "2022")))),
+				"tools-standing-1");
+		assertFalse(stored.isError(), text(stored));
+		String id = firstFactId(stored);
+		assertEquals("ended",
+				((Map<?, ?>) ((List<?>) ((Map<?, ?>) result(stored).get("stored")).get("facts")).getFirst())
+						.get("standing"),
+				"a past interval: ended, not current");
+		ToolResponse f = tools.inspect(id, Optional.empty(), NONE);
+		assertEquals("ended", result(f).get("standing"));
+		assertFalse(result(f).containsKey("status") || result(f).containsKey("state"), "one field, not two");
+		// A present-tense question misses, but names the ended fact rather than claiming ignorance.
+		String recalled = text(tools.recall(Optional.of("where does Mattias work"), NONE, Optional.of(400),
+				Optional.empty(), Optional.empty()));
+		assertTrue(recalled.contains(
+				"no current value; 1 ended fact: Mattias Sandell works at Initrode (2019 \u2013 2022) [" + id + "]"),
+				recalled);
+		assertTrue(recalled.contains("include_history"), recalled);
+	}
+
+	@Test
+	void inspectNamesTheRegistryAndItsEntries() {
+		ToolResponse r = tools.inspect("registry", Optional.empty(), NONE);
 		assertFalse(r.isError(), text(r));
 		Map<String, Object> result = result(r);
 		String preds = result.get("predicates").toString();
-		assertTrue(preds.contains("name=works_at"), preds);
-		assertTrue(preds.contains("name=considering"), "the predicate added on 2026-09-10 is visible: " + preds);
+		assertTrue(preds.contains("id=pred:works_at"), preds);
 		assertTrue(preds.contains("origin=seed"), preds);
-		assertTrue(result.get("event_types").toString().contains("name=joined"), result.toString());
+		assertTrue(result.get("event_types").toString().contains("id=event:joined"), result.toString());
 		String types = result.get("entity_types").toString();
 		assertTrue(types.contains("name=country") && types.contains("parent=place"), types);
+
+		ToolResponse one = tools.inspect("pred:works_at", Optional.empty(), NONE);
+		assertFalse(one.isError(), text(one));
+		assertEquals("works_at", result(one).get("name"));
+		assertTrue(result(one).containsKey("changes"));
+		assertFalse(tools.inspect("event:joined", Optional.empty(), NONE).isError());
+		assertFalse(tools.inspect("type:place", Optional.empty(), NONE).isError());
+		assertTrue(tools.inspect("type:spaceship", Optional.empty(), NONE).isError());
+		// A vocabulary correction goes through the same id scheme.
+		ToolResponse c = tools.correct("event:joined",
+				Map.of("lexicon", List.of("joined", "join", "started", "onboarded")), Optional.of("onboarding counts"));
+		assertFalse(c.isError(), text(c));
+		assertTrue(text(tools.inspect("event:joined", Optional.empty(), NONE)).contains("onboarded"));
 	}
 
 	@Test
-	void anUndefinedTermIsSuggestedInTheReply() {
-		Map<String, Object> proposal = Map.of("entities", List.of(Map.of("name", "the cabin", "type", "place")),
-				"events", List.of(Map.of("type", "inherited", "participants", List.of("self", "the cabin"))));
-		ToolResponse r = tools.remember("I inherited the cabin.", Optional.empty(), Optional.empty(), Optional.empty(),
-				Optional.empty(), Optional.empty(), proposal, Optional.empty(), Optional.of("tools-suggest-1"), null);
-		assertFalse(r.isError(), text(r));
-		Map<String, Object> result = result(r);
-		assertEquals(List.of(), result.get("questions"), "nothing is held");
-		String suggestions = result.get("suggestions").toString();
-		assertTrue(suggestions.contains("kind=event_type") && suggestions.contains("name=inherited"), suggestions);
-		assertTrue(suggestions.contains("Check with the user"), suggestions);
-		assertTrue(suggestions.contains("define={event_types="), "a skeleton to start from: " + suggestions);
+	void consolidateRebuildsAndReportsEventsToReRead() {
+		ToolResponse stored = remember("The dealer confirmed the payment for the boat on 11 September.",
+				Map.of("entities", List.of(Map.of("ref", "e1", "name", "Nordvik Marin", "type", "organization")),
+						"events",
+						List.of(Map.of("ref", "ev1", "type", "dealer confirmed receipt of the payment for the boat",
+								"participants", List.of("e1", "self"), "valid_time", Map.of("start", "2026-09-11")))),
+				"tools-rebuild-1");
+		assertFalse(stored.isError(), text(stored));
+		String obs = (String) result(stored).get("observation_id");
+		ToolResponse report = tools.consolidate(Optional.of(true), Optional.empty(), Optional.empty());
+		assertFalse(report.isError(), text(report));
+		List<?> descriptive = (List<?>) result(report).get("descriptive_events");
+		assertTrue(descriptive.stream().anyMatch(d -> obs.equals(((Map<?, ?>) d).get("observation"))),
+				descriptive.toString());
+		assertFalse(result(report).containsKey("rebuilt"), "a dry run never rebuilds");
+		ToolResponse rebuilt = tools.consolidate(Optional.of(false), Optional.empty(), Optional.of(true));
+		assertFalse(rebuilt.isError(), text(rebuilt));
+		@SuppressWarnings("unchecked")
+		Map<String, Object> r = (Map<String, Object>) result(rebuilt).get("rebuilt");
+		assertTrue(((Number) r.get("observations")).intValue() >= 1, r.toString());
+		assertEquals(List.of(), r.get("unmatched"));
+		assertTrue(r.containsKey("facts_before") && r.containsKey("facts_after"));
+	}
+
+	@SuppressWarnings("unchecked")
+	private static String firstFactId(ToolResponse stored) {
+		return (String) ((List<Map<String, Object>>) ((Map<?, ?>) result(stored).get("stored")).get("facts")).getFirst()
+				.get("id");
 	}
 
 	private static String text(ToolResponse r) {

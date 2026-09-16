@@ -358,12 +358,13 @@ class FactsTest {
 	}
 
 	@Test
-	void unregisteredPredicateWithoutDefinitionBecomesExtended() {
+	void unregisteredPredicateWithoutDefinitionIsRegisteredFromUse() {
 		try (Engine e = engine("x")) {
 			RememberOutcome o = remember(e, "I consult for Acme.", proposal().fact("consults_for", "Acme"));
 			assertEquals(1, o.applied().facts().size());
-			assertEquals("x:consults_for", o.applied().facts().getFirst().predicate());
+			assertEquals("consults_for", o.applied().facts().getFirst().predicate());
 			assertFalse(o.applied().warnings().isEmpty());
+			assertTrue(e.predicates().get("consults_for").orElseThrow().isInferred());
 			assertTrue(recall(e, "Acme").hits().size() >= 1, "reachable lexically");
 		}
 	}

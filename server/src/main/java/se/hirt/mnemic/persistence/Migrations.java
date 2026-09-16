@@ -54,11 +54,30 @@ final class Migrations {
 			"V008__sibling_qualifiers.sql", "V009__inverse_lexicon.sql", "V010__event_lexicon.sql",
 			"V011__qualifier_convention.sql", "V012__fact_mode.sql", "V013__related_to_qualifier.sql",
 			"V014__rerender_after_template_change.sql", "V015__embedding.sql", "V016__fact_observation_and_chunks.sql",
-			"V017__language.sql", "V018__retired_observation.sql", "V019__vocabularies.sql", "V020__event_render.sql");
+			"V017__language.sql", "V018__retired_observation.sql", "V019__vocabularies.sql", "V020__event_render.sql",
+			"V021__inferred.sql", "V022__from_use.sql");
 
 	private static final Pattern NAME = Pattern.compile("^V(\\d+)__(.+)\\.sql$");
 
 	private Migrations() {
+	}
+
+	/** Applies the first {@code count} migrations only: a store as an older release left it, for upgrade tests. */
+	static void applyUpTo(Connection c, int count) throws SQLException {
+		List<String> all = MIGRATIONS;
+		try {
+			MIGRATIONS_IN_USE.set(all.subList(0, count));
+			apply(c);
+		} finally {
+			MIGRATIONS_IN_USE.remove();
+		}
+	}
+
+	private static final ThreadLocal<List<String>> MIGRATIONS_IN_USE = new ThreadLocal<>();
+
+	private static List<String> migrations() {
+		List<String> subset = MIGRATIONS_IN_USE.get();
+		return subset == null ? MIGRATIONS : subset;
 	}
 
 	static void apply(Connection c) throws SQLException {
@@ -89,7 +108,7 @@ final class Migrations {
 					    applied_at  TEXT NOT NULL
 					)""");
 		}
-		int known = MIGRATIONS.size();
+		int known = migrations().size();
 		try (PreparedStatement ps = c.prepareStatement("SELECT COALESCE(MAX(version), 0) FROM schema_version");
 				ResultSet rs = ps.executeQuery()) {
 			if (rs.next() && rs.getInt(1) > known) {
@@ -97,7 +116,7 @@ final class Migrations {
 						+ " is newer than this binary understands (" + known + "). Upgrade Mnemic.", null);
 			}
 		}
-		for (String file : MIGRATIONS) {
+		for (String file : migrations()) {
 			var m = NAME.matcher(file);
 			if (!m.matches()) {
 				throw new IllegalStateException("Bad migration file name: " + file);

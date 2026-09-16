@@ -31,15 +31,18 @@ package se.hirt.mnemic.scenario;
 import org.junit.jupiter.api.Test;
 import se.hirt.mnemic.Engine;
 import se.hirt.mnemic.Engine.RememberOutcome;
+import se.hirt.mnemic.FixedEmbedding;
 import se.hirt.mnemic.Scenario;
 import se.hirt.mnemic.TestHomes;
 import se.hirt.mnemic.knowledge.Entity;
 import se.hirt.mnemic.knowledge.Fact;
+import se.hirt.mnemic.knowledge.Predicate;
 import se.hirt.mnemic.knowledge.QuestionResolver.Resolve;
 import se.hirt.mnemic.proposal.Proposal.FactRef;
 import se.hirt.mnemic.recall.RecallResult;
 import se.hirt.mnemic.proposal.Proposal.EntityTypeDef;
 import se.hirt.mnemic.proposal.Proposal.EventTypeDef;
+import se.hirt.mnemic.proposal.Proposal.PredicateDef;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -217,7 +220,7 @@ class VocabularyTest {
 			assertEquals("events", r.structured().state(), r.text());
 			assertEquals(1, r.events().size(), r.text());
 			assertEquals("inherited", r.events().getFirst().type());
-			assertTrue(r.text().contains("inherited(Mattias Sandell, the cabin) (since 2019)"), r.text());
+			assertTrue(r.text().contains("inherited (Mattias Sandell, the cabin) (since 2019)"), r.text());
 		}
 	}
 
@@ -306,87 +309,403 @@ class VocabularyTest {
 		}
 	}
 
-	private static List<Map<String, Object>> ofKind(RememberOutcome o, String kind) {
-		return o.applied().suggestions().stream().filter(x -> kind.equals(x.get("kind"))).toList();
+	private static Map<String, Object> question(RememberOutcome o, String kind) {
+		return o.applied().questions().stream().filter(q -> kind.equals(q.get("kind"))).findFirst().orElseThrow();
+	}
+
+	@SuppressWarnings("unchecked")
+	private static List<String> candidateIds(Map<String, Object> q) {
+		return ((List<Map<String, Object>>) q.get("candidates")).stream().map(c -> (String) c.get("id")).toList();
 	}
 
 	@Test
 	@Scenario("S13")
-	void anUnregisteredEventTypeIsASuggestion() {
-		try (Engine e = TestHomes.engine("s13-suggest-event")) {
+	void anUnregisteredEventTypeRegistersFromUseAndAsksWhatItDoes() {
+		try (Engine e = TestHomes.engine("s13-event-from-use")) {
 			RememberOutcome o = remember(e, "I inherited the cabin in 2019.",
 					proposal().entity("e1", "the cabin", "place").event("ev1", "inherited", "2019", "self", "e1"));
 			assertEquals(1, o.applied().events().size(), "the occurrence is stored");
-			assertEquals(0, o.applied().facts().size(), "with no effect on facts");
-			assertEquals(0, o.applied().questions().size(), "and nothing is held");
-			List<Map<String, Object>> s = ofKind(o, "event_type");
-			assertEquals(1, s.size(), o.applied().suggestions().toString());
-			assertEquals("inherited", s.getFirst().get("name"));
-			assertTrue(s.getFirst().get("message").toString().contains("Check with the user"), s.toString());
-			Map<?, ?> define = (Map<?, ?>) s.getFirst().get("define");
-			Map<?, ?> skeleton = (Map<?, ?>) ((List<?>) define.get("event_types")).getFirst();
-			assertEquals("inherited", skeleton.get("name"));
-			assertEquals(List.of("inherited"), skeleton.get("lexicon"));
-			RememberOutcome defined = remember(e, "Inheriting means I own it.", proposal().eventType(INHERITED)
-					.entity("e1", "the boat", "thing").event("ev1", "inherited", "2021", "self", "e1"));
-			assertEquals(List.of(), defined.applied().suggestions(),
-					"defined in the same proposal: nothing to suggest");
-			assertEquals(List.of("Mattias Sandell owns the boat (since 2021)"), renderings(e, defined));
+			assertEquals(0, o.applied().facts().size(), "with no effect on facts until the type has one");
+			Map<String, Object> defined = o.applied().definitions().getFirst();
+			assertEquals("inferred", defined.get("resolution"), defined.toString());
+			@SuppressWarnings("unchecked")
+			Map<String, Object> assumed = (Map<String, Object>) defined.get("inferred");
+			assertEquals("{subject} inherited {object}", assumed.get("render"), "what was assumed is shown");
+			assertEquals("none", assumed.get("effects"));
+			assertTrue(assumed.get("correct").toString().startsWith("correct(\"event:inherited\""));
+			var t = e.eventTypes().get("inherited").orElseThrow();
+			assertTrue(t.inferred());
+			assertEquals(List.of("inherited", "inherit"), t.lexicon(), "the name's words are its cue");
+			assertEquals("{subject} inherited {object}", t.render());
+			long eventId = Long.parseLong(o.applied().events().getFirst().id().substring(4));
+			assertTrue(e.events().get(eventId).orElseThrow().rendering()
+					.startsWith("Mattias Sandell inherited the cabin"));
+			Map<String, Object> q = question(o, "event_effect");
+			assertEquals("inherited", q.get("subject"));
+			List<String> ids = candidateIds(q);
+			assertTrue(ids.contains("opens:owns") && ids.contains("closes:owns") && ids.contains("none"),
+					ids.toString());
+			assertFalse(ids.contains("ends_entity"), "two participants: nothing ceases to exist");
+			assertFalse(ids.contains("opens:works_at"), "a place is no employer: " + ids);
+			// Asked once per type, however many events arrive before the answer.
+			RememberOutcome again = remember(e, "I inherited the boat in 2021.",
+					proposal().entity("e1", "the boat", "thing").event("ev1", "inherited", "2021", "self", "e1"));
+			assertEquals(0, again.applied().questions().size(), again.applied().questions().toString());
+		}
+	}
+
+	@Test
+	@Scenario("S18")
+	void answeringWhatAnEventTypeDoesAppliesToItsStoredEvents() {
+		try (Engine e = TestHomes.engine("s18-event-effect")) {
+			RememberOutcome o = remember(e, "I inherited the cabin in 2019.",
+					proposal().entity("e1", "the cabin", "place").event("ev1", "inherited", "2019", "self", "e1"));
+			remember(e, "I inherited the boat in 2021.",
+					proposal().entity("e1", "the boat", "thing").event("ev1", "inherited", "2021", "self", "e1"));
+			String qid = (String) question(o, "event_effect").get("id");
+			RememberOutcome a = remember(e, "Inheriting made them mine.", null, new Resolve(qid, "opens:owns"));
+			var t = e.eventTypes().get("inherited").orElseThrow();
+			assertEquals(List.of("owns"), t.opens());
+			assertFalse(t.inferred(), "answered: no longer waiting for a meaning");
+			@SuppressWarnings("unchecked")
+			Map<String, Object> applied = (Map<String, Object>) a.resolved().getFirst().get("applied");
+			assertEquals(2, applied.get("events"), "both stored events got the effect");
+			assertEquals(2, ((List<?>) applied.get("facts")).size(), applied.toString());
+			List<String> owned = e.facts().factsOf(e.entities().owner().id()).stream().map(Fact::rendering).sorted()
+					.toList();
+			assertEquals(List.of("Mattias Sandell owns the boat (since 2021)",
+					"Mattias Sandell owns the cabin (since 2019)"), owned);
+			assertEquals(0, e.questions().openCount());
+			// From now on the type works like a seeded one.
+			RememberOutcome later = remember(e, "I inherited the flat in 2024.",
+					proposal().entity("e1", "the flat", "place").event("ev1", "inherited", "2024", "self", "e1"));
+			assertEquals(List.of("Mattias Sandell owns the flat (since 2024)"), renderings(e, later));
+			assertEquals(0, later.applied().questions().size());
 		}
 	}
 
 	@Test
 	@Scenario("S14")
-	void anUnregisteredEntityTypeIsASuggestion() {
-		try (Engine e = TestHomes.engine("s14-suggest-type")) {
+	void anUnregisteredEntityTypeRegistersFromUseAndAsksWhatKindItIs() {
+		try (Engine e = TestHomes.engine("s14-type-from-use")) {
 			RememberOutcome o = remember(e, "Two cantons.", proposal().entity("e1", "Kanton Schwyz", "canton")
 					.entity("e2", "Kanton Luzern", "canton").entity("e3", "Anna Lindqvist", "person"));
 			assertEquals(3, o.applied().entities().size());
-			List<Map<String, Object>> s = ofKind(o, "entity_type");
-			assertEquals(1, s.size(), "one suggestion per unregistered type, however many entities use it");
-			assertEquals("canton", s.getFirst().get("name"));
-			assertTrue(s.getFirst().get("message").toString().contains("Kanton Schwyz"));
-			assertEquals(List.of(), ofKind(o, "predicate"));
-			RememberOutcome again = remember(e, "Again.",
-					proposal().entityType(CANTON).entity("e1", "Kanton Uri", "canton"));
-			assertEquals(List.of(), again.applied().suggestions());
+			Map<String, Object> defined = o.applied().definitions().getFirst();
+			assertEquals("inferred", defined.get("resolution"), defined.toString());
+			assertTrue(((Map<?, ?>) defined.get("inferred")).containsKey("parent"),
+					"the assumed parent (none) is shown");
+			var t = e.entityTypes().get("canton").orElseThrow();
+			assertTrue(t.inferred());
+			assertEquals(null, t.parent());
+			assertEquals(1, o.applied().questions().size(), "asked once, however many entities use the type");
+			Map<String, Object> q = question(o, "type_kind");
+			assertEquals("canton", q.get("subject"));
+			List<String> ids = candidateIds(q);
+			assertTrue(ids.contains("place") && ids.contains("organization") && ids.contains("none"), ids.toString());
+			assertFalse(ids.contains("country"), "only root kinds are offered: " + ids);
+			RememberOutcome again = remember(e, "Again.", proposal().entity("e1", "Appenzell", "canton"));
+			assertEquals(List.of(), again.applied().questions());
+			assertEquals(List.of(), again.applied().definitions(), "registered once");
+		}
+	}
+
+	@Test
+	@Scenario("S19")
+	void answeringWhatKindAnEntityTypeIsMakesItAcceptedWhereItsParentIs() {
+		try (Engine e = TestHomes.engine("s19-type-kind")) {
+			RememberOutcome o = remember(e, "I live in Kanton Schwyz.",
+					proposal().entity("e1", "Kanton Schwyz", "canton").fact("self", "lives_in", "e1"));
+			assertEquals(0, o.applied().facts().size(), "a canton is not yet a place");
+			String kindQ = (String) question(o, "type_kind").get("id");
+			assertEquals("type_mismatch", question(o, "type_mismatch").get("kind"));
+			RememberOutcome a = remember(e, "A canton is a Swiss region.", null, new Resolve(kindQ, "place"));
+			assertEquals("place", e.entityTypes().get("canton").orElseThrow().parent());
+			assertTrue(e.entityTypes().isA("canton", "place"));
+			assertEquals(1, ((List<?>) a.resolved().getFirst().get("settled")).size(),
+					"the held fact no longer mismatches: " + a.resolved());
+			assertEquals(0, e.questions().openCount());
+			assertEquals(List.of("Mattias Sandell lives in Kanton Schwyz"),
+					e.facts().factsOf(e.entities().owner().id()).stream().map(Fact::rendering).toList());
+			RememberOutcome later = remember(e, "I was born in Kanton Uri.",
+					proposal().entity("e1", "Kanton Uri", "canton").fact("self", "born_in", "e1"));
+			assertEquals(List.of("Mattias Sandell was born in Kanton Uri"), renderings(e, later));
+			assertEquals(List.of(), later.applied().questions());
+		}
+	}
+
+	@Test
+	@Scenario("S20")
+	void aTypeMismatchIsAnsweredByRetypingOrByANewKind() {
+		try (Engine e = TestHomes.engine("s20-type-mismatch")) {
+			// Anna typed as an organization by mistake: the seed type stays what it is, the entity is retyped.
+			RememberOutcome o = remember(e, "Anna is my daughter.",
+					proposal().entity("e1", "Anna Lindqvist", "organization").fact("self", "parent_of", "e1"));
+			Map<String, Object> q = question(o, "type_mismatch");
+			assertEquals(List.of("retype:person", "dismiss"), candidateIds(q), "no kind: for a seeded type");
+			RememberOutcome a = remember(e, "She is a person.", null,
+					new Resolve((String) q.get("id"), "retype:person"));
+			assertEquals("person", e.entities().byRef("Anna Lindqvist").orElseThrow().type());
+			assertEquals(1, ((List<?>) a.resolved().getFirst().get("facts")).size(), a.resolved().toString());
+			assertEquals("Mattias Sandell is Anna Lindqvist's parent",
+					e.facts().factsOf(e.entities().owner().id()).getFirst().rendering());
+			// A type registered from use can instead become a kind of what the predicate accepts.
+			RememberOutcome c = remember(e, "I live in Kanton Schwyz.",
+					proposal().entity("e1", "Kanton Schwyz", "canton").fact("self", "lives_in", "e1"));
+			Map<String, Object> mismatch = question(c, "type_mismatch");
+			assertEquals(List.of("kind:place", "retype:place", "dismiss"), candidateIds(mismatch));
+			RememberOutcome k = remember(e, "A canton is a place.", null,
+					new Resolve((String) mismatch.get("id"), "kind:place"));
+			assertEquals("place", e.entityTypes().get("canton").orElseThrow().parent());
+			assertEquals(1, ((List<?>) k.resolved().getFirst().get("facts")).size());
+			assertEquals(0, e.questions().openCount(), "the kind question was settled by the same answer");
+			// Or the fact was simply wrong.
+			RememberOutcome w = remember(e, "Hooli is my godmother.",
+					proposal().entity("e1", "Hooli", "organization").fact("e1", "parent_of", "self"));
+			String wid = (String) question(w, "type_mismatch").get("id");
+			RememberOutcome d = remember(e, "Never mind.", null, new Resolve(wid, "dismiss"));
+			assertEquals("dismissed", d.resolved().getFirst().get("status"));
+			assertEquals(List.of(), e.facts().factsOf(e.entities().byRef("Hooli").orElseThrow().id()),
+					"nothing about Hooli was stored");
 		}
 	}
 
 	@Test
 	@Scenario("S15")
-	void aBarePredicateIsASuggestionAsWellAsAnExtension() {
-		try (Engine e = TestHomes.engine("s15-suggest-predicate")) {
+	void aBarePredicateRegistersFromUse() {
+		try (Engine e = TestHomes.engine("s15-predicate-from-use")) {
 			RememberOutcome o = remember(e, "I mentor Anna.",
 					proposal().entity("e1", "Anna Lindqvist", "person").fact("self", "mentors", "e1"));
-			assertEquals("x:mentors", o.applied().facts().getFirst().predicate());
-			assertTrue(o.applied().warnings().getFirst().contains("not registered"), o.applied().warnings().toString());
-			List<Map<String, Object>> s = ofKind(o, "predicate");
-			assertEquals(1, s.size(), o.applied().suggestions().toString());
-			assertEquals("mentors", s.getFirst().get("name"));
-			Map<?, ?> skeleton = (Map<?, ?>) ((List<?>) ((Map<?, ?>) s.getFirst().get("define")).get("predicates"))
-					.getFirst();
-			assertEquals("mentors", skeleton.get("name"));
-			RememberOutcome deliberate = remember(e, "I coach Anna.",
-					proposal().entity("e1", "Anna Lindqvist", "person").fact("self", "x:coaches", "e1"));
-			assertEquals(List.of(), deliberate.applied().suggestions(), "an x: predicate is an extension on purpose");
+			assertEquals("mentors", o.applied().facts().getFirst().predicate());
+			assertEquals("Mattias Sandell mentors Anna Lindqvist", o.applied().facts().getFirst().rendering());
+			assertTrue(o.applied().warnings().getFirst().contains("registered from this use"),
+					o.applied().warnings().toString());
+			Map<String, Object> defined = o.applied().definitions().getFirst();
+			assertEquals("inferred", defined.get("resolution"), defined.toString());
+			@SuppressWarnings("unchecked")
+			Map<String, Object> assumed = (Map<String, Object>) defined.get("inferred");
+			assertEquals(List.of("*"), assumed.get("domain"), "the assumed direction is shown, to be corrected");
+			assertEquals(List.of("*"), assumed.get("range"));
+			assertEquals(false, assumed.get("functional"));
+			assertEquals(List.of("mentors", "mentor"), assumed.get("lexicon"));
+			assertTrue(assumed.get("correct").toString().contains("pred:mentors"));
+			var p = e.predicates().get("mentors").orElseThrow();
+			assertTrue(p.isInferred());
+			assertEquals(List.of("mentors", "mentor"), p.lexicon(), "the name's words are its cue");
+			assertEquals(List.of("*"), p.domain());
+			assertTrue(recall(e, "who does Mattias mentor").structured().matched(), "reachable through its own words");
+			// A description through correct completes it; the name resolves exactly from then on.
+			e.correctPredicate("mentors",
+					Map.of("description", "Subject guides object's career.", "domain", "person", "range", "person"),
+					"the user explained");
+			var completed = e.predicates().get("mentors").orElseThrow();
+			assertFalse(completed.isInferred());
+			assertEquals(List.of("person"), completed.range());
+			RememberOutcome again = remember(e, "I mentor Erik.",
+					proposal().entity("e1", "Erik Nyberg", "person").fact("self", "mentors", "e1"));
+			assertEquals(List.of(), again.applied().warnings());
+			assertEquals(List.of(), again.applied().definitions());
 		}
 	}
 
 	@Test
 	@Scenario("S16")
-	void consolidateListsVocabularyInUseWithoutADefinition() {
+	void consolidateListsVocabularyRegisteredFromUseUntilItIsDefined() {
 		try (Engine e = TestHomes.engine("s16-consolidate")) {
-			remember(e, "Cantons and an inheritance.",
+			remember(e, "Cantons, an inheritance, and a mentee.",
 					proposal().entity("e1", "Kanton Schwyz", "canton").entity("e2", "Kanton Luzern", "canton")
-							.entity("e3", "the cabin", "place").event("ev1", "inherited", "2019", "self", "e3"));
-			List<Map<String, Object>> before = e.consolidate(true).suggestedRegistrations();
+							.entity("e3", "the cabin", "place").entity("e4", "Anna Lindqvist", "person")
+							.event("ev1", "inherited", "2019", "self", "e3").fact("self", "mentors", "e4"));
+			List<Map<String, Object>> before = e.consolidate(true).inferredVocabulary();
 			assertTrue(before.contains(Map.of("event_type", "inherited", "uses", 1L)), before.toString());
 			assertTrue(before.contains(Map.of("entity_type", "canton", "uses", 2L)), before.toString());
-			remember(e, "Definitions.", proposal().eventType(INHERITED).entityType(CANTON));
-			List<Map<String, Object>> after = e.consolidate(true).suggestedRegistrations();
-			assertEquals(List.of(), after, "once defined, nothing is left to suggest");
+			Map<String, Object> mentors = before.stream().filter(m -> "mentors".equals(m.get("predicate"))).findFirst()
+					.orElseThrow();
+			assertEquals(1L, mentors.get("uses"));
+			assertEquals(List.of("obs-1"), mentors.get("observations"));
+			// Definitions arriving later complete what was inferred, instead of being ignored as duplicates.
+			RememberOutcome defined = remember(e, "Definitions.",
+					proposal().eventType(INHERITED).entityType(CANTON)
+							.predicate(new PredicateDef("mentors", "Subject guides object's career.", "person",
+									"person", false, null, false, null, "medium", List.of("mentor", "mentee"), null,
+									List.of(), List.of())));
+			assertEquals("defined", defined.applied().definitions().getFirst().get("resolution"),
+					defined.applied().definitions().toString());
+			assertEquals(List.of("owns"), e.eventTypes().get("inherited").orElseThrow().opens());
+			assertEquals("place", e.entityTypes().get("canton").orElseThrow().parent());
+			assertEquals(List.of("mentor", "mentee"), e.predicates().get("mentors").orElseThrow().lexicon());
+			assertEquals(List.of(), e.consolidate(true).inferredVocabulary(), "once defined, nothing is left to list");
 		}
+	}
+
+	@Test
+	@Scenario("S21")
+	void aPartialDefinitionCountsAsADefinition() {
+		try (Engine e = TestHomes.engine("s21-partial")) {
+			remember(e, "I mentor Anna.",
+					proposal().entity("e1", "Anna Lindqvist", "person").fact("self", "mentors", "e1"));
+			assertTrue(e.predicates().get("mentors").orElseThrow().isInferred());
+			// No prose, just the two facts the model knows: one mentee at a time, and mentees are people.
+			RememberOutcome d = remember(e, "One mentee at a time.", proposal().predicate(new PredicateDef("mentors",
+					null, null, "person", true, null, null, null, null, List.of(), null, List.of(), List.of())));
+			Map<String, Object> definition = d.applied().definitions().getFirst();
+			assertEquals("defined", definition.get("resolution"), definition.toString());
+			assertEquals(1, definition.get("rerendered_facts"));
+			assertEquals(0, definition.get("rechecked_conflicts"), "functional now, but one mentee so far");
+			Predicate p = e.predicates().get("mentors").orElseThrow();
+			assertFalse(p.isInferred(), "somebody said something about it");
+			assertTrue(p.functional());
+			assertEquals(List.of("person"), p.range());
+			assertEquals(List.of("*"), p.domain(), "what was not stated stays as inferred");
+			assertEquals(List.of("mentors", "mentor"), p.lexicon());
+			assertEquals(List.of(), e.consolidate(true).inferredVocabulary());
+			// A first use that carries a partial definition is a definition too.
+			RememberOutcome f = remember(e, "I coach Erik.",
+					proposal()
+							.predicate(new PredicateDef("coaches", null, "person", null, null, null, null, null, "low",
+									List.of(), null, List.of(), List.of()))
+							.entity("e1", "Erik Nyberg", "person").fact("self", "coaches", "e1"));
+			assertEquals("registered", f.applied().predicates().getFirst().resolution());
+			Predicate c = e.predicates().get("coaches").orElseThrow();
+			assertFalse(c.isInferred());
+			assertEquals("low", c.volatility());
+			assertEquals(List.of("coaches", "coach"), c.lexicon(), "the name still supplies the words");
+		}
+	}
+
+	@Test
+	@Scenario("S22")
+	void makingAPredicateFunctionalRechecksItsFacts() {
+		try (Engine e = TestHomes.engine("s22-functional")) {
+			RememberOutcome a = remember(e, "I share a flat with Anna.",
+					proposal().entity("e1", "Anna Lindqvist", "person").fact("self", "shares_a_flat_with", "e1"));
+			RememberOutcome b = remember(e, "I share a flat with Erik.",
+					proposal().entity("e1", "Erik Nyberg", "person").fact("self", "shares_a_flat_with", "e1"));
+			assertEquals(List.of(), b.applied().questions(), "nothing inferred is functional");
+			long first = Long.parseLong(a.applied().facts().getFirst().id().substring(2));
+			long second = Long.parseLong(b.applied().facts().getFirst().id().substring(2));
+			assertEquals("current", e.facts().get(second).orElseThrow().status());
+			Map<String, Object> c = e.correctPredicate("shares_a_flat_with", Map.of("functional", true),
+					"one flatmate at a time");
+			assertEquals(1, c.get("rechecked_conflicts"), c.toString());
+			assertEquals("current", e.facts().get(first).orElseThrow().status(), "the earlier fact stands");
+			assertEquals("pending", e.facts().get(second).orElseThrow().status(), "the later one waits");
+			assertEquals(1, e.questions().openCount());
+			var q = e.questions().open(10).getFirst();
+			assertEquals("conflict", q.kind());
+			assertEquals("f-" + second, q.toMap().get("pending_fact"));
+			RememberOutcome r = remember(e, "Erik replaced Anna.", null, new Resolve(q.ref(), "supersede"));
+			assertEquals("answered", r.resolved().getFirst().get("status"));
+			assertEquals("superseded", e.facts().get(first).orElseThrow().status());
+			assertEquals("current", e.facts().get(second).orElseThrow().status());
+			assertEquals(0, e.correctPredicate("shares_a_flat_with", Map.of("volatility", "low"), null)
+					.get("rechecked_conflicts"), "only a change to functional re-checks");
+		}
+	}
+
+	@Test
+	@Scenario("S23")
+	void aBareNameCloseInMeaningToARegisteredPredicateIsAskedAbout() {
+		try (Engine e = new Engine(
+				TestHomes.options(TestHomes.fresh("s23-semantic")).withVocabularyEmbedding(new FixedEmbedding()))) {
+			remember(e, "I mentor Anna.",
+					proposal().entity("e1", "Anna Lindqvist", "person").fact("self", "mentors", "e1"));
+			RememberOutcome o = remember(e, "I coach Erik.",
+					proposal().entity("e1", "Erik Nyberg", "person").fact("self", "coaches", "e1"));
+			assertEquals(0, o.applied().facts().size(), "the fact is held behind the question");
+			Map<String, Object> q = question(o, "predicate_resolution");
+			assertEquals("coaches", q.get("predicate"));
+			@SuppressWarnings("unchecked")
+			Map<String, Object> first = ((List<Map<String, Object>>) q.get("candidates")).getFirst();
+			assertEquals("mentors", first.get("id"));
+			assertEquals("semantic", first.get("match"));
+			assertTrue(candidateIds(q).contains("new"));
+			assertTrue(q.get("message").toString().contains("mentors"), q.get("message").toString());
+			RememberOutcome a = remember(e, "Same thing.", null, new Resolve((String) q.get("id"), "mentors"));
+			assertEquals(1, ((List<?>) a.resolved().getFirst().get("facts")).size(), a.resolved().toString());
+			Entity erik = e.entities().byRef("Erik Nyberg").orElseThrow();
+			assertEquals("Mattias Sandell mentors Erik Nyberg", e.facts().factsOf(erik.id()).getFirst().rendering());
+			assertTrue(e.predicates().get("mentors").orElseThrow().aliases().contains("coaches"), "asked once");
+			RememberOutcome later = remember(e, "I coach Sara.",
+					proposal().entity("e1", "Sara Berg", "person").fact("self", "coaches", "e1"));
+			assertEquals("mentors", later.applied().facts().getFirst().predicate());
+			assertEquals(List.of(), later.applied().questions());
+			// A name close to nothing registers from use as before.
+			RememberOutcome v = remember(e, "I visited Zug.",
+					proposal().entity("e1", "Zug", "place").fact("self", "visited", "e1"));
+			assertEquals(1, v.applied().facts().size(), v.applied().questions() + " " + v.applied().warnings());
+			assertEquals("visited", v.applied().facts().getFirst().predicate());
+			assertEquals(List.of(), v.applied().questions());
+		}
+	}
+
+	@Test
+	@Scenario("S24")
+	void consolidateReportsClosePredicatesAndCorrectMergesThem() {
+		try (Engine e = new Engine(
+				TestHomes.options(TestHomes.fresh("s24-merge")).withVocabularyEmbedding(new FixedEmbedding()))) {
+			remember(e, "I mentor Anna.",
+					proposal().entity("e1", "Anna Lindqvist", "person").fact("self", "mentors", "e1"));
+			RememberOutcome o = remember(e, "I coach Erik.",
+					proposal().entity("e1", "Erik Nyberg", "person").fact("self", "coaches", "e1"));
+			String qid = (String) question(o, "predicate_resolution").get("id");
+			remember(e, "Different things, I thought.", null, new Resolve(qid, "new"));
+			assertEquals("coaches", e.predicates().get("coaches").orElseThrow().name());
+			List<Map<String, Object>> close = e.consolidate(true).similarVocabulary();
+			assertEquals(1, close.size(), close.toString());
+			assertEquals("coaches", close.getFirst().get("predicate"));
+			assertEquals("mentors", close.getFirst().get("close_to"));
+			assertTrue(((Number) close.getFirst().get("score")).doubleValue() > 0.8, close.toString());
+			Map<String, Object> m = e.correctPredicate("coaches", Map.of("merge_into", "mentors"), "one relation");
+			assertEquals(1, m.get("merged_facts"), m.toString());
+			assertEquals("mentors", e.predicates().get("coaches").orElseThrow().name(), "the old name is an alias");
+			assertTrue(e.predicates().all().stream().noneMatch(p -> p.name().equals("coaches")));
+			List<String> facts = e.facts().factsOf(e.entities().owner().id()).stream().map(Fact::rendering).sorted()
+					.toList();
+			assertEquals(List.of("Mattias Sandell mentors Anna Lindqvist", "Mattias Sandell mentors Erik Nyberg"),
+					facts);
+			assertEquals(List.of(), e.consolidate(true).similarVocabulary());
+			assertEquals(2, recall(e, "who does Mattias mentor").hits().size());
+			assertEquals(1, e.predicates().changes("mentors").size(), "the merge is on record");
+		}
+	}
+
+	@Test
+	@Scenario("S25")
+	void anInferredDirectionIsCorrectedAtOnceAndRecallFollowsIt() {
+		try (Engine e = TestHomes.engine("s25-direction")) {
+			RememberOutcome o = remember(e, "Anna mentors me.",
+					proposal().entity("e1", "Anna Lindqvist", "person").fact("e1", "mentors", "self"));
+			remember(e, "I mentor Erik.",
+					proposal().entity("e1", "Erik Nyberg", "person").fact("self", "mentors", "e1"));
+			@SuppressWarnings("unchecked")
+			Map<String, Object> assumed = (Map<String, Object>) o.applied().definitions().getFirst().get("inferred");
+			assertEquals(List.of("*"), assumed.get("domain"), "either side, until somebody says");
+			// "does Mattias mentor" says which side Mattias is on; the other questions do not, so both facts come back.
+			assertEquals(List.of("Mattias Sandell mentors Erik Nyberg"), structured(e, "who does Mattias mentor"));
+			assertEquals(2, structured(e, "who mentors Mattias").size(), "no direction on record yet");
+			assertEquals(2, structured(e, "who is Mattias's mentor").size());
+			// The model corrects the assumption at once, as the reply's correct line says.
+			Map<String, Object> c = e.correctPredicate("mentors",
+					Map.of("domain", "person", "range", "person", "description", "Subject guides object's career."),
+					"mentors are people guiding people");
+			assertEquals(List.of("person"), e.predicates().get("mentors").orElseThrow().domain());
+			assertEquals(List.of("person"), e.predicates().get("mentors").orElseThrow().range());
+			assertFalse(e.predicates().get("mentors").orElseThrow().isInferred());
+			assertEquals(2, c.get("rerendered_facts"));
+			// Now a relation between like things: "Mattias's mentor" names the one whose mentee Mattias is.
+			assertEquals(List.of("Anna Lindqvist mentors Mattias Sandell"), structured(e, "who is Mattias's mentor"));
+			assertEquals(List.of("Anna Lindqvist mentors Mattias Sandell"), structured(e, "who mentors Mattias"));
+			assertEquals(List.of("Mattias Sandell mentors Erik Nyberg"), structured(e, "who does Mattias mentor"));
+			// And the types are checked from now on.
+			RememberOutcome org = remember(e, "I mentor Hooli.",
+					proposal().entity("e1", "Hooli", "organization").fact("self", "mentors", "e1"));
+			assertEquals("type_mismatch", question(org, "type_mismatch").get("kind"));
+		}
+	}
+
+	private static List<String> structured(Engine e, String query) {
+		return recall(e, query).structured().facts().stream().map(Fact::rendering).sorted().toList();
 	}
 
 	@Test

@@ -32,6 +32,7 @@ import se.hirt.mnemic.persistence.Database;
 import se.hirt.mnemic.persistence.Row;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -44,9 +45,10 @@ import java.util.Optional;
 public final class Consolidator {
 
 	/** What consolidation did or would do. */
-	public record Outcome(List<Map<String, Object>> merges, int reclosed,
-			List<Map<String, Object>> suggestedRegistrations, List<Map<String, Object>> resolvedQuestions,
-			List<Map<String, Object>> review, List<Map<String, Object>> duplicates) {
+	public record Outcome(List<Map<String, Object>> merges, int reclosed, List<Map<String, Object>> inferredVocabulary,
+			List<Map<String, Object>> similarVocabulary, List<Map<String, Object>> descriptiveEvents,
+			List<Map<String, Object>> unusedVocabulary, List<Map<String, Object>> resolvedQuestions,
+			List<Map<String, Object>> review, List<Map<String, Object>> duplicates, int removedEntities) {
 	}
 
 	private final Database db;
@@ -82,25 +84,113 @@ public final class Consolidator {
 		var duplicates = new ArrayList<Map<String, Object>>();
 		foldDuplicateFacts(dryRun, duplicates);
 		foldDuplicateEvents(dryRun, duplicates);
-		return new Outcome(merges, reclosed, suggestedRegistrations(), resolved, facts.review(5), duplicates);
+		int removed = dryRun ? 0 : entities.removeOrphansOfForgotten();
+		if (!dryRun) {
+			forgetDefinedBy();
+		}
+		return new Outcome(merges, reclosed, inferredVocabulary(), predicates.closePairs(), descriptiveEvents(),
+				unusedVocabulary(), resolved, facts.review(5), duplicates, removed);
 	}
 
 	/**
-	 * Vocabulary in use without a definition, for the caller to settle with the user: extended predicates used often
-	 * (EVALUATION.md J6), and every event type and entity type the store holds that the registry lacks.
+	 * Vocabulary registered from use that nobody has described yet, with how much rests on it, for the caller to settle
+	 * with the user (EVALUATION.md J6): predicates, event types, and entity types.
 	 */
-	private List<Map<String, Object>> suggestedRegistrations() {
-		var out = new ArrayList<>(predicates.frequentExtended(3));
-		for (Row r : db.read(tx -> tx.query("SELECT type, COUNT(*) AS n FROM event GROUP BY type ORDER BY n DESC"))) {
-			if (eventTypes.get(r.str("type")).isEmpty()) {
-				out.add(Map.of("event_type", r.str("type"), "uses", r.lng("n")));
+	private List<Map<String, Object>> inferredVocabulary() {
+		var out = new ArrayList<>(predicates.inferred());
+		for (var t : eventTypes.all()) {
+			if (t.inferred()) {
+				long n = db.read(tx -> tx.queryLong("SELECT COUNT(*) FROM event WHERE type = ?", t.name()));
+				out.add(Map.of("event_type", t.name(), "uses", n));
 			}
 		}
-		for (Row r : db.read(tx -> tx.query(
-				"SELECT type, COUNT(*) AS n FROM entity WHERE merged_into IS NULL GROUP BY type ORDER BY n DESC"))) {
+		for (var t : entityTypes.all()) {
+			if (t.inferred()) {
+				long n = db.read(tx -> tx
+						.queryLong("SELECT COUNT(*) FROM entity WHERE type = ? AND merged_into IS NULL", t.name()));
+				out.add(Map.of("entity_type", t.name(), "uses", n));
+			}
+		}
+		return out;
+	}
+
+	/**
+	 * Vocabulary nothing rests on whose definition is gone: not seeded, not inferred, defined by an observation since
+	 * forgotten (or anchored to none), and used by no fact, event, entity, or child type. Listed for the caller to
+	 * settle; nothing removes it on its own.
+	 */
+	private List<Map<String, Object>> unusedVocabulary() {
+		var out = new ArrayList<Map<String, Object>>();
+		for (var p : predicates.all()) {
+			if (!p.seed() && !p.isInferred() && orphanDefinition(p.definedBy())
+					&& count("SELECT COUNT(*) FROM fact WHERE predicate = ?", p.name()) == 0) {
+				out.add(unused("predicate", p.name(), p.definedBy()));
+			}
+		}
+		for (var t : eventTypes.all()) {
+			if (!t.seed() && !t.inferred() && orphanDefinition(t.definedBy())
+					&& count("SELECT COUNT(*) FROM event WHERE type = ?", t.name()) == 0) {
+				out.add(unused("event_type", t.name(), t.definedBy()));
+			}
+		}
+		for (var t : entityTypes.all()) {
+			if (!t.seed() && !t.inferred() && orphanDefinition(t.definedBy())
+					&& count("SELECT COUNT(*) FROM entity WHERE type = ? AND merged_into IS NULL", t.name()) == 0
+					&& entityTypes.all().stream().noneMatch(x -> t.name().equals(x.parent()))) {
+				out.add(unused("entity_type", t.name(), t.definedBy()));
+			}
+		}
+		return out;
+	}
+
+	private boolean orphanDefinition(Long definedBy) {
+		return definedBy == null
+				|| count("SELECT COUNT(*) FROM observation WHERE id = ? AND forgotten_at IS NOT NULL", definedBy) > 0;
+	}
+
+	private long count(String sql, Object arg) {
+		return db.read(tx -> tx.queryLong(sql, arg));
+	}
+
+	private static Map<String, Object> unused(String kind, String name, Long definedBy) {
+		var m = new LinkedHashMap<String, Object>();
+		m.put(kind, name);
+		m.put("defined_by", definedBy == null ? null : "obs-" + definedBy + " (forgotten)");
+		m.put("uses", 0);
+		return m;
+	}
+
+	/** Vocabulary defined by an observation since forgotten stays, but no longer points at a tombstone. */
+	private void forgetDefinedBy() {
+		int n = db.write(tx -> {
+			int changed = 0;
+			for (String table : List.of("predicate", "event_type", "entity_type")) {
+				changed += tx.update("UPDATE " + table + " SET defined_by = NULL WHERE defined_by IN "
+						+ "(SELECT id FROM observation WHERE forgotten_at IS NOT NULL)");
+			}
+			return changed;
+		});
+		if (n > 0) {
+			predicates.reload();
+			eventTypes.reload();
+			entityTypes.reload();
+		}
+	}
+
+	/**
+	 * Events whose type is a sentence rather than a type: the reading put the description where the type goes. Each
+	 * names the observation to re-read with a proper type and the detail in the text.
+	 */
+	private List<Map<String, Object>> descriptiveEvents() {
+		var out = new ArrayList<Map<String, Object>>();
+		for (Row r : db.read(tx -> tx.query("SELECT id, type, observation_id FROM event ORDER BY id"))) {
 			String type = r.str("type");
-			if (!EntityTypeRegistry.UNKNOWN.equals(type) && entityTypes.get(type).isEmpty()) {
-				out.add(Map.of("entity_type", type, "uses", r.lng("n")));
+			if (type != null && !EventTypeRegistry.typeLike(type) && eventTypes.get(type).isEmpty()) {
+				var m = new LinkedHashMap<String, Object>();
+				m.put("event", "evt-" + r.lng("id"));
+				m.put("type", type);
+				m.put("observation", "obs-" + r.lng("observation_id"));
+				out.add(m);
 			}
 		}
 		return out;

@@ -51,7 +51,7 @@ import java.util.Locale;
  * is L2-normalised, so cosine similarity is a dot product. Texts stored go through {@link #embed}; questions through
  * {@link #embedQuery}, which differ only by the prefix.
  */
-public final class Embedder implements AutoCloseable {
+public final class Embedder implements Embedding, AutoCloseable {
 
 	/** Tokens per text; the model's position table holds 512 and the texts here are sentences to paragraphs. */
 	public static final int MAX_TOKENS = 512;

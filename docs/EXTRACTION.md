@@ -112,8 +112,8 @@ an assistant remember; the protocol is part of the product.
 `max_tokens`: first the owner's current asserted facts (up to 40), ordered by
 predicate rank — functional predicates first (`works_at`, `lives_in`,
 `holds_role`, `spouse_of`, `born_in`), then lasting relations between like
-things (`parent_of`, `sibling_of`), then everything else, `x:` predicates
-last — and within a rank by corroboration count; then, for up to four of the
+things (`parent_of`, `sibling_of`), then everything else, predicates
+registered from use and not yet described last — and within a rank by corroboration count; then, for up to four of the
 eight entities whose facts were most recently touched by an observation, up to
 eight facts each; then up to five open questions. Nothing in the ordering comes
 from a caller-supplied importance score, which would be opinion recorded as
@@ -129,7 +129,7 @@ type may carry a `render` template (`{subject} inherited {object}`; a `[[ ... ]]
 object), and a predicate definition `renders`, its
 template, negation, and cue words per language of the store. Both are
 validated (an event type may only name registered predicates, a parent must exist), stored, listed by
-`list_predicates` with their origin, and corrected through `correct`, which logs every change with its reason.
+`inspect('registry')` with their origin, and corrected through `correct`, which logs every change with its reason.
 An event of a type nobody registered is stored as a plain occurrence with no effect on facts; an entity type
 nobody registered passes through as written. In both cases, and for a predicate sent without a definition, the
 reply carries a `suggestion` with a definition skeleton: the caller checks with the user what the term should mean
@@ -162,7 +162,7 @@ reasons over these properties rather than over the name:
 
 | Property                | Used by                                                                                                   |
 |-------------------------|-----------------------------------------------------------------------------------------------------------|
-| `domain`, `range`       | entity-type checks; a mismatch is a `type_mismatch` question, not a store. `*` is any type, `literal` a string object; `place` accepts `country` |
+| `domain`, `range`       | entity-type checks; a mismatch is a `type_mismatch` question that holds the fact, answered by re-parenting the type, retyping the entity, or dismissing. `*` is any type, `literal` a string object; `place` accepts `country` |
 | `functional`            | consistency check — one current object per subject, or per (subject, `scope`) when `functional_scope` is `"scope"` |
 | `symmetric`             | the fact is stored once from either side and probed from both; a qualifier is matched by family (brother/sister/sibling) |
 | `volatility`            | the staleness annotation in recall and the `review` list: `high` facts are called *likely changed* after 180 days without confirmation, `medium` after 365, `low` never. It never touches confidence or ranking |
@@ -200,22 +200,38 @@ defined `real_estate_confined_to` once mapped itself onto `owns`. Confirming a
 *similar* candidate records the proposed name as an alias, so the question is
 asked once; an *ambiguous* one is confirmed per fact. A name with no plausible
 match is registered from its definition. A
-name with **no definition** is stored as `x:<name>` with a warning, so
-nothing is lost.
-
-The `x:<name>` escape hatch remains for callers that do not want to define a
-predicate: an `x:` predicate is registered on first use with wildcard domain
-and range, medium volatility, no lexicon, and a generic template built from
-its name (`{subject} consults for {object}` for `x:consults_for`). It is not
-conflict-checked and has no query cue, so it is reachable through the key,
-lexical, and semantic channels only. `consolidate` lists `x:` predicates used
-by three or more facts under `suggested_registrations`.
+name with **no definition** is compared by its words alone and, when nothing
+on record shares one, registered from that use with a warning: wildcard
+domain and range, medium volatility, the words of the name (and their
+lemmas) as lexicon, and a template built from the name (`{subject} consults
+for {object}` for `consults_for`). It takes part in recall through its own
+words and is not conflict-checked until someone makes it functional.
+`inspect` shows it with origin `inferred`; `consolidate` lists it under
+`inferred_vocabulary` until anything is said about it, through `correct` or a
+later definition in a proposal, which completes it rather than being ignored
+as a duplicate; a definition need not carry prose, `functional: true` alone
+counts, and turning `functional` on re-checks the facts already stored for
+conflicts. When the embedding model is loaded, a bare name is also compared
+by meaning: one that shares no word with a registered predicate but lies
+close to it (cosine over name, description, and lexicon of 0.88 or more,
+leading the runner-up by 0.04, since short phrases all score high and the
+lead carries the signal) is asked about as `semantic`, like a `similar`
+match, and a weaker lead (0.86 and 0.02) as `ambiguous`; `consolidate` lists predicates registered
+from use that lie close to another under `similar_vocabulary`, and
+`correct(pred:x, {merge_into: "y"})` folds one into the other. Event types and entity types register from use the same way
+(see Event effects below): the store asks once what a new event type does
+(`event_effect`) and what kind of thing a new entity type is (`type_kind`),
+and the answer applies to everything already stored under the term. Event
+type names are spelled one way, lowercase words joined by underscores, and
+only a name that is a type (at most three words, two of them content words,
+no number) is registered: a sentence where the type goes is stored as the
+occurrence it describes, with a warning, and never becomes vocabulary.
 
 #### Seed vocabulary
 
 The seed covers predicates that recur in personal knowledge. It is the initial
-content of the registry, nothing more; `list_predicates` is authoritative and
-also shows each predicate's lexicon and the event types.
+content of the registry, nothing more; `inspect('registry')` is authoritative
+and also shows each predicate's lexicon and the event types.
 
 | Predicate     | Domain → Range                          | Functional | Symmetric | Volatility | Qualifiers                                                                                   | Inverse lexicon                        |
 |---------------|-----------------------------------------|-----------:|----------:|------------|----------------------------------------------------------------------------------------------|----------------------------------------|
@@ -379,7 +395,7 @@ and `part_of` facts applied before the others so a bound can be checked
 against where a thing lies, then closures.
 
 **Predicate resolution** is described above: exact name or alias; a similar or
-ambiguous definition is a question; a bare unknown name becomes `x:`.
+ambiguous name is a question; a bare unknown name is registered from use.
 
 **Entity resolution.** Every proposed entity is matched against existing
 entities, in order: first-person references → the owner; exact match of the
@@ -452,7 +468,7 @@ existing one under the same predicate ("owns Switzerland" beside "owns the
 Willisau apartment") is stored with a warning that it reads like a restriction
 written as ownership.
 
-**Event effects.** Event types are registered like predicates (`list_predicates`
+**Event effects.** Event types are registered like predicates (`inspect('registry')`
 shows them) with four effects: `opens` (a fact the event implies when the
 proposal did not state it: `purchased` → `owns`, `joined` → `works_at`),
 `closes` (the event ends the fact whose subject and object both take part:
@@ -508,9 +524,9 @@ staleness is a separate annotation driven by the predicate's volatility.
     "entities": [ { "ref": "e2", "id": "ent-41", "name": "Hooli", "resolution": "alias", "score": 1.0 } ],
     "events":   [ { "ref": "ev1", "id": "evt-302", "type": "joined" } ],
     "facts": [
-      { "id": "f-1190", "predicate": "works_at", "status": "current", "corroborated": false,
+      { "id": "f-1190", "predicate": "works_at", "standing": "current", "corroborated": false,
         "rendering": "Mattias Sandell works at Hooli (since 2018)" },
-      { "id": "f-1191", "predicate": "holds_role", "status": "current", "corroborated": false,
+      { "id": "f-1191", "predicate": "holds_role", "standing": "current", "corroborated": false,
         "rendering": "Mattias Sandell holds the role Director of Engineering at Hooli (since 2018)" }
     ]
   },
@@ -528,18 +544,31 @@ staleness is a separate annotation driven by the predicate's volatility.
 `proposal_source` is `assistant`, `server:<model id>` (hybrid mode), or
 `none`. An entity's `resolution` is `owner`, `alias` (exact name or alias
 match), `fuzzy`, `merged`, `created`, or `bound` (already resolved earlier in
-the same call). A fact's `status` is `current` or `pending`; `corroborated`
+the same call). A fact's `standing` is `current`, `ended`, or `future` by its dates, else `pending` (or, later,
+`superseded`, `corrected`, `rejected`); `corroborated`
 means the fact was already on record and gained a corroboration. `predicates`
 lists what each proposed definition resolved to (`registered`, `similar`,
-`ambiguous`, `exact`, `alias`, or `extended` for an `x:` name). A fact closed by an event's `closes` or
+`ambiguous`, `exact`, `alias`, or `inferred` for a name registered from use); `definitions` names every
+term the proposal defined or that registered itself from a first use here, and for the latter carries
+`inferred`: what the store assumed (a predicate's domain, range, direction, functional, volatility, lexicon,
+and template; an event type's template, lexicon, and effects; an entity type's parent) and the `correct` call
+that changes it. The assumptions are defaults, not decisions: the same proposal may state any of them in
+`predicates`, `event_types`, or `entity_types`, and then nothing is inferred. A fact closed by an event's `closes` or
 `ends_entity` effect appears in `superseded` with `ended_at` instead of
 `superseded_by` and `closed_at`. `resolved` appears when the call answered
-questions. Ids are `obs-N`, `ent-N`, `evt-N`, `f-N`, `q-N`.
+questions. `replaced` appears when `observation_id` named an observation that already had a reading: the facts
+and events the old reading produced and were taken back, and `reopened_facts`, the number of facts that had been
+closed by them and are current again. Re-read when the reading was wrong; `correct` when the user says the world
+is otherwise. Fact and event ids are handles for a conversation; observation ids last. `resolve` alone, with neither
+`text` nor `observation_id`, answers questions without recording an observation. `correct` takes an entity too
+(`ent-12` with `name`, `type`, or `aliases`, the list to keep). A fact is shown with one `standing`: current, ended, or future by its dates while the record holds it, else
+superseded, corrected, pending, or rejected. A present-tense recall that misses beside ended facts names them. A fact stated beside the event that
+opens it takes that event as its explanation even without `derived_from`. Ids are `obs-N`, `ent-N`, `evt-N`, `f-N`, `q-N`.
 
 **Questions.** `questions` carries every check the caller must settle, each as
 `{id, kind, status, subject?, predicate?, candidates, message, pending_fact?,
 observation}`, with `kind` one of `entity_resolution`, `predicate_resolution`,
-`conflict`, `type_mismatch`, or `containment`. Questions persist in a queue
+`conflict`, `type_mismatch`, `containment`, `event_effect`, or `type_kind`. Questions persist in a queue
 (`status` counts them, the briefing and `consolidate` list them) until
 answered; whatever they hold (an entity's facts, a pending fact) is applied
 only then. The calling assistant is expected to surface them to the user and
@@ -576,12 +605,23 @@ The response carries what was done (`merges`, `reclosed_facts`, `duplicates`,
 `retired`, `embedded`, `proposed`, `resolved_questions`) and what needs the
 caller: the `backlog` of observations still without a proposal (with an
 excerpt each; `propose` gives them their reading), `open_questions`,
-`suggested_registrations` (`x:` predicates used three times or more), and
+`inferred_vocabulary` (terms registered from use and not yet described),
+`similar_vocabulary` (predicates registered from use that lie close in meaning
+to another), `descriptive_events` (events whose type is a sentence, with the
+observation to re-read), `unused_vocabulary` (predicates, event types, and entity types that nothing uses and whose
+defining observation was forgotten), `removed_entities` (entities a forgotten observation created that nothing refers
+to any more), and
 `review`: plans whose date has passed with no word since (`due: true`), then
 the open facts longest without confirmation on predicates that age, oldest
 first, skipping anything confirmed within two weeks or within a third of its
 predicate's staleness threshold, and flagging `likely_changed` past it.
 `dry_run` reports without changing anything.
+
+`consolidate(rebuild: true)` re-derives every fact and event from the observations and their readings, in order:
+correction records are replayed against the fact their key names (their reading holds the key, the reason, and the
+replacement), answers once given are given again, entities keep their ids, facts and events get new ones. The reply's
+`rebuilt` reports `observations`, `corrections`, `answers`, `facts_before`, `facts_after`, and `unmatched`, the
+correction records whose fact no longer exists (what they stated stands as facts of the record). Never on a dry run.
 
 Mnemic is correct without a proposer. It is only less refined.
 
@@ -620,7 +660,7 @@ changes.
   "Mattias's father" puts Mattias on the object side, "Mattias's children" on the
   subject side; otherwise the entity's type against the predicate's domain and
   range decides. Caller-defined predicates participate as soon as they are
-  registered. `x:` predicates have no cue.
+  registered; one registered from use cues on the words of its name.
 - **Event cues**: a registered event type's lexicon ("buy" → `purchased`), or
   the bare name of a type nobody registered, names the events that answer
   "when did Mattias buy his house".

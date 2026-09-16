@@ -29,6 +29,8 @@
 package se.hirt.mnemic.knowledge;
 
 import se.hirt.mnemic.knowledge.EntityService.Candidate;
+import se.hirt.mnemic.knowledge.EntityTypeRegistry.EntityType;
+import se.hirt.mnemic.knowledge.EventTypeRegistry.EventType;
 import se.hirt.mnemic.observation.Observation;
 import se.hirt.mnemic.proposal.Proposal;
 import se.hirt.mnemic.proposal.Proposal.EntityRef;
@@ -47,8 +49,9 @@ import java.util.Optional;
 /**
  * The questions the write path puts to the caller when it cannot decide alone: an ambiguous entity or predicate (the
  * fact is held in the question until answered), a conflict on a functional predicate (the new fact is stored pending),
- * a type mismatch, and a containment gap. Each carries numbered candidates so the model never has to reproduce an
- * internal id.
+ * a type mismatch (the fact is held), a containment gap, and what a type registered from use means (nothing is held:
+ * the event or entity is stored, and the answer applies to everything of that type). Each carries numbered candidates
+ * so the model never has to reproduce an internal id.
  */
 final class FactQuestions {
 
@@ -77,13 +80,13 @@ final class FactQuestions {
 		c.add(choice(1, candidate.name(), candidate.name() + ": " + candidate.description(), how));
 		c.add(choice(2, "new", "register '" + f.predicate() + "' as a new predicate", null));
 		String message = "Does '" + f.predicate() + "' (" + (def == null ? "" : def.description()) + ") mean the "
-				+ "same as '" + candidate.name() + "' (" + candidate.description() + ")? "
-				+ ("similar".equals(how)
-						? "They share several words, but a narrower or opposite meaning (a restriction, "
-								+ "a negation) would be lost. "
-						: "")
-				+ "The fact is held until you answer with '" + candidate.name() + "' or \"new\"; '" + candidate.name()
-				+ "' also records '" + f.predicate() + "' as its alias when the match was similar.";
+				+ "same as '" + candidate.name() + "' (" + candidate.description() + ")? " + switch (how) {
+				case "similar" -> "They share several words, but a narrower or opposite meaning (a restriction, "
+						+ "a negation) would be lost. ";
+				case "semantic" -> "They share no words but lie close in meaning. ";
+				default -> "";
+				} + "The fact is held until you answer with '" + candidate.name() + "' or \"new\"; '" + candidate.name()
+				+ "' also records '" + f.predicate() + "' as its alias when the match was similar or semantic.";
 		return questions.create("predicate_resolution", obs.id(), null, f.subject(), f.predicate(), c, payload,
 				message);
 	}
@@ -109,13 +112,97 @@ final class FactQuestions {
 				payload, message);
 	}
 
-	Question typeMismatch(Observation obs, Predicate pred, String position, Entity e, List<String> allowed) {
+	/**
+	 * The entity's type does not fit the predicate: the fact is held, and the answer either makes the type a kind of
+	 * one the predicate accepts, retypes this entity, or dismisses the fact.
+	 */
+	Question typeMismatch(
+		Observation obs, Predicate pred, String position, Entity e, List<String> allowed, boolean newKind,
+		String held) {
+		var c = new ArrayList<Map<String, Object>>();
+		int n = 1;
+		for (String kind : allowed) {
+			if ("*".equals(kind) || "literal".equals(kind)) {
+				continue;
+			}
+			if (newKind) {
+				c.add(choice(n++, "kind:" + kind, "every " + e.type() + " is a kind of " + kind
+						+ " (sets the parent of " + e.type() + "; the fact is stored)", null));
+			}
+			c.add(choice(n++, "retype:" + kind,
+					e.name() + " is a " + kind + ", not a " + e.type() + " (retypes the entity; the fact is stored)",
+					null));
+		}
+		c.add(choice(n, "dismiss", "the fact is wrong; drop it", null));
 		String message = pred.name() + " expects a " + position + " of type " + allowed + "; " + e.name() + " is "
-				+ e.type() + ". Not stored. Correct the entity type or the predicate, then remember again.";
-		List<Map<String, Object>> c = List.of(choice(1, "dismiss", "dismiss", null));
-		String payload = Json
-				.write(Map.of("entity", e.ref(), "entity_type", e.type(), "position", position, "expected", allowed));
-		return questions.create("type_mismatch", obs.id(), null, e.name(), pred.name(), c, payload, message);
+				+ e.type() + ". The fact is held until you answer: "
+				+ (newKind ? "is a " + e.type() + " a kind of " + String.join(" or ", allowed) + " (kind:...), " : "")
+				+ "is " + e.name() + " really a " + String.join(" or ", allowed) + " (retype:...), or is the fact "
+				+ "wrong (dismiss)?";
+		var payload = new LinkedHashMap<String, Object>();
+		payload.put("entity", e.ref());
+		payload.put("entity_type", e.type());
+		payload.put("position", position);
+		payload.put("expected", allowed);
+		payload.put("held", held);
+		return questions.create("type_mismatch", obs.id(), null, e.name(), pred.name(), c, Json.write(payload),
+				message);
+	}
+
+	/**
+	 * What an event type registered from use does to facts, asked once per type: which fitting predicate it opens or
+	 * closes, whether it ends the subject, or nothing. Empty when the type is already asked about.
+	 */
+	Optional<Question> eventEffect(
+		Observation obs, EventType t, List<Entity> participants, long eventId, List<Predicate> fitting) {
+		if (questions.open(200).stream()
+				.anyMatch(q -> "event_effect".equals(q.kind()) && t.name().equals(q.subject()))) {
+			return Optional.empty();
+		}
+		var c = new ArrayList<Map<String, Object>>();
+		int n = 1;
+		for (Predicate p : fitting) {
+			c.add(choice(n++, "opens:" + p.name(),
+					"the event starts " + p.name() + (p.functional() ? " and replaces its earlier value" : ""), null));
+		}
+		for (Predicate p : fitting) {
+			c.add(choice(n++, "closes:" + p.name(), "the event ends " + p.name(), null));
+		}
+		if (participants.size() == 1) {
+			c.add(choice(n++, "ends_entity", participants.getFirst().name() + " ceases to exist", null));
+		}
+		c.add(choice(n, "none", "a plain occurrence with no effect on facts", null));
+		String who = participants.isEmpty() ? "its participants"
+				: String.join(" and ", participants.stream().map(Entity::name).toList());
+		String message = "'" + t.name() + "' is a new event type; the event is stored as an occurrence with no effect "
+				+ "on facts. Does it start or end a relation between " + who + "? Answer opens:<predicate>, "
+				+ "closes:<predicate>, ends_entity, or none. The answer applies to every event of this type, "
+				+ "including those already stored.";
+		String payload = Json.write(Map.of("event_type", t.name(), "event", "evt-" + eventId));
+		return Optional.of(questions.create("event_effect", obs.id(), null, t.name(), null, c, payload, message));
+	}
+
+	/**
+	 * What kind of thing an entity type registered from use is, asked once per type: a registered root type as its
+	 * parent, or a kind of its own. Empty when the type is already asked about.
+	 */
+	Optional<Question> typeKind(Observation obs, EntityType t, Entity e, List<String> roots) {
+		if (questions.open(200).stream().anyMatch(q -> "type_kind".equals(q.kind()) && t.name().equals(q.subject()))) {
+			return Optional.empty();
+		}
+		var c = new ArrayList<Map<String, Object>>();
+		int n = 1;
+		for (String root : roots) {
+			if (!root.equals(t.name())) {
+				c.add(choice(n++, root, "a " + t.name() + " is a kind of " + root, null));
+			}
+		}
+		c.add(choice(n, "none", "a kind of its own", null));
+		String message = "'" + t.name() + "' is a new kind of thing (the type of " + e.name() + "). Is a " + t.name()
+				+ " a kind of " + String.join(", ", roots.stream().filter(r -> !r.equals(t.name())).toList())
+				+ "? Answer with the kind, so that everything that accepts it accepts a " + t.name() + ", or none.";
+		String payload = Json.write(Map.of("entity_type", t.name(), "entity", e.ref()));
+		return Optional.of(questions.create("type_kind", obs.id(), null, t.name(), null, c, payload, message));
 	}
 
 	/** Asks whether {@code top} lies within {@code bound}; empty when the same question is already open. */

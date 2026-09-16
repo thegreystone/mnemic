@@ -73,7 +73,7 @@ public final class ObservationService {
 		if ("connector".equals(src.kind()) && proposalJson != null) {
 			throw MnemicException.invalidArgument("Connector observations arrive without a proposal; connectors create "
 					+ "observations, never facts (EXTRACTION.md). Store it without one, then read it and give it its facts with "
-					+ "propose(observation_id, proposal), or let a configured proposer handle it in consolidate.");
+					+ "remember(observation_id, proposal), or let a configured proposer handle it in consolidate.");
 		}
 		Instant observed = observedAt == null ? Instant.now() : observedAt;
 		String hash = Json.hashText(text);
@@ -122,6 +122,12 @@ public final class ObservationService {
 	}
 
 	/** Observations with no proposal yet, oldest first: the consolidate backlog (EVALUATION.md A3, G3). */
+	/** The whole log in order, forgotten entries excluded. */
+	public List<Observation> all() {
+		return db.read(tx -> tx.query("SELECT * FROM observation WHERE forgotten_at IS NULL ORDER BY id").stream()
+				.map(Observation::from).toList());
+	}
+
 	public List<Observation> backlog(int limit) {
 		return db.read(tx -> tx.query("SELECT * FROM observation WHERE proposal_json IS NULL AND forgotten_at IS NULL "
 				+ "ORDER BY id LIMIT ?", limit).stream().map(Observation::from).toList());

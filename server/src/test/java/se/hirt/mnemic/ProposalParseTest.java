@@ -40,6 +40,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ProposalParseTest {
 
 	@Test
+	void nullElementsAreDropped() {
+		// Seen from a local model on LongMemEval: a bare null where a fact goes crashed event effects downstream.
+		Proposal p = Proposal.parse("""
+				{"entities": [null, {"ref": "e1", "name": "Hooli", "type": "organization"}],
+				 "events": [null], "facts": [{"subject": "self", "predicate": "works_at", "object": "e1"}, null],
+				 "predicates": [null], "closures": [null], "event_types": [null], "entity_types": [null]}""");
+		assertEquals(1, p.entities().size());
+		assertEquals(0, p.events().size());
+		assertEquals(1, p.facts().size());
+		assertEquals(0, p.predicates().size() + p.closures().size() + p.eventTypes().size() + p.entityTypes().size());
+	}
+
+	@Test
 	void listObjectBecomesOneFactPerElement() {
 		Proposal p = Proposal.parse("""
 				{"facts": [{"subject": "self", "predicate": "prefers", "object": ["e1", "e2", "e3"]},

@@ -180,6 +180,10 @@ final class RecallRenderer {
 		return sb.toString();
 	}
 
+	private static long entityId(Structured s) {
+		return s.entity() != null && s.entity().startsWith("ent-") ? Long.parseLong(s.entity().substring(4)) : -1;
+	}
+
 	private static void verdict(StringBuilder sb, Structured s, List<Event> events, Instant now, boolean polar) {
 		String key = s.entityName() + " · " + s.predicate() + (s.qualifier() != null ? "[" + s.qualifier() + "]" : "");
 		sb.append("structured: ");
@@ -205,7 +209,15 @@ final class RecallRenderer {
 			sb.append(s.decidedBy().rendering()).append(" [").append(s.decidedBy().ref()).append(']');
 		}
 		case "miss" -> {
-			sb.append("MISS — ").append(key).append(": entity and predicate resolved, no such fact is known");
+			if (s.ended().isEmpty()) {
+				sb.append("MISS — ").append(key).append(": entity and predicate resolved, no such fact is known");
+			} else {
+				sb.append("MISS — ").append(key).append(": no current value; ").append(s.ended().size())
+						.append(s.ended().size() == 1 ? " ended fact: " : " ended facts: ")
+						.append(String.join("; ",
+								s.ended().stream().map(f -> f.rendering() + " [" + f.ref() + "]").toList()))
+						.append("; pass include_history to have them returned");
+			}
 			if (polar) {
 				sb.append(s.bounds().isEmpty()
 						? ", which is not evidence of no (yes/no question: nothing recorded says no either)"
@@ -216,8 +228,17 @@ final class RecallRenderer {
 				sb.append(String.join("; ", s.nearMisses().stream().map(Fact::rendering).toList()));
 			}
 			if (!events.isEmpty()) {
-				sb.append("; ").append(events.size()).append(events.size() == 1 ? " event" : " events")
-						.append(" about ").append(s.entityName()).append(" on the next line may explain why");
+				// Only an event the subject took part in can explain why it has no such fact; the other entity's
+				// events are context, and saying otherwise ("1 event about Anna: Bo joined Initrode") misleads.
+				long about = events.stream().filter(ev -> ev.participants().contains(entityId(s))).count();
+				if (about > 0) {
+					sb.append("; ").append(about).append(about == 1 ? " event" : " events").append(" about ")
+							.append(s.entityName()).append(" on the next line may explain why");
+				} else {
+					sb.append("; the ").append(events.size()).append(events.size() == 1 ? " event" : " events")
+							.append(" on the next line ").append(events.size() == 1 ? "involves" : "involve")
+							.append(" what else the question names, not ").append(s.entityName());
+				}
 			}
 		}
 		case "events" -> {
@@ -238,7 +259,7 @@ final class RecallRenderer {
 		}
 		case "entity" -> sb.append("entity ").append(s.entityName()).append(" resolved, no predicate cue; ")
 				.append(s.facts().size()).append(s.facts().size() == 1 ? " fact" : " facts").append(" known, ")
-				.append("not used for ranking (name a relation, e.g. works_at, or use get_entity)");
+				.append("not used for ranking (name a relation, e.g. works_at, or use inspect)");
 		default -> sb.append("unresolved (no entity and predicate cue in the query)");
 		}
 		for (String note : s.notes()) {

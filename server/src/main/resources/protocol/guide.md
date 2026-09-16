@@ -16,16 +16,23 @@ MEMORY PROTOCOL
    structured reading of it as `proposal`, its literal parts in the store's language (`status` names it),
    the observation in the user's own words. A leaning or intention is `considering`, not `decided`. What the
    user says is not so goes in as a negated fact, a restriction (`only`), or a closure, never as a fact with
-   the bound as its object. An event type or entity type the registry lacks goes in the same proposal
-   (`event_types`, `entity_types`, with a `render` template for an event type and `renders` per language for a
-   predicate) and stays registered. When a reply carries `suggestions`, the proposal used a
-   term the registry lacks: ask the user in one line what it should mean and define it next time. Call
-   `list_predicates` when unsure what relation, event type, or entity type to use; `status` only counts
-   them. Record at
+   the bound as its object. A predicate, event type, or entity type the registry lacks registers itself
+   from its first use (`definitions` in the reply names it, with `inferred`: the domain, range, direction,
+   template, and effects the store assumed) with everything inferred from the name; state what you know in
+   the same proposal (`predicates`, `event_types`, `entity_types`), correct an assumption you can see is
+   wrong, or answer the question the store asks about what it means. Answer such a question yourself when
+   the answer is plain (inheriting opens owns); bring only real doubt to the user. An event type is a verb
+   or two words (`inherited`, `purchased_property`); a sentence where the type goes is stored as a plain
+   occurrence and never becomes vocabulary, so put the detail in the text. When you misread an
+   observation, read it again: `remember(observation_id, proposal)` replaces the reading and the text keeps
+   its id and date; use `correct` only when the user says the world is otherwise. `consolidate` lists
+   observations worth re-reading under `descriptive_events`. Call `inspect('registry')` when unsure what relation,
+   event type, or entity type to use; `status` only counts them. Record at
    natural boundaries: a topic change, the end of a task, before your context is compacted. Do not record
    every message.
 4. SURFACE. If a response carries `questions`, put them to the user in your own words and answer them with
-   `resolve: [{question_id: "q-3", choice: ...}]` on your next `remember`. Never resolve an ambiguity silently.
+   `resolve: [{question_id: "q-3", choice: ...}]` on your next `remember`, or alone in a `remember` with no
+   text when there is nothing else to record. Never resolve an ambiguity silently.
    An `entity_resolution` or `predicate_resolution` question holds the facts that depend on it until you answer
    with a candidate id or "new". A `conflict` question means a predicate that allows one current value already
    has one: ask whether the earlier one `ended` (unknown date), the new one should `supersede` it from now, the

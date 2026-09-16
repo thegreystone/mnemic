@@ -38,6 +38,7 @@ import se.hirt.mnemic.Scenario;
 import se.hirt.mnemic.TestHomes;
 import se.hirt.mnemic.knowledge.Fact;
 import se.hirt.mnemic.knowledge.Lang;
+import se.hirt.mnemic.knowledge.QuestionResolver.Resolve;
 import se.hirt.mnemic.proposal.Proposal.FactRef;
 import se.hirt.mnemic.proposal.Proposal.PredicateDef;
 import se.hirt.mnemic.recall.RecallResult;
@@ -168,6 +169,68 @@ class LanguageTest {
 			assertEquals(0, refused.applied().facts().size());
 			assertTrue(refused.applied().warnings().getFirst().contains("Unsupported language"),
 					refused.applied().warnings().toString());
+		}
+	}
+
+	@Test
+	@Scenario("R5")
+	void registeringFromUseInAGermanStore() {
+		try (Engine e = TestHomes.engine(TestHomes.fresh("r5-de-from-use"), Lang.DE)) {
+			RememberOutcome o = remember(e, "Ich betreue Anna.",
+					proposal().entity("e1", "Anna Lindqvist", "person").fact("self", "betreut", "e1"));
+			assertEquals("betreut", o.applied().facts().getFirst().predicate());
+			assertEquals("Mattias Sandell betreut Anna Lindqvist", stored(e, o, 0).rendering(),
+					"the name's words make the template, whatever the language");
+			assertEquals(List.of("betreut"), e.predicates().get("betreut").orElseThrow().lexicon());
+			assertTrue(recall(e, "wen betreut Mattias").structured().matched(), "and its cue");
+			RememberOutcome ev = remember(e, "Ich habe 2019 die Hütte geerbt.",
+					proposal().entity("e1", "die Hütte", "place").event("ev1", "geerbt", "2019", "self", "e1"));
+			long eventId = Long.parseLong(ev.applied().events().getFirst().id().substring(4));
+			assertTrue(
+					e.events().get(eventId).orElseThrow().rendering().startsWith("Mattias Sandell geerbt die Hütte"));
+			Map<String, Object> q = ev.applied().questions().getFirst();
+			assertEquals("event_effect", q.get("kind"));
+			// A definition in the store's language completes it and re-renders what was stored.
+			RememberOutcome defined = remember(e, "Betreuen heisst beruflich begleiten.",
+					proposal().predicate(new PredicateDef("betreut", "Subject guides the career of object.", "person",
+							"person", false, null, false, null, "medium", List.of("betreut", "betreuen", "mentor"),
+							"{subject} mentors {object}", List.of(), List.of(),
+							Map.of("de", Map.of("render", "{subject} betreut {object} beruflich")))));
+			assertEquals("defined", defined.applied().definitions().getFirst().get("resolution"));
+			assertEquals(1, defined.applied().definitions().getFirst().get("rerendered_facts"));
+			assertEquals("Mattias Sandell betreut Anna Lindqvist beruflich", stored(e, o, 0).rendering());
+			assertFalse(e.predicates().get("betreut").orElseThrow().isInferred());
+		}
+	}
+
+	@Test
+	@Scenario("R6")
+	void aGermanNameCloseInMeaningToAnEnglishPredicateIsAskedAbout() {
+		try (Engine e = new Engine(TestHomes.options(TestHomes.fresh("r6-de-semantic")).withLang(Lang.DE)
+				.withVocabularyEmbedding(new se.hirt.mnemic.FixedEmbedding()))) {
+			remember(e, "I mentor Anna.",
+					proposal().entity("e1", "Anna Lindqvist", "person").fact("self", "mentors", "e1"));
+			RememberOutcome o = remember(e, "Ich betreue Erik.",
+					proposal().entity("e1", "Erik Nyberg", "person").fact("self", "betreut", "e1"));
+			assertEquals(0, o.applied().facts().size(), "held: no word shared, but the meaning is close");
+			Map<String, Object> q = o.applied().questions().getFirst();
+			assertEquals("predicate_resolution", q.get("kind"));
+			@SuppressWarnings("unchecked")
+			Map<String, Object> first = ((List<Map<String, Object>>) q.get("candidates")).getFirst();
+			assertEquals("mentors", first.get("id"));
+			assertEquals("semantic", first.get("match"));
+			RememberOutcome a = remember(e, "Ja, dasselbe.", null, new Resolve((String) q.get("id"), "mentors"));
+			assertEquals(1, ((List<?>) a.resolved().getFirst().get("facts")).size(), a.resolved().toString());
+			assertTrue(e.predicates().get("mentors").orElseThrow().aliases().contains("betreut"));
+			assertEquals("mentors", e.predicates().get("betreut").orElseThrow().name(), "the German name resolves");
+			// The German name now cues the English predicate in a German question.
+			RecallResult r = recall(e, "wen betreut Mattias");
+			assertTrue(r.structured().matched(), r.text());
+			assertEquals("mentors", r.structured().predicate());
+			RememberOutcome later = remember(e, "Ich betreue Sara.",
+					proposal().entity("e1", "Sara Berg", "person").fact("self", "betreut", "e1"));
+			assertEquals("mentors", later.applied().facts().getFirst().predicate());
+			assertEquals(List.of(), later.applied().questions());
 		}
 	}
 }

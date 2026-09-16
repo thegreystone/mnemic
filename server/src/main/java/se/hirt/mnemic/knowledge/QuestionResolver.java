@@ -41,6 +41,7 @@ import se.hirt.mnemic.proposal.Proposal.PredicateDef;
 import se.hirt.mnemic.protocol.Json;
 import se.hirt.mnemic.protocol.MnemicException;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -51,7 +52,8 @@ import java.util.Optional;
 /**
  * Applies the caller's answers to open questions. An entity answer binds the name and applies what the question held; a
  * predicate answer confirms or registers the predicate and applies the fact; a conflict answer settles which of two
- * facts stands; a containment answer stores the missing link.
+ * facts stands; a containment answer stores the missing link; a type mismatch answer fixes the type and applies the
+ * held fact; an event effect or type kind answer defines the vocabulary and applies it to what is already stored.
  */
 public final class QuestionResolver {
 
@@ -62,21 +64,26 @@ public final class QuestionResolver {
 	public record Resolve(String questionId, String choice) {
 	}
 
-	private record Pending(Question question, String choice, Entity chosen, Map<String, Object> result) {
+	private record Pending(Question question, String choice, Entity chosen, Map<String, Object> result,
+			Observation obs) {
 	}
 
 	private final Database db;
 	private final EntityService entities;
 	private final PredicateRegistry predicates;
+	private final EventTypeRegistry eventTypes;
+	private final EntityTypeRegistry entityTypes;
 	private final QuestionService questions;
 	private final FactService facts;
 	private final FactLedger ledger;
 
-	QuestionResolver(Database db, EntityService entities, PredicateRegistry predicates, QuestionService questions,
-			FactService facts, FactLedger ledger) {
+	QuestionResolver(Database db, EntityService entities, PredicateRegistry predicates, EventTypeRegistry eventTypes,
+			EntityTypeRegistry entityTypes, QuestionService questions, FactService facts, FactLedger ledger) {
 		this.db = db;
 		this.entities = entities;
 		this.predicates = predicates;
+		this.eventTypes = eventTypes;
+		this.entityTypes = entityTypes;
 		this.questions = questions;
 		this.facts = facts;
 		this.ledger = ledger;
@@ -89,6 +96,15 @@ public final class QuestionResolver {
 	 * now names an entity exactly is settled.
 	 */
 	public List<Map<String, Object>> resolve(Observation obs, List<Resolve> resolves) {
+		return resolve(obs, resolves, obs.observedAt());
+	}
+
+	/** Answers given on their own, with no observation carrying them: each question's own observation stands in. */
+	public List<Map<String, Object>> resolve(List<Resolve> resolves, Instant now) {
+		return resolve(null, resolves, now);
+	}
+
+	private List<Map<String, Object>> resolve(Observation carrier, List<Resolve> resolves, Instant now) {
 		var out = new ArrayList<Map<String, Object>>();
 		var pending = new ArrayList<Pending>();
 		var bindings = new LinkedHashMap<String, Entity>();
@@ -97,6 +113,9 @@ public final class QuestionResolver {
 			if (!q.open()) {
 				throw MnemicException.conflict(q.ref() + " is already " + q.status(), Map.of("question", q.ref()));
 			}
+			Observation obs = carrier != null ? carrier : observation(q.observationId()).orElseThrow(
+					() -> MnemicException.invalidArgument(q.ref() + " has no observation to answer against; pass "
+							+ "the answer with a remember that has text."));
 			String choice = r.choice() == null ? "" : r.choice().trim();
 			var result = new LinkedHashMap<String, Object>();
 			result.put("question", q.ref());
@@ -105,11 +124,14 @@ public final class QuestionResolver {
 			case "entity_resolution" -> {
 				Entity chosen = chooseEntity(q, choice);
 				bindings.put(q.subject(), chosen);
-				pending.add(new Pending(q, choice, chosen, result));
+				pending.add(new Pending(q, choice, chosen, result, obs));
 			}
 			case "predicate_resolution" -> result.putAll(resolvePredicate(q, choice, obs));
-			case "conflict" -> result.putAll(resolveConflict(q, choice, obs));
+			case "conflict" -> result.putAll(resolveConflict(q, choice, obs, now));
 			case "containment" -> result.putAll(resolveContainment(q, choice, obs));
+			case "type_mismatch" -> result.putAll(resolveTypeMismatch(q, choice, obs));
+			case "event_effect" -> result.putAll(resolveEventEffect(q, choice));
+			case "type_kind" -> result.putAll(resolveTypeKind(q, choice, obs));
 			default -> {
 				questions.dismiss(q.id(), choice);
 				result.put("status", "dismissed");
@@ -118,7 +140,7 @@ public final class QuestionResolver {
 			out.add(result);
 		}
 		for (Pending p : pending) {
-			p.result().putAll(applyHeld(p.question(), p.choice(), p.chosen(), bindings, obs));
+			p.result().putAll(applyHeld(p.question(), p.choice(), p.chosen(), bindings, p.obs()));
 		}
 		List<Map<String, Object>> settled = settleExactSubjects(false);
 		if (!settled.isEmpty()) {
@@ -201,10 +223,9 @@ public final class QuestionResolver {
 		FactRef f = held.facts().getFirst();
 		Proposal toApply;
 		if ("new".equalsIgnoreCase(choice)) {
-			PredicateDef def = held.predicates().isEmpty() ? null : held.predicates().getFirst();
-			if (def == null) {
-				throw MnemicException.invalidArgument(q.ref() + " holds no definition to register.");
-			}
+			// Without a definition the name is registered from this use, as it would have been had nothing matched.
+			PredicateDef def = held.predicates().isEmpty() ? new PredicateDef(f.predicate(), null, null, null, null,
+					null, null, null, null, List.of(), null, List.of(), List.of()) : held.predicates().getFirst();
 			predicates.register(def, q.observationId());
 			toApply = new Proposal(held.specVersion(), held.entities(), List.of(), List.of(f), List.of());
 		} else {
@@ -212,8 +233,8 @@ public final class QuestionResolver {
 					"'" + choice + "' is not a registered predicate; answer with the candidate or \"new\"."));
 			// A confirmed synonym is asked once: the proposed name becomes an alias (EVALUATION.md J2). An ambiguous
 			// match confirmed for this fact stays a one-off (J3).
-			boolean similar = q.candidates().stream()
-					.anyMatch(cd -> target.name().equals(cd.get("id")) && "similar".equals(cd.get("match")));
+			boolean similar = q.candidates().stream().anyMatch(cd -> target.name().equals(cd.get("id"))
+					&& ("similar".equals(cd.get("match")) || "semantic".equals(cd.get("match"))));
 			if (similar) {
 				predicates.addAlias(target, f.predicate());
 			}
@@ -229,7 +250,7 @@ public final class QuestionResolver {
 		return m;
 	}
 
-	private Map<String, Object> resolveConflict(Question q, String choice, Observation obs) {
+	private Map<String, Object> resolveConflict(Question q, String choice, Observation obs, Instant now) {
 		Map<String, Object> payload = Json.readMap(q.payload());
 		long existingId = Long.parseLong(payload.get("existing").toString().substring(2));
 		long pendingId = Long.parseLong(payload.get("pending").toString().substring(2));
@@ -241,7 +262,7 @@ public final class QuestionResolver {
 			return null;
 		});
 		case "supersede" -> db.write(tx -> {
-			String today = obs.observedAt().toString().substring(0, 10);
+			String today = now.toString().substring(0, 10);
 			ledger.close(tx, factIn(tx, existingId), pendingId, "supersession", "user: replaced", null, obs.id(), today,
 					"day", "superseded");
 			tx.update("UPDATE fact SET status = 'current' WHERE id = ?", pendingId);
@@ -290,6 +311,149 @@ public final class QuestionResolver {
 				.invalidArgument("'" + choice + "' is not an answer to " + q.ref() + "; use yes or no.");
 		}
 		questions.answer(q.id(), choice);
+		m.put("status", "answered");
+		return m;
+	}
+
+	/** The entity's type is made a kind of an accepted one, or the entity is retyped; then the held fact is applied. */
+	private Map<String, Object> resolveTypeMismatch(Question q, String choice, Observation obs) {
+		Map<String, Object> payload = Json.readMap(q.payload());
+		String type = String.valueOf(payload.get("entity_type"));
+		long entityId = Long.parseLong(payload.get("entity").toString().substring(4));
+		var m = new LinkedHashMap<String, Object>();
+		if ("dismiss".equalsIgnoreCase(choice)) {
+			questions.dismiss(q.id(), choice);
+			m.put("status", "dismissed");
+			return m;
+		}
+		boolean listed = q.candidates().stream().anyMatch(c -> choice.equals(c.get("id")));
+		if (!listed) {
+			throw MnemicException.invalidArgument("'" + choice + "' is not an answer to " + q.ref()
+					+ "; answer with one " + "of " + q.candidates().stream().map(c -> c.get("id")).toList() + ".");
+		}
+		String kind = choice.substring(choice.indexOf(':') + 1);
+		if (choice.startsWith("kind:")) {
+			entityTypes.update(type, Map.of("parent", kind, "description", "A kind of " + kind + "."),
+					"user: " + q.ref());
+			m.put("entity_type", type);
+			m.put("parent", kind);
+			// The same answer settles the open question about what kind of thing the type is.
+			for (Question other : questions.open(200)) {
+				if ("type_kind".equals(other.kind()) && type.equals(other.subject())) {
+					questions.answer(other.id(), kind);
+				}
+			}
+		} else {
+			entities.retype(entityId, kind);
+			m.put("entity", "ent-" + entityId);
+			m.put("type", kind);
+		}
+		Object held = payload.get("held");
+		if (held != null) {
+			// Bound to the entity itself: re-resolving its name under the old type would mint another entity.
+			Entity ent = entities.get(entityId).orElseThrow();
+			Applied a = facts.apply(source(q, obs), Proposal.parse(String.valueOf(held)), Map.of(ent.name(), ent));
+			m.put("facts", a.facts().stream().map(FactOut::id).toList());
+			if (!a.questions().isEmpty()) {
+				m.put("questions", a.questions());
+			}
+		}
+		questions.answer(q.id(), choice);
+		m.put("status", "answered");
+		return m;
+	}
+
+	/** The type gets its effect and every event stored under it gets the consequences. */
+	private Map<String, Object> resolveEventEffect(Question q, String choice) {
+		String type = q.subject();
+		String c = choice.toLowerCase(Locale.ROOT);
+		var m = new LinkedHashMap<String, Object>();
+		var replacement = new LinkedHashMap<String, Object>();
+		if ("none".equals(c)) {
+			replacement.put("description", "A plain occurrence with no effect on facts.");
+		} else if ("ends_entity".equals(c)) {
+			replacement.put("ends_entity", true);
+			replacement.put("description", "The subject ceases to exist.");
+		} else if (c.startsWith("opens:") || c.startsWith("closes:")) {
+			String name = c.substring(c.indexOf(':') + 1);
+			Predicate p = predicates.get(name).orElseThrow(() -> MnemicException.invalidArgument(
+					"'" + name + "' is not a registered predicate; answer with one of the candidates."));
+			if (c.startsWith("opens:")) {
+				replacement.put("opens", List.of(p.name()));
+				if (p.functional()) {
+					replacement.put("supersedes", List.of(p.name()));
+				}
+				replacement.put("description", "Starts " + p.name() + ".");
+			} else {
+				replacement.put("closes", List.of(p.name()));
+				replacement.put("description", "Ends " + p.name() + ".");
+			}
+		} else {
+			throw MnemicException.invalidArgument("'" + choice + "' is not an answer to " + q.ref()
+					+ "; use opens:<predicate>, closes:<predicate>, ends_entity, or none.");
+		}
+		eventTypes.update(type, replacement, "user: " + q.ref(), name -> predicates.get(name).isPresent());
+		m.put("event_type", type);
+		if (!"none".equals(c)) {
+			m.put("applied", facts.applyEffectsOf(type));
+		}
+		questions.answer(q.id(), choice);
+		m.put("status", "answered");
+		return m;
+	}
+
+	/**
+	 * The type gets its parent, so everything that accepts the parent accepts it; facts held behind a type mismatch
+	 * that the parent resolves are stored.
+	 */
+	private Map<String, Object> resolveTypeKind(Question q, String choice, Observation obs) {
+		String type = q.subject();
+		var replacement = new LinkedHashMap<String, Object>();
+		if ("none".equalsIgnoreCase(choice)) {
+			replacement.put("description", "A kind of its own.");
+		} else {
+			String parent = entityTypes.canonical(choice);
+			if (entityTypes.get(parent).isEmpty()) {
+				throw MnemicException.invalidArgument(
+						"'" + choice + "' is not a registered entity type; answer with one of the candidates or none.");
+			}
+			replacement.put("parent", parent);
+			replacement.put("description", "A kind of " + parent + ".");
+		}
+		var t = entityTypes.update(type, replacement, "user: " + q.ref());
+		questions.answer(q.id(), choice);
+		var m = new LinkedHashMap<String, Object>();
+		m.put("entity_type", t.name());
+		m.put("parent", t.parent());
+		if (t.parent() != null) {
+			var settled = new ArrayList<Map<String, Object>>();
+			List<String> lineage = entityTypes.lineage(t.name());
+			for (Question other : questions.open(200)) {
+				if (!"type_mismatch".equals(other.kind())) {
+					continue;
+				}
+				Map<String, Object> payload = Json.readMap(other.payload());
+				if (!type.equals(payload.get("entity_type")) || !(payload.get("expected") instanceof List<?> expected)
+						|| expected.stream().noneMatch(lineage::contains)) {
+					continue;
+				}
+				var s = new LinkedHashMap<String, Object>();
+				s.put("question", other.ref());
+				if (payload.get("held") != null) {
+					long entityId = Long.parseLong(payload.get("entity").toString().substring(4));
+					Map<String, Entity> bound = entities.get(entityId).map(en -> Map.of(en.name(), en))
+							.orElse(Map.of());
+					Applied a = facts.apply(source(other, obs), Proposal.parse(String.valueOf(payload.get("held"))),
+							bound);
+					s.put("facts", a.facts().stream().map(FactOut::id).toList());
+				}
+				questions.answer(other.id(), "kind:" + t.parent());
+				settled.add(s);
+			}
+			if (!settled.isEmpty()) {
+				m.put("settled", settled);
+			}
+		}
 		m.put("status", "answered");
 		return m;
 	}

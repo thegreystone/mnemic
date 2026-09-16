@@ -37,8 +37,8 @@ import java.util.Map;
 
 /**
  * A question Mnemic could not answer by itself and put to the caller: an ambiguous entity, an ambiguous predicate, a
- * conflict on a functional predicate, a type mismatch, or a containment gap. It stays open until answered or dismissed;
- * what it holds is applied only then.
+ * conflict on a functional predicate, a type mismatch, a containment gap, and what a new event type or entity type
+ * registered from use means. It stays open until answered or dismissed; what it holds is applied only then.
  *
  * @param candidates
  *            numbered choices, each {@code {n, id, label, score}}; small integers remapped per question so the model
@@ -73,7 +73,9 @@ public record Question(long id, String kind, String status, Long observationId, 
 		m.put("candidates", candidates);
 		m.put("message", message);
 		if (payload != null && !kind.endsWith("_resolution")) {
-			m.putAll(Json.readMap(payload)); // conflict: existing/pending; type_mismatch: entity_type/expected
+			Map<String, Object> p = Json.readMap(payload); // conflict: existing/pending; type_mismatch: entity_type/expected
+			p.remove("held");
+			m.putAll(p);
 		}
 		if (factId != null) {
 			m.put("pending_fact", "f-" + factId);

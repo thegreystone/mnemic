@@ -84,6 +84,17 @@ public final class QuestionService {
 				answer, Instant.now().toString(), id));
 	}
 
+	/** Every question raised about an observation, whatever its status, oldest first. */
+	public List<Question> ofObservation(long observationId) {
+		return db.read(tx -> tx.query("SELECT * FROM question WHERE observation_id = ? ORDER BY id", observationId)
+				.stream().map(Question::from).toList());
+	}
+
+	/** Removes an observation's questions: a re-read raises them afresh. */
+	public void deleteOf(long observationId) {
+		db.write(tx -> tx.update("DELETE FROM question WHERE observation_id = ?", observationId));
+	}
+
 	public void dismiss(long id, String reason) {
 		db.write(tx -> tx.update("UPDATE question SET status = 'dismissed', answer = ?, answered_at = ? WHERE id = ?",
 				reason, Instant.now().toString(), id));

@@ -48,8 +48,9 @@ import java.util.Set;
  * carries the synonyms that map a proposed type onto it ({@code company} → {@code organization}), the words that say
  * what kind of thing a name is rather than which one ("Kanton" in "Kanton Luzern", dropped before fuzzy matching), and
  * an optional parent: a country is a place, so everything that accepts a place accepts a country. A type nobody
- * registered passes through unchanged, so nothing is refused for its type; once a type is registered, entities that
- * were typed by one of its synonyms take its name.
+ * registered is registered from its first use, without a parent until somebody says what kind of thing it is, so
+ * nothing is refused for its type; once a type is registered, entities that were typed by one of its synonyms take its
+ * name.
  * <p>
  * The table is read once at start into hash maps (by name, by synonym, the set of type words); every write goes to the
  * database and into the maps in the same call, so lookups never touch the database and the next start sees everything
@@ -58,7 +59,13 @@ import java.util.Set;
 public final class EntityTypeRegistry {
 
 	public record EntityType(String name, String description, String parent, List<String> synonyms,
-			List<String> typeWords, Long definedBy, boolean seed) {
+			List<String> typeWords, Long definedBy, boolean seed, boolean inferred) {
+	}
+
+	/** A definition that states nothing beyond the name. */
+	static boolean bare(EntityTypeDef d) {
+		return d.description() == null && (d.parent() == null || d.parent().isBlank()) && d.synonyms().isEmpty()
+				&& d.typeWords().isEmpty();
 	}
 
 	public static final String UNKNOWN = "unknown";
@@ -76,6 +83,21 @@ public final class EntityTypeRegistry {
 				insert(e);
 			}
 		}
+		// Entities typed with a type nobody registered (a store from before 2.3): registered from use now.
+		for (Row r : db.read(tx -> tx.query("SELECT DISTINCT type FROM entity WHERE merged_into IS NULL"))) {
+			String type = r.str("type");
+			if (type != null && !UNKNOWN.equals(type) && !byName.containsKey(key(type))) {
+				registerInferred(type, null);
+			}
+		}
+	}
+
+	/** Reads the table again, after a change made beside the registry. */
+	public synchronized void reload() {
+		byName.clear();
+		bySynonym.clear();
+		typeWords.clear();
+		load();
 	}
 
 	public synchronized List<EntityType> all() {
@@ -83,7 +105,7 @@ public final class EntityTypeRegistry {
 	}
 
 	public synchronized Optional<EntityType> get(String name) {
-		return name == null ? Optional.empty() : Optional.ofNullable(byName.get(Names.norm(name)));
+		return name == null ? Optional.empty() : Optional.ofNullable(byName.get(key(name)));
 	}
 
 	/** The registered name for a proposed type, through its synonyms; unknown types pass through lowercased. */
@@ -91,8 +113,18 @@ public final class EntityTypeRegistry {
 		if (type == null || type.isBlank()) {
 			return UNKNOWN;
 		}
-		String t = Names.norm(type);
+		String t = key(type);
 		return byName.containsKey(t) ? t : bySynonym.getOrDefault(t, t);
+	}
+
+	/** Registered names are lowercase with underscores: "Sports club" and "sports_club" are one type. */
+	private static String key(String name) {
+		return Names.norm(name).replace(' ', '_');
+	}
+
+	/** Types with no parent: the kinds a new type can be a kind of. */
+	public synchronized List<String> roots() {
+		return byName.values().stream().filter(t -> t.parent() == null).map(EntityType::name).toList();
 	}
 
 	/** The type and its ancestors, nearest first: {@code country, place}. */
@@ -135,14 +167,45 @@ public final class EntityTypeRegistry {
 		return kept.isEmpty() ? Names.contentTokens(name) : kept; // "Kanton" alone stays "kanton"
 	}
 
+	/**
+	 * Registers a type from its first use: no parent, no words, no description. An existing name is returned as it is.
+	 */
+	public synchronized EntityType registerInferred(String name, Long observationId) {
+		String n = key(name);
+		if (byName.containsKey(n)) {
+			return byName.get(n);
+		}
+		var e = new EntityType(n, null, null, List.of(), List.of(), observationId, false, true);
+		insert(e);
+		return e;
+	}
+
 	/** Registers a caller-defined type; an existing name is returned as it is. */
 	public synchronized EntityType register(EntityTypeDef def, Long observationId) {
 		if (def.name() == null || def.name().isBlank()) {
 			throw MnemicException.invalidArgument("An entity type definition needs a 'name'.");
 		}
-		String name = Names.norm(def.name()).replace(' ', '_');
-		if (byName.containsKey(name)) {
-			return byName.get(name);
+		String name = key(def.name());
+		EntityType existing = byName.get(name);
+		if (existing != null) {
+			if (!existing.inferred() || bare(def)) {
+				return existing;
+			}
+			// A definition for a type registered from use: what it states replaces what was inferred.
+			var replacement = new LinkedHashMap<String, Object>();
+			if (def.description() != null) {
+				replacement.put("description", def.description());
+			}
+			if (def.parent() != null && !def.parent().isBlank()) {
+				replacement.put("parent", def.parent());
+			}
+			if (!def.synonyms().isEmpty()) {
+				replacement.put("synonyms", def.synonyms());
+			}
+			if (!def.typeWords().isEmpty()) {
+				replacement.put("type_words", def.typeWords());
+			}
+			return update(name, replacement, "defined after registration from use");
 		}
 		String parent = def.parent() == null || def.parent().isBlank() ? null : canonical(def.parent());
 		if (parent != null && !byName.containsKey(parent)) {
@@ -150,7 +213,7 @@ public final class EntityTypeRegistry {
 					+ "'; register the parent first or leave it out.");
 		}
 		var e = new EntityType(name, def.description(), parent, lower(def.synonyms()), lower(def.typeWords()),
-				observationId, false);
+				observationId, false, false);
 		insert(e);
 		adopt(e);
 		return e;
@@ -202,9 +265,11 @@ public final class EntityTypeRegistry {
 			}
 			changes.add(new String[] {c.getKey(), old, value});
 		}
-		var updated = new EntityType(e.name(), description, parent, synonyms, words, e.definedBy(), e.seed());
+		var updated = new EntityType(e.name(), description, parent, synonyms, words, e.definedBy(), e.seed(), false);
 		db.write(tx -> {
-			tx.update("UPDATE entity_type SET description = ?, parent = ?, synonyms = ?, type_words = ? WHERE name = ?",
+			tx.update(
+					"UPDATE entity_type SET description = ?, parent = ?, synonyms = ?, type_words = ?, inferred = 0 "
+							+ "WHERE name = ?",
 					updated.description(), updated.parent(), Vocabulary.json(updated.synonyms()),
 					Vocabulary.json(updated.typeWords()), updated.name());
 			Vocabulary.logChanges(tx, "entity_type", updated.name(), changes, reason);
@@ -257,7 +322,7 @@ public final class EntityTypeRegistry {
 
 	private static EntityType seed(
 		String name, String description, String parent, List<String> synonyms, List<String> typeWords) {
-		return new EntityType(name, description, parent, synonyms, typeWords, null, true);
+		return new EntityType(name, description, parent, synonyms, typeWords, null, true, false);
 	}
 
 	// ── persistence ──────────────────────────────────────────────────────
@@ -266,15 +331,16 @@ public final class EntityTypeRegistry {
 		for (Row r : db.read(tx -> tx.query("SELECT * FROM entity_type ORDER BY seed DESC, name"))) {
 			index(new EntityType(r.str("name"), r.str("description"), r.str("parent"),
 					Vocabulary.list(r.str("synonyms")), Vocabulary.list(r.str("type_words")), r.lngOrNull("defined_by"),
-					r.lng("seed") == 1));
+					r.lng("seed") == 1, r.lng("inferred") == 1));
 		}
 	}
 
 	private void insert(EntityType e) {
 		db.write(tx -> tx.insert("""
-				INSERT INTO entity_type(name, description, parent, synonyms, type_words, defined_by, seed, created_at)
-				VALUES (?,?,?,?,?,?,?,?)""", e.name(), e.description(), e.parent(), Vocabulary.json(e.synonyms()),
-				Vocabulary.json(e.typeWords()), e.definedBy(), e.seed() ? 1 : 0, Instant.now().toString()));
+				INSERT INTO entity_type(name, description, parent, synonyms, type_words, defined_by, seed, inferred,
+				                        created_at) VALUES (?,?,?,?,?,?,?,?,?)""", e.name(), e.description(),
+				e.parent(), Vocabulary.json(e.synonyms()), Vocabulary.json(e.typeWords()), e.definedBy(),
+				e.seed() ? 1 : 0, e.inferred() ? 1 : 0, Instant.now().toString()));
 		index(e);
 	}
 

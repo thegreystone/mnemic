@@ -82,13 +82,18 @@ Integer specVersion, List<EntityRef> entities, List<EventRef> events, List<FactR
 			.configure(DeserializationFeature.ACCEPT_SINGLE_VALUE_AS_ARRAY, true);
 
 	public Proposal {
-		entities = entities == null ? List.of() : entities;
-		events = events == null ? List.of() : events;
-		facts = facts == null ? List.of() : facts;
-		predicates = predicates == null ? List.of() : predicates;
-		closures = closures == null ? List.of() : closures;
-		eventTypes = eventTypes == null ? List.of() : eventTypes;
-		entityTypes = entityTypes == null ? List.of() : entityTypes;
+		// A model sometimes writes a bare null where an element goes; it means nothing and is dropped.
+		entities = present(entities);
+		events = present(events);
+		facts = present(facts);
+		predicates = present(predicates);
+		closures = present(closures);
+		eventTypes = present(eventTypes);
+		entityTypes = present(entityTypes);
+	}
+
+	private static <T> List<T> present(List<T> list) {
+		return list == null ? List.of() : list.stream().filter(java.util.Objects::nonNull).toList();
 	}
 
 	/** A parsed proposal with what the parser had to say about it: keys it did not know and ignored. */

@@ -36,6 +36,7 @@ import se.hirt.mnemic.protocol.MnemicException;
 
 import java.time.Instant;
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * Entities and their aliases: the owner, the resolution ladder, query-time spotting, and merges.
@@ -63,6 +64,8 @@ public final class EntityService {
 	public static final Set<String> SELF = Set.of("self", "i", "me", "my", "myself", "mine", "the user", "user");
 	static final double MERGE = 0.85;
 	static final double AMBIGUOUS = 0.40;
+	/** Across types, or with none given, a match on letters alone (no shared name part) must be this close to ask. */
+	static final double LETTERS_ACROSS_TYPES = 0.60;
 	private static final int MAX_NGRAM = 4;
 
 	private final Database db;
@@ -70,10 +73,13 @@ public final class EntityService {
 	private final Entity owner;
 
 	/** {@code ownerIdentity}: configured aliases, e-mail addresses, and handles, seeded as aliases of the owner. */
+	private final Set<String> ownerIdentityNorms;
+
 	public EntityService(Database db, EntityTypeRegistry types, String ownerName, List<String> ownerIdentity) {
 		this.db = db;
 		this.types = types;
 		this.owner = ensureOwner(ownerName, ownerIdentity);
+		this.ownerIdentityNorms = ownerIdentity.stream().map(Names::norm).collect(Collectors.toSet());
 	}
 
 	public Entity owner() {
@@ -170,6 +176,62 @@ public final class EntityService {
 		});
 	}
 
+	/**
+	 * Corrects an entity's {@code name}, {@code type}, or {@code aliases} (the list to keep). The name itself and the
+	 * owner's configured identity are never dropped; an alias that names another entity is not taken.
+	 */
+	public Entity correct(long id, Map<String, Object> replacement) {
+		Entity e = get(id).orElseThrow(() -> MnemicException.notFound("No entity ent-" + id));
+		for (Map.Entry<String, Object> c : replacement.entrySet()) {
+			switch (c.getKey()) {
+			case "name" -> {
+				String name = String.valueOf(c.getValue()).trim();
+				if (name.isEmpty()) {
+					throw MnemicException.invalidArgument("'name' must not be empty.");
+				}
+				db.write(tx -> {
+					tx.update("UPDATE entity SET name = ? WHERE id = ?", name, id);
+					addAliases(tx, id, List.of(name), null);
+					return null;
+				});
+			}
+			case "type" -> retype(id, String.valueOf(c.getValue()));
+			case "aliases" -> {
+				if (!(c.getValue() instanceof List<?> keep)) {
+					throw MnemicException.invalidArgument("'aliases' takes the list of aliases to keep.");
+				}
+				Set<String> kept = keep.stream().map(x -> Names.norm(String.valueOf(x))).collect(Collectors.toSet());
+				String own = Names.norm(get(id).orElseThrow().name());
+				db.write(tx -> {
+					for (Row r : tx.query(
+							"SELECT id, alias_norm, source_observation FROM entity_alias WHERE entity_id = ?", id)) {
+						String norm = r.str("alias_norm");
+						// The owner's seeded aliases (first person, first name, configured identity) are never dropped.
+						boolean protectedName = norm.equals(own)
+								|| (id == owner.id() && (r.lngOrNull("source_observation") == null
+										|| SELF.contains(norm) || ownerIdentityNorms.contains(norm)));
+						if (!kept.contains(norm) && !protectedName) {
+							tx.update("DELETE FROM entity_alias WHERE id = ?", r.lng("id"));
+						}
+					}
+					var add = keep.stream().map(String::valueOf).toList();
+					addAliases(tx, id, add, null);
+					return null;
+				});
+			}
+			default -> throw MnemicException
+					.invalidArgument("Unknown entity property '" + c.getKey() + "'; correctable: name, type, aliases.");
+			}
+		}
+		return get(id).orElseThrow();
+	}
+
+	/** Changes an entity's type: the answer to a type mismatch that blamed the entity. */
+	public void retype(long id, String type) {
+		String t = types.canonical(type);
+		db.write(tx -> tx.update("UPDATE entity SET type = ? WHERE id = ?", t, id));
+	}
+
 	/** Creates an entity outright (used when a question is answered with "new"). */
 	public Entity create(String name, String type, List<String> aliases, Long observationId) {
 		return db.write(tx -> create(tx, name, types.canonical(type), aliases, observationId));
@@ -207,10 +269,11 @@ public final class EntityService {
 	 * three letters or made only of stopwords, so "AL" or "it" never fuzzy-match anything.
 	 */
 	private List<Candidate> fuzzy(Tx tx, String name, String norm, String type, Set<Long> distinctFrom) {
-		List<String> tokens = types.identityTokens(name, type).stream().filter(x -> x.length() >= 3).toList();
+		List<String> tokens = types.identityTokens(name, type).stream().filter(EntityService::identity).toList();
 		if (norm.length() < 3 || tokens.isEmpty()) {
 			return List.of();
 		}
+		List<String> words = Names.contentTokens(name);
 		Set<String> grams = trigrams(norm);
 		var out = new ArrayList<Candidate>();
 		for (Row r : tx.query("SELECT * FROM entity WHERE merged_into IS NULL AND id <> ?", owner.id())) {
@@ -224,7 +287,8 @@ public final class EntityService {
 			double best = 0;
 			for (String alias : aliasesOf(tx, e.id())) {
 				String an = Names.norm(alias);
-				List<String> at = types.identityTokens(alias, e.type()).stream().filter(x -> x.length() >= 3).toList();
+				List<String> at = types.identityTokens(alias, e.type()).stream().filter(EntityService::identity)
+						.toList();
 				long shared = tokens.stream().filter(at::contains).count();
 				double tokenScore = shared == 0 ? 0 : (double) shared / Math.max(tokens.size(), at.size());
 				// "Oskar Nyberg" against "Konrad Nyberg": two full names whose leading tokens differ share a
@@ -235,7 +299,22 @@ public final class EntityService {
 					tokenScore = Math.min(tokenScore, AMBIGUOUS - 0.1);
 				}
 				double gramScore = an.length() >= 4 ? jaccard(grams, trigrams(an)) : 0;
-				best = Math.max(best, Math.max(tokenScore, gramScore));
+				double score = Math.max(tokenScore, gramScore);
+				// "coffee" against a project "Coff-E": no name part shared and not the same kind of thing. Letters
+				// alone raise a question across types only when the spellings nearly agree.
+				if (tokenScore == 0 && !type.equals(e.type()) && gramScore < LETTERS_ACROSS_TYPES) {
+					score = 0;
+				}
+				// One name says more than the other: a version ("Raspberry Pi 5" against "Raspberry Pi"), or a place
+				// word that names another level ("Luzern" against "Kanton Luzern"). Asked, never merged.
+				boolean oneSaysMore = (!tokens.equals(at) && (tokens.containsAll(at) || at.containsAll(tokens)))
+						|| !numbers(name).equals(numbers(alias));
+				boolean placeWordDiffers = tokens.equals(at) && !words.equals(Names.contentTokens(alias))
+						&& (types.isA(type, "place") || types.isA(e.type(), "place"));
+				if (oneSaysMore || placeWordDiffers) {
+					score = Math.min(score, MERGE - 0.01);
+				}
+				best = Math.max(best, score);
 			}
 			if (best >= AMBIGUOUS) {
 				out.add(new Candidate(e, Math.round(best * 100) / 100.0));
@@ -243,6 +322,17 @@ public final class EntityService {
 		}
 		out.sort((a, b) -> Double.compare(b.score(), a.score()));
 		return out;
+	}
+
+	/** The numbers in a name, which content tokens drop: the "5" that makes a Raspberry Pi 5 another thing. */
+	private static Set<String> numbers(String name) {
+		return Names.tokens(name).stream().filter(t -> t.chars().allMatch(Character::isDigit))
+				.collect(java.util.stream.Collectors.toSet());
+	}
+
+	/** A token that identifies: three letters or more, or a number ("5" in "Raspberry Pi 5"). */
+	private static boolean identity(String token) {
+		return token.length() >= 3 || token.chars().allMatch(Character::isDigit);
 	}
 
 	static Set<String> trigrams(String s) {
@@ -477,6 +567,21 @@ public final class EntityService {
 						AND NOT EXISTS (SELECT 1 FROM fact f WHERE f.subject_id = entity.id OR f.object_id = entity.id OR f.scope_id = entity.id)
 						AND NOT EXISTS (SELECT 1 FROM event_participant p WHERE p.entity_id = entity.id)""",
 				observationId));
+	}
+
+	/**
+	 * Entities created by a forgotten observation that nothing refers to any more: the last reference may have gone
+	 * after the observation did, when nothing looked again. The count removed.
+	 */
+	public int removeOrphansOfForgotten() {
+		return db.write(tx -> tx.update(
+				"""
+						DELETE FROM entity WHERE merged_into IS NULL AND id <> ?
+						AND created_from IN (SELECT id FROM observation WHERE forgotten_at IS NOT NULL)
+						AND NOT EXISTS (SELECT 1 FROM fact f WHERE f.subject_id = entity.id OR f.object_id = entity.id OR f.scope_id = entity.id)
+						AND NOT EXISTS (SELECT 1 FROM event_participant p WHERE p.entity_id = entity.id)
+						AND NOT EXISTS (SELECT 1 FROM entity m WHERE m.merged_into = entity.id)""",
+				owner.id()));
 	}
 
 	// ── owner ────────────────────────────────────────────────────────────

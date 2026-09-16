@@ -155,8 +155,8 @@ class RecallFeedbackTest {
 			assertEquals("inherited", inh.events().getFirst().type());
 		}
 		try (Engine e = engine("f9-two-word-type")) {
-			// The author's store typed the event "purchased property": two words, matched word by word, and "buy"
-			// reaches it through the registered "purchased" type's lexicon (2026-09-10).
+			// The author's store typed the event "purchased property": two words (stored as purchased_property),
+			// matched word by word, and "buy" reaches it through the registered "purchased" type's lexicon (2026-09-10).
 			remember(e, "We bought the house at Bergstrasse 7 in November 2025.",
 					proposal().entity("e1", "Bergstrasse 7, Haus B", "place")
 							.event("ev1", "purchased property", "2025-11", "self", "e1").fact(fact("self", "owns", "e1",
@@ -165,7 +165,7 @@ class RecallFeedbackTest {
 					proposal().fact("decided", "not to buy the InfiMaker K1 5-axis CNC"));
 			RecallResult r = recall(e, "when did Mattias buy his house");
 			assertEquals("events", r.structured().state(), r.text());
-			assertEquals("purchased property", r.events().getFirst().type());
+			assertEquals("purchased_property", r.events().getFirst().type());
 			assertTrue(r.hits().getFirst().observation().text().contains("Bergstrasse"), r.text());
 		}
 	}

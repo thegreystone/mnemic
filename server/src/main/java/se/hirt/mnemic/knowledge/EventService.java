@@ -81,6 +81,10 @@ public final class EventService {
 		return eventsOf(entityId).stream().filter(ev -> ev.type().equalsIgnoreCase(type)).toList();
 	}
 
+	public List<Event> ofType(String type) {
+		return db.read(tx -> events(tx, tx.query("SELECT * FROM event WHERE type = ? ORDER BY id", type)));
+	}
+
 	public List<Event> eventsOfObservation(long observationId) {
 		return db.read(
 				tx -> events(tx, tx.query("SELECT * FROM event WHERE observation_id = ? ORDER BY id", observationId)));

@@ -244,7 +244,7 @@ class QuestionsTest {
 			assertTrue(b.applied().questions().isEmpty(), "containment nests, no conflict: " + b.applied().questions());
 			assertEquals("current", stored(e, a, 0).status());
 			assertEquals("current", stored(e, b, 0).status());
-			assertEquals(20, e.database().schemaVersion());
+			assertEquals(22, e.database().schemaVersion());
 		}
 	}
 
@@ -383,10 +383,10 @@ class QuestionsTest {
 					"question links the pending fact");
 
 			RememberOutcome c = remember(e, "Sorry, I meant I consult for Acme.",
-					proposal().fact("x:consults_for", "Acme"), new Resolve(questionId(b), "reinterpret"));
+					proposal().fact("consults_for", "Acme"), new Resolve(questionId(b), "reinterpret"));
 			assertEquals("current", stored(e, a, 0).status(), "Hooli untouched");
 			assertEquals("rejected", stored(e, b, 0).status(), "Acme works_at rejected, not deleted");
-			assertEquals("x:consults_for", c.applied().facts().getFirst().predicate());
+			assertEquals("consults_for", c.applied().facts().getFirst().predicate());
 			assertEquals("current", stored(e, c, 0).status());
 			assertTrue(e.observations().get(b.observation().observationId()).isPresent(),
 					"earlier observation retained");
@@ -492,7 +492,7 @@ class QuestionsTest {
 			assertEquals(1, c.backlog().size());
 			assertEquals(0, e.facts().count(), "no facts invented");
 			assertTrue(c.merges().isEmpty());
-			assertTrue(c.suggestedRegistrations().isEmpty());
+			assertTrue(c.inferredVocabulary().isEmpty());
 		}
 	}
 
@@ -584,19 +584,19 @@ class QuestionsTest {
 
 	@Test
 	@Scenario("J6")
-	void frequentExtendedPredicatesAreProposedForRegistration() {
+	void predicatesRegisteredFromUseAreListedForDefinition() {
 		try (Engine e = engine("j6")) {
 			for (String who : List.of("Anna", "Erik", "Sara")) {
 				remember(e, "I mentor " + who + ".",
-						proposal().entity("e1", who, "person").fact("self", "x:mentors", "e1"));
+						proposal().entity("e1", who, "person").fact("self", "mentors", "e1"));
 			}
 			Consolidation c = e.consolidate(true);
-			assertEquals(1, c.suggestedRegistrations().size(), c.toString());
-			Map<String, Object> s = c.suggestedRegistrations().getFirst();
-			assertEquals("x:mentors", s.get("predicate"));
+			assertEquals(1, c.inferredVocabulary().size(), c.toString());
+			Map<String, Object> s = c.inferredVocabulary().getFirst();
+			assertEquals("mentors", s.get("predicate"));
 			assertEquals(3L, s.get("uses"));
 			assertEquals(3, ((List<?>) s.get("observations")).size());
-			assertTrue(e.predicates().get("x:mentors").orElseThrow().isExtended(), "nothing changed");
+			assertTrue(e.predicates().get("mentors").orElseThrow().isInferred(), "nothing changed");
 		}
 	}
 

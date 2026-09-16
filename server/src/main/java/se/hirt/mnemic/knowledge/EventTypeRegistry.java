@@ -37,10 +37,8 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
-import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -56,7 +54,7 @@ import java.util.regex.Pattern;
  * C11).</li>
  * </ul>
  * A type's {@code render} template turns the participants into a sentence ({@code {subject} bought {object}}); a type
- * without one, or nobody registered, renders as {@code type(participants)}. Seeded, extensible from a proposal,
+ * without one renders as {@code type(participants)}. Seeded, extensible from a proposal or from an event's first use,
  * corrected through {@code correct}. The table is read once at start into a hash map and every write goes to the
  * database and the map in the same call.
  */
@@ -64,7 +62,13 @@ public final class EventTypeRegistry {
 
 	public record EventType(String name, String description, List<String> opens, List<String> closes,
 			List<String> supersedes, boolean endsEntity, boolean seed, List<String> lexicon, Long definedBy,
-			String render) {
+			String render, boolean inferred) {
+	}
+
+	/** A definition that states nothing beyond the name. */
+	static boolean bare(EventTypeDef d) {
+		return d.description() == null && d.opens().isEmpty() && d.closes().isEmpty() && d.supersedes().isEmpty()
+				&& d.endsEntity() == null && d.lexicon().isEmpty() && d.render() == null;
 	}
 
 	private final Database db;
@@ -78,10 +82,47 @@ public final class EventTypeRegistry {
 				insert(t);
 			}
 		}
+		// A store from before 2.3: types are spelled the registry's way, and those that are types (not descriptions
+		// the caller put where the type goes) are registered from use.
+		for (Row r : db.read(tx -> tx.query("SELECT DISTINCT type FROM event"))) {
+			String stored = r.str("type");
+			if (stored == null) {
+				continue;
+			}
+			String k = key(stored);
+			if (!k.equals(stored)) {
+				db.write(tx -> tx.update("UPDATE event SET type = ? WHERE type = ?", k, stored));
+			}
+			if (!byName.containsKey(k) && typeLike(stored)) {
+				registerInferred(stored, null);
+			}
+		}
+	}
+
+	/** Reads the table again, after a change made beside the registry. */
+	public synchronized void reload() {
+		byName.clear();
+		load();
 	}
 
 	public synchronized Optional<EventType> get(String name) {
-		return name == null ? Optional.empty() : Optional.ofNullable(byName.get(name.toLowerCase(Locale.ROOT)));
+		return name == null ? Optional.empty() : Optional.ofNullable(byName.get(key(name)));
+	}
+
+	/** The registry's spelling of a name: its words, lowercase, joined by underscores ({@code purchased_property}). */
+	public static String key(String name) {
+		return String.join("_", Names.tokens(name));
+	}
+
+	/**
+	 * Whether a name is a type at all, rather than a description the caller put where the type goes ("dealer confirmed
+	 * receipt of the payment"): at most three words, two of them content words, and no number. A description is stored
+	 * as a plain occurrence and never registered, since a registry of one-off sentences would be no vocabulary.
+	 */
+	public static boolean typeLike(String name) {
+		List<String> tokens = Names.tokens(name);
+		return !tokens.isEmpty() && tokens.size() <= 3 && Names.contentTokens(name).size() <= 2
+				&& tokens.stream().noneMatch(t -> t.chars().allMatch(Character::isDigit));
 	}
 
 	public synchronized List<EventType> all() {
@@ -109,7 +150,7 @@ public final class EventTypeRegistry {
 		EventType t = byName.get(type);
 		String template = t == null ? null : t.render();
 		if (template == null || template.isBlank()) {
-			return type + "(" + String.join(", ", participants) + ")";
+			return type.replace('_', ' ') + " (" + String.join(", ", participants) + ")";
 		}
 		String subject = participants.isEmpty() ? "" : participants.getFirst();
 		String object = participants.size() < 2 ? "" : String.join(", ", participants.subList(1, participants.size()));
@@ -128,13 +169,41 @@ public final class EventTypeRegistry {
 	 * Registers a caller-defined type; an existing name is returned as it is. {@code registered} says which predicates
 	 * exist, since a type may only open, close, or supersede those.
 	 */
-	public synchronized EventType register(EventTypeDef def, Long observationId, Predicate<String> registered) {
+	public synchronized EventType register(
+		EventTypeDef def, Long observationId, java.util.function.Predicate<String> registered) {
 		if (def.name() == null || def.name().isBlank()) {
 			throw MnemicException.invalidArgument("An event type definition needs a 'name'.");
 		}
-		String name = def.name().trim().toLowerCase(Locale.ROOT).replace(' ', '_');
-		if (byName.containsKey(name)) {
-			return byName.get(name);
+		String name = key(def.name());
+		EventType existing = byName.get(name);
+		if (existing != null) {
+			if (!existing.inferred() || bare(def)) {
+				return existing;
+			}
+			// A definition for a type registered from use: what it states replaces what was inferred.
+			var replacement = new LinkedHashMap<String, Object>();
+			if (def.description() != null) {
+				replacement.put("description", def.description());
+			}
+			if (!def.opens().isEmpty()) {
+				replacement.put("opens", def.opens());
+			}
+			if (!def.closes().isEmpty()) {
+				replacement.put("closes", def.closes());
+			}
+			if (!def.supersedes().isEmpty()) {
+				replacement.put("supersedes", def.supersedes());
+			}
+			if (def.endsEntity() != null) {
+				replacement.put("ends_entity", def.endsEntity());
+			}
+			if (!def.lexicon().isEmpty()) {
+				replacement.put("lexicon", def.lexicon());
+			}
+			if (def.render() != null && !def.render().isBlank()) {
+				replacement.put("render", def.render());
+			}
+			return update(name, replacement, "defined after registration from use", registered);
 		}
 		for (String p : concat(def.opens(), def.closes(), def.supersedes())) {
 			if (!registered.test(p)) {
@@ -144,7 +213,22 @@ public final class EventTypeRegistry {
 		}
 		var t = new EventType(name, def.description(), def.opens(), def.closes(), def.supersedes(),
 				Boolean.TRUE.equals(def.endsEntity()), false, lower(def.lexicon()), observationId,
-				template(def.render()));
+				template(def.render()), false);
+		insert(t);
+		return t;
+	}
+
+	/**
+	 * Registers a type from its first use: no effects, the name's words as lexicon, a template made from the name, and
+	 * no description until somebody answers what it does. An existing name is returned as it is.
+	 */
+	public synchronized EventType registerInferred(String name, Long observationId) {
+		String n = key(name);
+		if (byName.containsKey(n)) {
+			return byName.get(n);
+		}
+		var t = new EventType(n, null, List.of(), List.of(), List.of(), false, false, Predicate.lexiconOf(n),
+				observationId, "{subject} " + n.replace('_', ' ') + " {object}", true);
 		insert(t);
 		return t;
 	}
@@ -154,7 +238,7 @@ public final class EventTypeRegistry {
 	 * {@code lexicon}, or {@code render}; every change is logged. The caller re-renders the type's events.
 	 */
 	public synchronized EventType update(
-		String name, Map<String, Object> replacement, String reason, Predicate<String> registered) {
+		String name, Map<String, Object> replacement, String reason, java.util.function.Predicate<String> registered) {
 		EventType t = get(name).orElseThrow(() -> MnemicException.notFound("No event type " + name));
 		String description = t.description();
 		List<String> opens = t.opens();
@@ -202,12 +286,12 @@ public final class EventTypeRegistry {
 			changes.add(new String[] {c.getKey(), old, value});
 		}
 		var updated = new EventType(t.name(), description, opens, closes, supersedes, endsEntity, t.seed(), lexicon,
-				t.definedBy(), render);
+				t.definedBy(), render, false);
 		db.write(tx -> {
 			tx.update(
 					"""
 							UPDATE event_type SET description = ?, opens = ?, closes = ?, supersedes = ?, ends_entity = ?, lexicon = ?,
-							                      render = ? WHERE name = ?""",
+							                      render = ?, inferred = 0 WHERE name = ?""",
 					updated.description(), Vocabulary.json(updated.opens()), Vocabulary.json(updated.closes()),
 					Vocabulary.json(updated.supersedes()), updated.endsEntity() ? 1 : 0,
 					Vocabulary.json(updated.lexicon()), updated.render(), updated.name());
@@ -222,6 +306,29 @@ public final class EventTypeRegistry {
 		return db.read(tx -> Vocabulary.changes(tx, "event_type", name));
 	}
 
+	/** After two predicates merged: every type that opened, closed, or superseded the old name names the new one. */
+	public synchronized void renamePredicate(String from, String into, String reason) {
+		for (EventType t : List.copyOf(byName.values())) {
+			var replacement = new LinkedHashMap<String, Object>();
+			if (t.opens().contains(from)) {
+				replacement.put("opens", rename(t.opens(), from, into));
+			}
+			if (t.closes().contains(from)) {
+				replacement.put("closes", rename(t.closes(), from, into));
+			}
+			if (t.supersedes().contains(from)) {
+				replacement.put("supersedes", rename(t.supersedes(), from, into));
+			}
+			if (!replacement.isEmpty()) {
+				update(t.name(), replacement, reason, p -> true);
+			}
+		}
+	}
+
+	private static List<String> rename(List<String> names, String from, String into) {
+		return names.stream().map(n -> n.equals(from) ? into : n).distinct().toList();
+	}
+
 	/** A template must name the subject, or an event would read the same whoever took part. */
 	private static String template(String render) {
 		if (render == null || render.isBlank()) {
@@ -234,7 +341,7 @@ public final class EventTypeRegistry {
 		return render.trim();
 	}
 
-	private static List<String> predicates(Object value, Predicate<String> registered) {
+	private static List<String> predicates(Object value, java.util.function.Predicate<String> registered) {
 		List<String> names = Vocabulary.strings(value).stream().map(String::trim).filter(s -> !s.isEmpty()).toList();
 		for (String p : names) {
 			if (!registered.test(p)) {
@@ -334,15 +441,15 @@ public final class EventTypeRegistry {
 				type("sold", "Subject sold object.", List.of(), List.of("owns"), List.of(),
 						List.of("sold", "sell", "selling"), "{subject} sold {object}"),
 				new EventType("died", "Subject died; open facts about the subject end.", List.of(), List.of(),
-						List.of(), true, true, List.of("died", "death", "passed"), null, "{subject} died"),
+						List.of(), true, true, List.of("died", "death", "passed"), null, "{subject} died", false),
 				new EventType("dissolved", "Subject organization ceased to exist.", List.of(), List.of(), List.of(),
-						true, true, List.of("dissolved"), null, "{subject} was dissolved"));
+						true, true, List.of("dissolved"), null, "{subject} was dissolved", false));
 	}
 
 	private static EventType type(
 		String name, String description, List<String> opens, List<String> closes, List<String> supersedes,
 		List<String> lexicon, String render) {
-		return new EventType(name, description, opens, closes, supersedes, false, true, lexicon, null, render);
+		return new EventType(name, description, opens, closes, supersedes, false, true, lexicon, null, render, false);
 	}
 
 	// ── persistence ──────────────────────────────────────────────────────
@@ -353,17 +460,17 @@ public final class EventTypeRegistry {
 					new EventType(r.str("name"), r.str("description"), Vocabulary.list(r.str("opens")),
 							Vocabulary.list(r.str("closes")), Vocabulary.list(r.str("supersedes")),
 							r.lng("ends_entity") == 1, r.lng("seed") == 1, Vocabulary.list(r.str("lexicon")),
-							r.lngOrNull("defined_by"), r.str("render")));
+							r.lngOrNull("defined_by"), r.str("render"), r.lng("inferred") == 1));
 		}
 	}
 
 	private void insert(EventType t) {
 		db.write(tx -> tx.insert("""
 				INSERT INTO event_type(name, description, opens, closes, supersedes, ends_entity, lexicon, defined_by,
-				                       seed, render, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)""", t.name(),
-				t.description(), Vocabulary.json(t.opens()), Vocabulary.json(t.closes()),
+				                       seed, render, inferred, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+				t.name(), t.description(), Vocabulary.json(t.opens()), Vocabulary.json(t.closes()),
 				Vocabulary.json(t.supersedes()), t.endsEntity() ? 1 : 0, Vocabulary.json(t.lexicon()), t.definedBy(),
-				t.seed() ? 1 : 0, t.render(), Instant.now().toString()));
+				t.seed() ? 1 : 0, t.render(), t.inferred() ? 1 : 0, Instant.now().toString()));
 		byName.put(t.name(), t);
 	}
 }

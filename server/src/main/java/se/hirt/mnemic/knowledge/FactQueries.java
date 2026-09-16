@@ -186,7 +186,7 @@ public final class FactQueries {
 
 	private int briefingRank(String predicate) {
 		Predicate p = predicates.get(predicate).orElse(null);
-		if (p == null || p.isExtended()) {
+		if (p == null || p.isInferred()) {
 			return 3;
 		}
 		if (p.functional()) {
