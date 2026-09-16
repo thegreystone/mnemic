@@ -397,6 +397,95 @@ class FeedbackTest {
 	}
 
 	@Test
+	@Scenario("T15")
+	void aCoupleWhoAreNotMarried() {
+		try (Engine e = TestHomes.engine("t15-partner")) {
+			assertTrue(e.predicates().get("partner_of").orElseThrow().symmetric());
+			RememberOutcome o = remember(e, "Anna and Bo live together.",
+					proposal().entity("e1", "Anna Lindqvist", "person").entity("e2", "Bo Nyberg", "person")
+							.fact(fact("e2", "partner_of", "e1", "boyfriend", null, null, null, null, null, null)));
+			assertEquals("Bo Nyberg is Anna Lindqvist's boyfriend", o.applied().facts().getFirst().rendering());
+			assertTrue(o.applied().questions().isEmpty(), o.applied().questions().toString());
+			RememberOutcome w = remember(e, "Anna married Bo in June 2024.",
+					proposal().entity("e1", "Anna Lindqvist", "person").entity("e2", "Bo Nyberg", "person").event("ev1",
+							"married", "2024-06", "e1", "e2"));
+			Fact partner = factOf(e, factId(o, 0));
+			assertEquals("2024-06-01", partner.validEnd(), "closed from the other side: " + partner.rendering());
+			assertEquals("ended", partner.state(e.clock().instant()));
+			assertTrue(w.applied().facts().stream().anyMatch(f -> "spouse_of".equals(f.predicate())),
+					"the wedding opens spouse_of: " + w.applied().facts());
+			RecallResult p = recall(e, "who is Anna's partner");
+			assertEquals("miss", p.structured().state(), p.text());
+			assertTrue(p.text().contains("1 ended fact: Bo Nyberg is Anna Lindqvist's boyfriend"), p.text());
+			RecallResult m = recall(e, "who is Anna married to");
+			assertEquals("matched", m.structured().state(), m.text());
+			// separated ends a partnership too.
+			RememberOutcome c = remember(e, "Lisa and Tom are a couple.",
+					proposal().entity("e1", "Lisa Berg", "person").entity("e2", "Tom Berg", "person")
+							.fact(fact("e1", "partner_of", "e2", null, null, "2020", null, null, null, null)));
+			remember(e, "Tom and Lisa split up in 2023.", proposal().entity("e1", "Tom Berg", "person")
+					.entity("e2", "Lisa Berg", "person").event("ev1", "separated", "2023", "e1", "e2"));
+			assertEquals("2023-01-01", factOf(e, factId(c, 0)).validEnd());
+		}
+	}
+
+	@Test
+	@Scenario("T16")
+	void anEngagement() {
+		try (Engine e = TestHomes.engine("t16-engaged")) {
+			RememberOutcome o = remember(e, "Anna and Bo got engaged in 2023.",
+					proposal().entity("e1", "Anna Lindqvist", "person").entity("e2", "Bo Nyberg", "person").event("ev1",
+							"engaged", "2023", "e1", "e2"));
+			assertTrue(o.applied().questions().isEmpty(), o.applied().questions().toString());
+			Fact engaged = e.facts().factsOfObservation(o.observation().observationId()).stream()
+					.filter(f -> "engaged_to".equals(f.predicate())).findFirst().orElseThrow();
+			assertEquals("Anna Lindqvist is engaged to Bo Nyberg (since 2023)", engaged.rendering());
+			remember(e, "Anna married Bo in June 2024.", proposal().entity("e1", "Anna Lindqvist", "person")
+					.entity("e2", "Bo Nyberg", "person").event("ev1", "married", "2024-06", "e1", "e2"));
+			Fact after = factOf(e, engaged.id());
+			assertEquals("2024-06-01", after.validEnd(), after.rendering());
+			assertEquals("ended", after.state(e.clock().instant()));
+		}
+	}
+
+	@Test
+	@Scenario("T17")
+	void aStepParent() {
+		try (Engine e = TestHomes.engine("t17-step-parent")) {
+			RememberOutcome o = remember(e, "Lars is my stepfather.", proposal().entity("e1", "Lars Berg", "person")
+					.fact(fact("e1", "step_parent_of", "self", "stepfather", null, null, null, null, null, null)));
+			assertEquals("Lars Berg is Mattias Sandell's stepfather", o.applied().facts().getFirst().rendering());
+			assertEquals("step_parent_of", o.applied().facts().getFirst().predicate());
+			assertFalse(e.predicates().get("parent_of").orElseThrow().qualifiers().contains("stepfather"));
+			assertTrue(e.predicates().get("step_parent_of").orElseThrow().lexicon().contains("stepfather"));
+		}
+		try (Engine e = TestHomes.engine(TestHomes.fresh("t17-step-parent-de"), Lang.DE)) {
+			RememberOutcome o = remember(e, "Lars ist mein Stiefvater.", proposal().entity("e1", "Lars Berg", "person")
+					.fact(fact("e1", "step_parent_of", "self", "stepfather", null, null, null, null, null, null)));
+			assertEquals("Lars Berg ist Stiefvater von Mattias Sandell", o.applied().facts().getFirst().rendering());
+		}
+	}
+
+	@Test
+	@Scenario("T18")
+	void anUndatedDeathEndsFactsWithoutInventingADate() {
+		try (Engine e = TestHomes.engine("t18-undated-death")) {
+			RememberOutcome o = remember(e, "Bosse lived in Zug.", proposal().entity("e1", "Bosse Nyberg", "person")
+					.entity("e2", "Zug", "place").fact("e1", "lives_in", "e2"));
+			remember(e, "Bosse has died.",
+					proposal().entity("e1", "Bosse Nyberg", "person").event("ev1", "died", null, "e1"));
+			Fact f = factOf(e, factId(o, 0));
+			assertTrue(f.ended(), f.rendering());
+			assertNull(f.validEnd(), "no date was given, none is invented: " + f.rendering());
+			assertEquals("ended", f.state(e.clock().instant()));
+			long bosse = e.entities().byRef("Bosse Nyberg").orElseThrow().id();
+			assertNull(e.database().read(
+					tx -> tx.query("SELECT existed_end FROM entity WHERE id = ?", bosse).getFirst().str("existed_end")),
+					"the entity's end is not invented either");
+		}
+	}
+
+	@Test
 	@Scenario("T6")
 	void aStoredQualifierCuesItsPredicate() {
 		try (Engine e = TestHomes.engine("t6-qualifier-cue")) {

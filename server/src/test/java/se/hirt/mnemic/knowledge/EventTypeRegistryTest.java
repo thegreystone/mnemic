@@ -59,7 +59,7 @@ class EventTypeRegistryTest {
 	void seedIsThereAtStart() {
 		try (Database db = open(TestHomes.fresh("events-seed"))) {
 			var types = new EventTypeRegistry(db);
-			assertEquals(16, types.all().size());
+			assertEquals(18, types.all().size());
 			assertTrue(types.touches("joined", "works_at"));
 			assertTrue(types.supersedes("joined", "works_at"));
 			assertFalse(types.supersedes("purchased", "owns"));
@@ -90,7 +90,7 @@ class EventTypeRegistryTest {
 			var reopened = new EventTypeRegistry(db);
 			EventType inherited = reopened.get("inherited").orElseThrow();
 			assertEquals(List.of("owns"), inherited.opens());
-			assertEquals(17, reopened.all().size());
+			assertEquals(19, reopened.all().size());
 		}
 	}
 

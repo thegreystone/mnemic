@@ -138,7 +138,9 @@ public enum Lang {
 			Map.entry("stepsister", "Stiefschwester"), Map.entry("stepsibling", "Stiefgeschwister"),
 			Map.entry("twin", "Zwilling"), Map.entry("twin brother", "Zwillingsbruder"),
 			Map.entry("twin sister", "Zwillingsschwester"), Map.entry("wife", "Ehefrau"),
-			Map.entry("husband", "Ehemann"), Map.entry("spouse", "Ehepartner"), Map.entry("partner", "Partner"));
+			Map.entry("husband", "Ehemann"), Map.entry("spouse", "Ehepartner"), Map.entry("partner", "Partner"),
+			Map.entry("girlfriend", "Freundin"), Map.entry("boyfriend", "Freund"), Map.entry("fiancé", "Verlobter"),
+			Map.entry("fiancée", "Verlobte"), Map.entry("step-parent", "Stiefelternteil"));
 
 	/** A family qualifier in the language's words; the stored value stays the vocabulary's (English) term. */
 	public String qualifier(String qualifier) {

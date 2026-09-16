@@ -234,11 +234,16 @@ public final class EventService {
 		Entity subject = participants.getFirst();
 		db.write(tx -> {
 			for (String pred : et.get().closes()) {
+				// A symmetric fact is stored once, from whichever side said it: partner_of(Bo, Anna) ends at
+				// married(Anna, Bo) as surely as at married(Bo, Anna).
+				boolean symmetric = ledger.symmetric(pred);
 				for (int i = 1; i < participants.size(); i++) {
-					for (Row r : tx.query("""
-							SELECT * FROM fact WHERE subject_id = ? AND predicate = ? AND status = 'current'
-							AND valid_end IS NULL AND (object_id = ? OR scope_id = ?)""", subject.id(), pred,
-							participants.get(i).id(), participants.get(i).id())) {
+					for (Row r : tx.query(
+							"""
+									SELECT * FROM fact WHERE predicate = ? AND status = 'current' AND valid_end IS NULL
+									AND ((subject_id = ? AND (object_id = ? OR scope_id = ?)) OR (? AND subject_id = ? AND object_id = ?))""",
+							pred, subject.id(), participants.get(i).id(), participants.get(i).id(), symmetric ? 1 : 0,
+							participants.get(i).id(), subject.id())) {
 						Fact f = Fact.from(r);
 						if (startsAfter(f, b)) {
 							continue;

@@ -241,8 +241,11 @@ and also shows each predicate's lexicon and the event types.
 | `lives_in`    | person → place                          |        yes |        no | high       |                                                                                              |                                        |
 | `born_in`     | person → place                          |        yes |        no | low        |                                                                                              |                                        |
 | `member_of`   | person → organization/team/group/project |        no |        no | medium     |                                                                                              |                                        |
-| `parent_of`   | person → person                         |         no |        no | low        | mother, father, stepmother, stepfather, mom, dad                                             | child, children, kid, kids, son, sons, daughter, daughters, offspring |
+| `parent_of`   | person → person                         |         no |        no | low        | mother, father, mom, dad                                                                     | child, children, kid, kids, son, sons, daughter, daughters, offspring |
 | `spouse_of`   | person → person                         |        yes |       yes | low        | wife, husband                                                                                |                                        |
+| `partner_of`  | person → person                         |        yes |       yes | medium     | girlfriend, boyfriend, partner                                                                            |                                        |
+| `engaged_to`  | person → person                         |        yes |       yes | high       | fiancé, fiancée                                                                                |                                        |
+| `step_parent_of`| person → person                         |         no |        no | low        | stepmother, stepfather                                                                        |                                        |
 | `sibling_of`  | person → person                         |         no |       yes | low        | brother, sister, twin, twin brother, twin sister, half-brother, half-sister, stepbrother, stepsister |                                 |
 | `owns`        | * → *                                   |         no |        no | medium     |                                                                                              |                                        |
 | `prefers`     | person → *                              |         no |        no | medium     |                                                                                              |                                        |
@@ -472,14 +475,15 @@ written as ownership.
 shows them) with four effects: `opens` (a fact the event implies when the
 proposal did not state it: `purchased` → `owns`, `joined` → `works_at`),
 `closes` (the event ends the fact whose subject and object both take part:
-`left`, `retired`, `divorced`, `sold`), `supersedes` (see step 2 above:
+`left`, `retired`, `divorced`, `sold`; `married` and `separated` end a
+`partner_of` or `engaged_to` fact from whichever side it was stated), `supersedes` (see step 2 above:
 `joined`, `hired`, `founded`, `promoted`, `moved`, `married`), and
 `ends_entity` (`died`, `dissolved`: the participant's open facts are closed at
 the event time and its `existed_end` is written). Without the last, a death
 leaves the person's `lives_in` and `works_at` facts current forever. The seed
 types are `joined`, `hired`, `founded`, `left`, `retired`, `promoted`,
-`moved`, `married`, `divorced`, `born`, `decided`, `met`, `purchased`, `sold`,
-`died`, `dissolved`; an unregistered type is stored as a plain occurrence with
+`moved`, `engaged`, `married`, `separated`, `divorced`, `born`, `decided`, `met`,
+`purchased`, `sold`, `died`, `dissolved`; an unregistered type is stored as a plain occurrence with
 no effect on facts. The same event said again, with or without its date, is
 the event on record, and a date the record lacked is filled in.
 

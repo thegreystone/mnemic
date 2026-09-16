@@ -103,6 +103,11 @@ final class FactLedger {
 		closeScoped(tx, fact, eventId, obsId, b.end(), b.endPrecision());
 	}
 
+	/** Whether the predicate is stored once and read from both sides. */
+	boolean symmetric(String predicate) {
+		return predicates.get(predicate).map(Predicate::symmetric).orElse(false);
+	}
+
 	/**
 	 * A fact functional per scope (a role at an organization) cannot outlive the subject's relation to that scope: when
 	 * {@code works_at(s, o)} ends, every open fact of {@code s} scoped to {@code o} ends with it, at the same date,

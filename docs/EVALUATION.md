@@ -2233,3 +2233,56 @@ Expect: `unused_vocabulary` lists `event_type: built` and
 unanchors the definitions and still lists them (`defined_by: null`).
 Seeded and inferred vocabulary never appears here (inferred terms have
 their own list); nothing is removed on its own.
+
+### T15. A couple who are not married
+
+```text
+remember(text: "Anna and Bo live together.", proposal: { facts: [ partner_of(Bo, Anna, boyfriend) ] })
+remember(text: "Anna married Bo in June 2024.", proposal: { events: [ married(Anna, Bo) 2024-06 ] })
+recall(query: "who is Anna's partner")
+recall(query: "who is Anna married to")
+```
+
+Expect: `partner_of` is a seed predicate (symmetric, functional, medium
+volatility; qualifiers girlfriend, boyfriend, partner), so the couple is
+not filed under `related_to`. The wedding closes the partnership at
+2024-06 although it was stated from Bo's side, and opens `spouse_of`. The
+partner question is a MISS naming the ended fact; the marriage question
+matches. `separated` ends a partnership the same way.
+
+### T16. An engagement
+
+```text
+remember(text: "Anna and Bo got engaged in 2023.", proposal: { events: [ engaged(Anna, Bo) 2023 ] })
+remember(text: "Anna married Bo in June 2024.", proposal: { events: [ married(Anna, Bo) 2024-06 ] })
+```
+
+Expect: `engaged` opens `engaged_to` (a seed predicate: symmetric,
+functional, high volatility) from 2023; the wedding ends it at 2024-06 and
+opens `spouse_of`. No ad-hoc definition and no "did you mean spouse_of"
+question.
+
+### T17. A step-parent
+
+```text
+remember(text: "Lars is my stepfather.", proposal: { facts: [ step_parent_of(Lars, self, stepfather) ] })
+```
+
+Expect: "Lars is Mattias Sandell's stepfather" under `step_parent_of`, a
+seed predicate of its own (person → person, not functional, not symmetric),
+so a step-parent never counts as a parent when siblings or grandparents are
+derived from `parent_of`. `parent_of` no longer lists stepmother and
+stepfather among its qualifiers, and its lexicon cues only parents. In
+German: "Lars ist Stiefvater von Mattias Sandell".
+
+### T18. An undated death ends facts without inventing a date
+
+```text
+remember(text: "Bosse lived in Zug.", proposal: { facts: [ lives_in(Bosse, Zug) ] })
+remember(text: "Bosse has died.", proposal: { events: [ died(Bosse) ] })
+```
+
+Expect: the `lives_in` fact is ended (`ended: true`, standing `ended`) with
+no end date, its `end_source` `entity_ended`; the entity's `existed_end`
+stays unset. Nothing is closed "at now". A later date for the death fills
+the end in through the event.
