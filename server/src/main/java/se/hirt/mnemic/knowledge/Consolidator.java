@@ -44,8 +44,8 @@ import java.util.Optional;
 public final class Consolidator {
 
 	/** What consolidation did or would do. */
-	public record Outcome(List<Map<String, Object>> merges, int reclosed,
-			List<Map<String, Object>> suggestedRegistrations, List<Map<String, Object>> resolvedQuestions,
+	public record Outcome(List<Map<String, Object>> merges, int reclosed, List<Map<String, Object>> inferredVocabulary,
+			List<Map<String, Object>> similarVocabulary, List<Map<String, Object>> resolvedQuestions,
 			List<Map<String, Object>> review, List<Map<String, Object>> duplicates) {
 	}
 
@@ -82,25 +82,27 @@ public final class Consolidator {
 		var duplicates = new ArrayList<Map<String, Object>>();
 		foldDuplicateFacts(dryRun, duplicates);
 		foldDuplicateEvents(dryRun, duplicates);
-		return new Outcome(merges, reclosed, suggestedRegistrations(), resolved, facts.review(5), duplicates);
+		return new Outcome(merges, reclosed, inferredVocabulary(), predicates.closePairs(), resolved, facts.review(5),
+				duplicates);
 	}
 
 	/**
-	 * Vocabulary in use without a definition, for the caller to settle with the user: extended predicates used often
-	 * (EVALUATION.md J6), and every event type and entity type the store holds that the registry lacks.
+	 * Vocabulary registered from use that nobody has described yet, with how much rests on it, for the caller to settle
+	 * with the user (EVALUATION.md J6): predicates, event types, and entity types.
 	 */
-	private List<Map<String, Object>> suggestedRegistrations() {
-		var out = new ArrayList<>(predicates.frequentExtended(3));
-		for (Row r : db.read(tx -> tx.query("SELECT type, COUNT(*) AS n FROM event GROUP BY type ORDER BY n DESC"))) {
-			if (eventTypes.get(r.str("type")).isEmpty()) {
-				out.add(Map.of("event_type", r.str("type"), "uses", r.lng("n")));
+	private List<Map<String, Object>> inferredVocabulary() {
+		var out = new ArrayList<>(predicates.inferred());
+		for (var t : eventTypes.all()) {
+			if (t.inferred()) {
+				long n = db.read(tx -> tx.queryLong("SELECT COUNT(*) FROM event WHERE type = ?", t.name()));
+				out.add(Map.of("event_type", t.name(), "uses", n));
 			}
 		}
-		for (Row r : db.read(tx -> tx.query(
-				"SELECT type, COUNT(*) AS n FROM entity WHERE merged_into IS NULL GROUP BY type ORDER BY n DESC"))) {
-			String type = r.str("type");
-			if (!EntityTypeRegistry.UNKNOWN.equals(type) && entityTypes.get(type).isEmpty()) {
-				out.add(Map.of("entity_type", type, "uses", r.lng("n")));
+		for (var t : entityTypes.all()) {
+			if (t.inferred()) {
+				long n = db.read(tx -> tx
+						.queryLong("SELECT COUNT(*) FROM entity WHERE type = ? AND merged_into IS NULL", t.name()));
+				out.add(Map.of("entity_type", t.name(), "uses", n));
 			}
 		}
 		return out;

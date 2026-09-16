@@ -165,8 +165,9 @@ You talk to the assistant; it talks to Mnemic. Things you can say:
 - "What should I confirm?" (plans past their date, and facts long unconfirmed)
 - "What vehicle am I about to collect?" (what is coming ranks first when the question asks)
 
-Behind that are the tools `remember`, `recall`, `get_entity`, `history`, `correct`, `retract`, `propose`, `retire`, `forget`,
-`consolidate`, `list_predicates`, and `status`. Each one tells the assistant when to use it and when not to.
+Behind that are seven tools: `remember`, `recall`, `inspect`, `correct`, `forget`, `consolidate`, and `status`. Each
+one tells the assistant when to use it and when not to, and everything the store holds has one kind of id (`obs-12`,
+`f-12`, `ent-12`, `evt-3`, `q-3`, `pred:works_at`, `event:joined`, `type:place`) that `inspect` and `correct` take.
 
 Every answer from `recall` starts with a verdict the assistant can rely on: *matched* (the fact is known),
 *MISS* (the question was understood and no such fact is known, which is not the same as no), *KNOWN FALSE*

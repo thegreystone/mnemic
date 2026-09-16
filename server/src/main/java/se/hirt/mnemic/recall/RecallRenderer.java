@@ -238,7 +238,7 @@ final class RecallRenderer {
 		}
 		case "entity" -> sb.append("entity ").append(s.entityName()).append(" resolved, no predicate cue; ")
 				.append(s.facts().size()).append(s.facts().size() == 1 ? " fact" : " facts").append(" known, ")
-				.append("not used for ranking (name a relation, e.g. works_at, or use get_entity)");
+				.append("not used for ranking (name a relation, e.g. works_at, or use inspect)");
 		default -> sb.append("unresolved (no entity and predicate cue in the query)");
 		}
 		for (String note : s.notes()) {

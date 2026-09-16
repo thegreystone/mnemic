@@ -16,12 +16,11 @@ MEMORY PROTOCOL
    structured reading of it as `proposal`, its literal parts in the store's language (`status` names it),
    the observation in the user's own words. A leaning or intention is `considering`, not `decided`. What the
    user says is not so goes in as a negated fact, a restriction (`only`), or a closure, never as a fact with
-   the bound as its object. An event type or entity type the registry lacks goes in the same proposal
-   (`event_types`, `entity_types`, with a `render` template for an event type and `renders` per language for a
-   predicate) and stays registered. When a reply carries `suggestions`, the proposal used a
-   term the registry lacks: ask the user in one line what it should mean and define it next time. Call
-   `list_predicates` when unsure what relation, event type, or entity type to use; `status` only counts
-   them. Record at
+   the bound as its object. A predicate, event type, or entity type the registry lacks registers itself
+   from its first use (`definitions` in the reply names it) with everything inferred from the name; define
+   it in the same proposal (`predicates`, `event_types`, `entity_types`) when you know more, or answer the
+   question the store asks about what it means. Call `inspect('registry')` when unsure what relation,
+   event type, or entity type to use; `status` only counts them. Record at
    natural boundaries: a topic change, the end of a task, before your context is compacted. Do not record
    every message.
 4. SURFACE. If a response carries `questions`, put them to the user in your own words and answer them with

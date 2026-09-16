@@ -172,17 +172,17 @@ The `recall` tool hides this machinery from the calling model; `status` reports 
 
 ## MCP surface
 
-The MCP surface is twelve tools:
+The MCP surface is seven tools:
 
 ```text
-remember   recall   get_entity   history   correct       forget
-retract    propose  retire       consolidate   list_predicates   status
+remember   recall   inspect   correct   forget   consolidate   status
 ```
 
-The first six were the original design; `retract`, `propose`, `retire`, `consolidate`, `list_predicates`, and `status`
-were added as use demanded them. Each tool's description tells the assistant when to use it and when not to; the
-schemas are in `MnemicTools.java` and summarised for users in the [README](../README.md). The API exposes natural
-knowledge operations rather than database implementation details.
+`remember` stores an observation with its reading, or attaches a reading to one stored without (`observation_id`);
+`inspect` shows anything by id or name; `correct` changes anything by id, including withdrawing a fact or retiring
+an observation. Every stored thing has one kind of id (`obs-`, `f-`, `ent-`, `evt-`, `q-`, `pred:`, `event:`,
+`type:`), so the assistant chooses a target, never a tool. Each tool's description tells the assistant when to use it
+and when not to; the schemas are in `MnemicTools.java` and summarised for users in the [README](../README.md).
 
 ## Persistence and vector search
 

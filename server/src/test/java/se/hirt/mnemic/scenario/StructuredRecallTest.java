@@ -101,14 +101,15 @@ class StructuredRecallTest {
 
 	@Test
 	@Scenario("F8")
-	void extendedPredicatesAreReachableLexicallyOnly() {
+	void predicatesRegisteredFromUseCueOnTheirOwnWordsOnly() {
 		try (Engine e = engine("f8")) {
 			remember(e, "I'm leading the Profiler team at Hooli.",
-					proposal().entity("e1", "Profiler team", "product").fact("self", "x:responsible_for", "e1"));
+					proposal().entity("e1", "Profiler team", "product").fact("self", "responsible_for", "e1"));
 			RecallResult r = recall(e, "what does Mattias lead");
 			assertEquals(1, r.hits().size(), r.text());
-			assertFalse(r.structured().matched(), "x: predicates have no lexicon: " + r.structured());
+			assertFalse(r.structured().matched(), "'lead' is not among the name's words: " + r.structured());
 			assertTrue(r.hits().getFirst().channels().contains("lexical"), r.text());
+			assertTrue(recall(e, "what is Mattias responsible for").structured().matched(), "its own words cue it");
 		}
 		try (Engine e = engine("f8-core")) {
 			remember(e, "I'm leading the Profiler team at Hooli.",

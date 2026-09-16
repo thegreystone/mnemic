@@ -35,8 +35,8 @@ import java.util.Set;
 
 /**
  * A registered predicate (EXTRACTION.md, Predicate registry). Layer 2 reasons over these properties, never over the
- * name. {@code x:} predicates are stored with wildcard domain and range, an empty lexicon, and a rendering derived from
- * the name; they are reachable lexically only.
+ * name. A predicate registered from its first use carries what its name gives: wildcard domain and range, a template
+ * and a lexicon made from the name's words, and no description until somebody supplies one.
  *
  * @param functionalScope
  *            {@code null}, or {@code "scope"} meaning functional per (subject, scope entity)
@@ -49,7 +49,7 @@ import java.util.Set;
 public record Predicate(String name, String description, List<String> domain, List<String> range, boolean functional,
 		String functionalScope, boolean symmetric, String inverse, String volatility, List<String> lexicon,
 		String render, List<String> qualifiers, List<String> aliases, List<String> inverseLexicon, Long definedBy,
-		boolean seed) {
+		boolean seed, boolean inferred) {
 
 	/**
 	 * Qualifiers that name the same relation from the two sides of it: brother and sister are one relation seen from a
@@ -96,8 +96,22 @@ public record Predicate(String name, String description, List<String> domain, Li
 		return !domain.contains("*") && !range.contains("*") && domain.stream().anyMatch(range::contains);
 	}
 
-	public boolean isExtended() {
-		return name.startsWith("x:");
+	/** Registered from its first use, with everything inferred from the name, and nothing said about it since. */
+	public boolean isInferred() {
+		return inferred;
+	}
+
+	/** The words of a name as search terms: {@code consults_for} → consults, consult. */
+	public static List<String> lexiconOf(String name) {
+		var out = new java.util.ArrayList<String>();
+		for (String word : Names.contentTokens(name.replace('_', ' '))) {
+			out.add(word);
+			String lemma = lemma(word);
+			if (lemma != null && lemma.length() > 2 && !out.contains(lemma)) {
+				out.add(lemma);
+			}
+		}
+		return List.copyOf(out);
 	}
 
 	public boolean literalRange() {
@@ -133,8 +147,8 @@ public record Predicate(String name, String description, List<String> domain, Li
 		Lang lang, String negatedTemplate, String subject, String object, String scope, String qualifier) {
 		if (negatedTemplate != null && !negatedTemplate.isBlank()) {
 			return new Predicate(name, description, domain, range, functional, functionalScope, symmetric, inverse,
-					volatility, lexicon, negatedTemplate, qualifiers, aliases, inverseLexicon, definedBy, seed)
-					.render(subject, object, scope, qualifier);
+					volatility, lexicon, negatedTemplate, qualifiers, aliases, inverseLexicon, definedBy, seed,
+					inferred).render(subject, object, scope, qualifier);
 		}
 		String full = render(subject, object, scope, qualifier);
 		if (lang != Lang.EN) {

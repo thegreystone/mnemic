@@ -73,7 +73,7 @@ public final class ObservationService {
 		if ("connector".equals(src.kind()) && proposalJson != null) {
 			throw MnemicException.invalidArgument("Connector observations arrive without a proposal; connectors create "
 					+ "observations, never facts (EXTRACTION.md). Store it without one, then read it and give it its facts with "
-					+ "propose(observation_id, proposal), or let a configured proposer handle it in consolidate.");
+					+ "remember(observation_id, proposal), or let a configured proposer handle it in consolidate.");
 		}
 		Instant observed = observedAt == null ? Instant.now() : observedAt;
 		String hash = Json.hashText(text);

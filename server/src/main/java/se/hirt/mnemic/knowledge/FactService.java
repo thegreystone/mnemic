@@ -68,19 +68,20 @@ import java.util.regex.Pattern;
  */
 public final class FactService {
 
-	/** What a proposal produced. Every id is reported so the caller can refer to it later. */
+	/**
+	 * What a proposal produced. Every id is reported so the caller can refer to it later; {@code definitions} names the
+	 * vocabulary the proposal defined or that was registered from its first use here.
+	 */
 	public record Applied(List<EntityOut> entities, List<EventOut> events, List<FactOut> facts,
 			List<PredicateOut> predicates, List<Map<String, Object>> questions, List<String> warnings,
-			List<Map<String, Object>> superseded, List<Map<String, Object>> definitions,
-			List<Map<String, Object>> suggestions) {
+			List<Map<String, Object>> superseded, List<Map<String, Object>> definitions) {
 		public static final Applied NOTHING = new Applied(List.of(), List.of(), List.of(), List.of(), List.of(),
-				List.of(), List.of(), List.of(), List.of());
+				List.of(), List.of(), List.of());
 
 		public Applied withWarning(String warning) {
 			var all = new ArrayList<>(warnings);
 			all.add(warning);
-			return new Applied(entities, events, facts, predicates, questions, all, superseded, definitions,
-					suggestions);
+			return new Applied(entities, events, facts, predicates, questions, all, superseded, definitions);
 		}
 	}
 
@@ -138,10 +139,8 @@ public final class FactService {
 		final List<EventOut> eventOut = new ArrayList<>();
 		final List<FactOut> factOut = new ArrayList<>();
 		final List<PredicateOut> predicateOut = new ArrayList<>();
-		/** Event types and entity types the proposal defined: {@code {kind, name, resolution}}. */
+		/** Vocabulary the proposal defined or used for the first time: {@code {kind, name, resolution}}. */
 		final List<Map<String, Object>> definitions = new ArrayList<>();
-		/** Vocabulary the proposal used that the registry lacks: {@code {kind, name, message, define}}. */
-		final List<Map<String, Object>> suggestions = new ArrayList<>();
 
 		Application(Observation obs, Proposal p, Map<String, Entity> bound) {
 			this.obs = obs;
@@ -164,22 +163,16 @@ public final class FactService {
 			questions.add(q.toMap());
 		}
 
-		/** Asks the caller, once per name, to check with the user what an unregistered term should mean. */
-		void suggest(String kind, String name, String message, Map<String, Object> define) {
-			if (suggestions.stream().anyMatch(s -> kind.equals(s.get("kind")) && name.equals(s.get("name")))) {
-				return;
+		/** Records a registration once per name. */
+		void defined(String kind, String name, String resolution) {
+			if (definitions.stream().noneMatch(d -> kind.equals(d.get("kind")) && name.equals(d.get("name")))) {
+				definitions.add(definition(kind, name, resolution));
 			}
-			var m = new LinkedHashMap<String, Object>();
-			m.put("kind", kind);
-			m.put("name", name);
-			m.put("message", message);
-			m.put("define", define);
-			suggestions.add(m);
 		}
 
 		Applied result() {
-			return new Applied(entityOut, eventOut, factOut, predicateOut, questions, warnings, superseded, definitions,
-					suggestions);
+			return new Applied(entityOut, eventOut, factOut, predicateOut, questions, warnings, superseded,
+					definitions);
 		}
 	}
 
@@ -271,57 +264,100 @@ public final class FactService {
 
 	/**
 	 * Vocabulary the proposal defines goes first, so the entities and events that follow can use it. A definition that
-	 * names an unknown predicate or parent is skipped with a warning; an existing name is left as it is.
+	 * names an unknown predicate or parent is skipped with a warning; an existing name is left as it is, unless it was
+	 * registered from use and the definition describes it. A predicate definition no fact uses is registered here; one
+	 * a fact uses resolves with the fact, so a similar predicate can be asked about with the fact held.
 	 */
 	private void registerVocabulary(Application a) {
+		for (PredicateDef d : a.p.predicates()) {
+			if (d.name() == null || d.name().isBlank()) {
+				continue;
+			}
+			Optional<Predicate> before = predicates.get(d.name());
+			boolean used = a.p.facts().stream().anyMatch(f -> d.name().equals(f.predicate()));
+			if (before.isPresent() && before.get().isInferred() && !PredicateRegistry.bare(d)) {
+				String name = predicates.register(d, a.obs.id()).name();
+				var m = definition("predicate", name, "defined");
+				m.put("rerendered_facts", renderer.rerender(name));
+				if (!before.get().functional() && predicates.get(name).orElseThrow().functional()) {
+					m.put("rechecked_conflicts", recheckFunctional(name));
+				}
+				a.definitions.add(m);
+			} else if (before.isEmpty() && !used) {
+				PredicateRegistry.Resolution r = predicates.resolve(d.name(), d, a.obs.id(), a.warnings);
+				if (r.asks()) {
+					a.warnings.add("Predicate '" + d.name() + "' reads like '" + r.candidate().name()
+							+ "' and no fact uses it here, so it was not registered; use it in a fact to be asked.");
+				} else {
+					a.definitions.add(definition("predicate", r.predicate().name(), "registered"));
+				}
+			}
+		}
 		for (EntityTypeDef d : a.p.entityTypes()) {
 			try {
-				boolean known = d.name() != null && types.get(d.name().replace(' ', '_')).isPresent();
-				a.definitions.add(definition("entity_type", types.register(d, a.obs.id()).name(), known));
+				Optional<EntityTypeRegistry.EntityType> before = types.get(d.name());
+				String resolution = before.isEmpty() ? "registered"
+						: before.get().inferred() && !EntityTypeRegistry.bare(d) ? "defined" : "exists";
+				String name = types.register(d, a.obs.id()).name();
+				if ("defined".equals(resolution)) {
+					settle("type_kind", name);
+				}
+				a.definitions.add(definition("entity_type", name, resolution));
 			} catch (MnemicException e) {
 				skipped(a, e, "Entity type '" + d.name() + "'");
 			}
 		}
 		for (EventTypeDef d : a.p.eventTypes()) {
 			try {
-				boolean known = d.name() != null && eventTypes.get(d.name().replace(' ', '_')).isPresent();
+				Optional<EventType> before = d.name() == null ? Optional.empty()
+						: eventTypes.get(d.name().replace(' ', '_'));
+				String resolution = before.isEmpty() ? "registered"
+						: before.get().inferred() && !EventTypeRegistry.bare(d) ? "defined" : "exists";
 				var t = eventTypes.register(d, a.obs.id(), name -> predicates.get(name).isPresent());
-				a.definitions.add(definition("event_type", t.name(), known));
+				var m = definition("event_type", t.name(), resolution);
+				if ("defined".equals(resolution)) {
+					settle("event_effect", t.name());
+				}
+				if ("defined".equals(resolution) && (!t.opens().isEmpty() || !t.closes().isEmpty()
+						|| !t.supersedes().isEmpty() || t.endsEntity())) {
+					// The events stored under the type get the effects it now has, as an answered question would give.
+					m.put("applied", applyEffectsOf(t.name()));
+				}
+				a.definitions.add(m);
 			} catch (MnemicException e) {
 				skipped(a, e, "Event type '" + d.name() + "'");
 			}
 		}
 	}
 
-	/** An entity of a type the registry lacks: the caller should check what kind of thing it is. */
-	private void suggestEntityType(Application a, Entity e) {
+	/**
+	 * An entity of a type the registry lacks: the type is registered from this use, and the caller is asked once what
+	 * kind of thing it is. Nothing is held; the entity stands whatever the answer.
+	 */
+	private void registerTypeFromUse(Application a, Entity e) {
 		String type = e.type();
 		if (EntityTypeRegistry.UNKNOWN.equals(type) || types.get(type).isPresent()) {
 			return;
 		}
-		a.suggest("entity_type", type, "'" + type + "' (the type of " + e.name()
-				+ ") is not a registered entity type, so "
-				+ "no predicate's domain or range admits it and its names get no type words. Check with the user what kind "
-				+ "of thing it is (a kind of place? organization?) and define it in your next remember with entity_types, "
-				+ "with 'parent' when it nests within a registered kind.",
-				Map.of("entity_types", List.of(skeleton("name", type, "description", "", "parent", "", "synonyms",
-						List.of(), "type_words", List.of()))));
+		EntityTypeRegistry.EntityType t = types.registerInferred(type, a.obs.id());
+		a.defined("entity_type", t.name(), "inferred");
+		asks.typeKind(a.obs, t, e, types.roots()).ifPresent(a::ask);
 	}
 
-	/** An ordered map from alternating keys and values, for the definition skeletons a suggestion carries. */
-	private static Map<String, Object> skeleton(Object ... keysAndValues) {
-		var m = new LinkedHashMap<String, Object>();
-		for (int i = 0; i < keysAndValues.length; i += 2) {
-			m.put((String) keysAndValues[i], keysAndValues[i + 1]);
+	/** A definition of the term answers the question that asked what it means. */
+	private void settle(String kind, String term) {
+		for (Question q : questions.open(200)) {
+			if (kind.equals(q.kind()) && term.equals(q.subject())) {
+				questions.answer(q.id(), "defined");
+			}
 		}
-		return m;
 	}
 
-	private static Map<String, Object> definition(String kind, String name, boolean known) {
+	private static Map<String, Object> definition(String kind, String name, String resolution) {
 		var m = new LinkedHashMap<String, Object>();
 		m.put("kind", kind);
 		m.put("name", name);
-		m.put("resolution", known ? "exists" : "registered");
+		m.put("resolution", resolution);
 		return m;
 	}
 
@@ -372,7 +408,7 @@ public final class FactService {
 			a.refs.put(key, r.entity());
 			a.refs.put(Names.norm(er.name()), r.entity());
 			a.entityOut.add(new EntityOut(key, r.entity().ref(), r.entity().name(), r.how(), r.score()));
-			suggestEntityType(a, r.entity());
+			registerTypeFromUse(a, r.entity());
 		}
 	}
 
@@ -400,18 +436,11 @@ public final class FactService {
 				continue; // waits with the entity question
 			}
 			Bounds b = Bounds.of(ev.validTime(), a.obs.observedAt(), a.warnings);
-			String type = ev.type().trim().toLowerCase(Locale.ROOT);
-			if (eventTypes.get(type).isEmpty()) {
-				a.suggest("event_type", type, "'" + type
-						+ "' is not a registered event type, so the event is stored as an "
-						+ "occurrence with no effect on facts. Check with the user whether it starts or ends a relation "
-						+ "(for example opens owns, or closes works_at) and define it in your next remember; leave it if "
-						+ "it is a plain occurrence.",
-						Map.of("event_types",
-								List.of(skeleton("name", type, "description", "", "render",
-										"{subject} " + type.replace('_', ' ') + " {object}", "opens", List.of(),
-										"closes", List.of(), "supersedes", List.of(), "ends_entity", false, "lexicon",
-										List.of(type.replace('_', ' '))))));
+			String type = ev.type().trim().toLowerCase(Locale.ROOT).replace(' ', '_');
+			boolean fresh = eventTypes.get(type).isEmpty();
+			EventType et = fresh ? eventTypes.registerInferred(type, a.obs.id()) : eventTypes.get(type).orElseThrow();
+			if (fresh) {
+				a.defined("event_type", et.name(), "inferred");
 			}
 			String rendering = events.render(type, participants.stream().map(Entity::name).toList(), b);
 			EventService.Stored stored = events.store(type, participants, b, rendering, a.obs);
@@ -422,8 +451,67 @@ public final class FactService {
 				events.applyEffects(stored.id(), type, participants, b, a.obs, a.superseded);
 			}
 			opened.addAll(openedBy(a, ev, type, participants, key));
+			if (et.inferred()) {
+				asks.eventEffect(a.obs, et, participants, stored.id(), fitting(participants)).ifPresent(a::ask);
+			}
 		}
 		return opened;
+	}
+
+	/** The predicates an event between these participants could open or close: those whose types fit them. */
+	private List<Predicate> fitting(List<Entity> participants) {
+		if (participants.isEmpty()) {
+			return List.of();
+		}
+		List<String> subject = types.lineage(participants.getFirst().type());
+		List<String> object = participants.size() < 2 ? null : types.lineage(participants.get(1).type());
+		return predicates.all().stream().filter(p -> !p.literalRange() && p.acceptsSubject(subject)
+				&& (object == null ? p.range().contains("*") : p.acceptsObject(object))).toList();
+	}
+
+	/**
+	 * Applies a type's effects to the events already stored under it, after an answer or a correction gave it some: the
+	 * facts they open and close, as if the type had been defined when they were remembered.
+	 */
+	public Map<String, Object> applyEffectsOf(String type) {
+		var factsOut = new ArrayList<String>();
+		var superseded = new ArrayList<Map<String, Object>>();
+		var questions = new ArrayList<Map<String, Object>>();
+		int n = 0;
+		for (Event ev : events.ofType(type)) {
+			Optional<Observation> obs = db
+					.read(tx -> tx.queryOne("SELECT * FROM observation WHERE id = ?", ev.observationId()))
+					.map(Observation::from);
+			List<Entity> participants = ev.participants().stream().map(id -> entities.get(id).orElse(null))
+					.filter(Objects::nonNull).toList();
+			if (obs.isEmpty() || participants.size() != ev.participants().size()) {
+				continue;
+			}
+			var a = new Application(obs.get(),
+					new Proposal(Proposal.CURRENT_SPEC_VERSION, List.of(), List.of(), List.of(), List.of()), Map.of());
+			List<String> names = new ArrayList<>();
+			for (Entity e : participants) {
+				a.bind(e.name(), e);
+				names.add(e.name());
+			}
+			a.eventIds.put(ev.ref(), ev.id());
+			Bounds b = new Bounds(ev.validStart(), ev.validStartPrecision(), null, ev.validEnd(),
+					ev.validEndPrecision(), null);
+			events.applyEffects(ev.id(), type, participants, b, obs.get(), a.superseded);
+			applyFacts(a, openedBy(a, new EventRef(ev.ref(), type, names, null), type, participants, ev.ref()));
+			factsOut.addAll(a.factOut.stream().map(FactOut::id).toList());
+			superseded.addAll(a.superseded);
+			questions.addAll(a.questions);
+			n++;
+		}
+		var m = new LinkedHashMap<String, Object>();
+		m.put("events", n);
+		m.put("facts", factsOut);
+		m.put("superseded", superseded);
+		if (!questions.isEmpty()) {
+			m.put("questions", questions);
+		}
+		return m;
 	}
 
 	/** The event's participants, or null when one is held behind an entity question. */
@@ -531,14 +619,11 @@ public final class FactService {
 			Predicate named = res.predicate() != null ? res.predicate() : res.candidate();
 			a.predicateOut.add(new PredicateOut(f.predicate(), res.how(), named == null ? null : named.name()));
 		}
-		if ("extended".equals(res.how()) && !f.predicate().startsWith("x:")) {
-			a.suggest("predicate", f.predicate(), "'" + f.predicate()
-					+ "' is not a registered predicate and came without " + "a definition, so it is stored as 'x:"
-					+ f.predicate() + "' and found lexically only. Check with the "
-					+ "user what it means (which kinds of subject and object, whether one value at a time) and define it in "
-					+ "'predicates' in your next remember.",
-					Map.of("predicates", List.of(skeleton("name", f.predicate(), "description", "", "domain", "person",
-							"range", "*", "functional", false, "lexicon", List.of()))));
+		if ("inferred".equals(res.how())) {
+			a.defined("predicate", res.predicate().name(), "inferred");
+			a.warnings.add("Predicate '" + f.predicate() + "' was registered from this use with everything inferred "
+					+ "from its name (any subject and object, several values at a time); describe it through correct "
+					+ "when the user says more.");
 		}
 		if (res.asks()) {
 			a.ask(asks.predicate(a.obs, f, res.candidate(), res.how(), def, FactQuestions.heldProposal(a.p, f, def)));
@@ -666,11 +751,13 @@ public final class FactService {
 			}
 		}
 		if (!pred.acceptsSubject(types.lineage(subject.type()))) {
-			a.ask(asks.typeMismatch(a.obs, pred, "subject", subject, pred.domain()));
+			a.ask(asks.typeMismatch(a.obs, pred, "subject", subject, pred.domain(), newKind(subject),
+					FactQuestions.heldProposal(a.p, f, a.defs.get(f.predicate()))));
 			return null;
 		}
 		if (object != null && !pred.acceptsObject(types.lineage(object.type()))) {
-			a.ask(asks.typeMismatch(a.obs, pred, "object", object, pred.range()));
+			a.ask(asks.typeMismatch(a.obs, pred, "object", object, pred.range(), newKind(object),
+					FactQuestions.heldProposal(a.p, f, a.defs.get(f.predicate()))));
 			return null;
 		}
 		Entity scope = f.scope() == null ? null : resolveRef(a, f.scope());
@@ -678,6 +765,11 @@ public final class FactService {
 			return null;
 		}
 		return new Operands(subject, pred, object, objectText, qualifier(a, f, pred), scope, mode);
+	}
+
+	/** Whether the entity's type was registered from use and could still be made a kind of something. */
+	private boolean newKind(Entity e) {
+		return types.get(e.type()).map(EntityTypeRegistry.EntityType::inferred).orElse(false);
 	}
 
 	/** A vocabulary qualifier (mother, half-sister) is normalised; free text keeps the caller's casing. */
@@ -939,6 +1031,41 @@ public final class FactService {
 	}
 
 	// ── corrections ─────────────────────────────────────────────────────
+
+	/**
+	 * After a predicate became functional: where a subject (and scope, when the predicate is functional per scope) has
+	 * several open current values, the earliest stands and each later one becomes {@code pending} behind a conflict
+	 * question, as it would have had the predicate been functional when it arrived. The count of conflicts.
+	 */
+	public int recheckFunctional(String name) {
+		Predicate p = predicates.get(name).orElseThrow(() -> MnemicException.notFound("No predicate " + name));
+		if (!p.functional()) {
+			return 0;
+		}
+		boolean scoped = "scope".equals(p.functionalScope());
+		List<Fact> open = db.read(tx -> tx.query("""
+				SELECT * FROM fact WHERE predicate = ? AND status = 'current' AND valid_end IS NULL AND ended = 0
+				AND mode = 'asserted' ORDER BY id""", p.name())).stream().map(Fact::from).toList();
+		var first = new HashMap<String, Fact>();
+		int n = 0;
+		for (Fact f : open) {
+			String key = f.subjectId() + (scoped ? "/" + f.scopeId() : "");
+			Fact existing = first.putIfAbsent(key, f);
+			if (existing == null) {
+				continue;
+			}
+			Observation obs = db.read(tx -> tx.queryOne("SELECT * FROM observation WHERE id = ?", f.observationId()))
+					.map(Observation::from).orElse(null);
+			if (obs == null) {
+				continue;
+			}
+			db.write(tx -> tx.update("UPDATE fact SET status = 'pending' WHERE id = ?", f.id()));
+			Question q = asks.conflict(obs, p, existing, f.id(), f.rendering(), null);
+			questions.linkFact(q.id(), f.id());
+			n++;
+		}
+		return n;
+	}
 
 	/**
 	 * Replaces a fact without destroying history (EVALUATION.md D1): the original is marked {@code corrected}, the

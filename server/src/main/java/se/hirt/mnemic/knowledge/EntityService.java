@@ -170,6 +170,12 @@ public final class EntityService {
 		});
 	}
 
+	/** Changes an entity's type: the answer to a type mismatch that blamed the entity. */
+	public void retype(long id, String type) {
+		String t = types.canonical(type);
+		db.write(tx -> tx.update("UPDATE entity SET type = ? WHERE id = ?", t, id));
+	}
+
 	/** Creates an entity outright (used when a question is answered with "new"). */
 	public Entity create(String name, String type, List<String> aliases, Long observationId) {
 		return db.write(tx -> create(tx, name, types.canonical(type), aliases, observationId));

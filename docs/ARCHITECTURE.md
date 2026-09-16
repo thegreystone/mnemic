@@ -70,8 +70,9 @@ remember(text, source, proposal)
    applied (`EventService.applyEffects`): the facts a type closes end at the event's date, and a type that ends an
    entity closes every open fact of it. A type that opens a predicate (`purchased` → `owns`) supplies the fact when
    the proposal did not state it.
-3. **Facts** resolve their predicate through `PredicateRegistry` (exact, alias, `x:` extension, or a similar
-   definition that becomes a `predicate_resolution` question), their operands, and their qualifier; `Bounds`
+3. **Facts** resolve their predicate through `PredicateRegistry` (exact, alias, a name similar by its words or,
+   with the embedding model loaded, by meaning, which becomes a `predicate_resolution` question, or a registration
+   from this first use), their operands, and their qualifier; `Bounds`
    normalises valid time against the observation date; `FactRenderer` produces the sentence. Inside one
    transaction the row is either a restatement (`FactLedger.corroborate`) or new, in which case `ConflictCheck`
    decides whether it stands, is sequenced behind a later value, supersedes an older one through its event, or is
@@ -80,7 +81,7 @@ remember(text, source, proposal)
 4. **Closures** are facts of mode `closure` so that history and conflicts apply to them unchanged.
 
 Every status change of a fact goes through `FactLedger` (`fact_source` for provenance, `supersession` for the
-change), and nothing is deleted except by `forget`. Corrections (`FactService.correct`, `retract`) build a
+change), and nothing is deleted except by `forget`. Corrections (`FactService.correct`, `FactService.retract`) build a
 replacement proposal from the original row and send it through the same path, so history reads the same whether a
 fact was corrected by the user or superseded by an event.
 

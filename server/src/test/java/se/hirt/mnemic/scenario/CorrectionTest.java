@@ -147,7 +147,7 @@ class CorrectionTest {
 	void forgetLeavesATombstoneInHistory() {
 		try (Engine e = engine("d2-facts")) {
 			RememberOutcome o = remember(e, "My passport number is 123.",
-					proposal().fact("self", "x:passport_number", "123"));
+					proposal().fact("self", "passport_number", "123"));
 			long obs = o.observation().observationId();
 			assertEquals(1, e.facts().count());
 			assertTrue(e.forget(obs));

@@ -108,7 +108,7 @@ class GranularityAndForgettingTest {
 			assertEquals(town, e.entities().byRef("Schübelbach").orElseThrow().id());
 			// The default still removes what nothing else references.
 			long obs2 = remember(e, "I once visited Zug.",
-					proposal().entity("e1", "Zug", "place").fact("self", "x:visited", "e1")).observation()
+					proposal().entity("e1", "Zug", "place").fact("self", "visited", "e1")).observation()
 					.observationId();
 			long zug = e.entities().byRef("Zug").orElseThrow().id();
 			assertTrue(e.forget(obs2));

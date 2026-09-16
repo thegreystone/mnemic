@@ -393,7 +393,7 @@ Expect: original fact status `corrected`, replacement fact `current`,
 supersession record with the reason. Original observation still stored.
 
 ```text
-history(entity: ent-Mattias)
+inspect(ref: ent-Mattias, history: true)
 ```
 
 Expect: both `lives_in` facts, in order, with the correction record and a
@@ -447,7 +447,7 @@ than by forgetting the observation.
 ```text
 remember(text: "I work at Hooli.")                # obs-1, f-1
 remember(text: "As I said, I work at Hooli.")     # obs-2, corroborates f-1
-history(entity: Mattias)                                     # f-1: observations [obs-1, obs-2]
+inspect(ref: Mattias, history: true)                         # f-1: observations [obs-1, obs-2]
 forget(observation_id: obs-1)
 forget(observation_id: obs-2)
 ```
@@ -482,19 +482,19 @@ withdrawn.
 ```text
 remember(text: "Dad is best reached on Slack these days.")                                # obs-1
 remember(text: "Correction: Dad is on WhatsApp, not Slack.")                               # obs-2
-retire(observation_id: obs-1, reason: "said Slack; obs-2 says WhatsApp", superseded_by: obs-2)
+correct(target: obs-1, replacement: { retired: true, superseded_by: obs-2 }, reason: "said Slack; obs-2 says WhatsApp")
 recall(query: "how do I reach Dad")
 ```
 
 Expect: obs-1 keeps its text and history, leaves the proposal backlog,
 and is not a hit; with `include_history` it is a hit prefixed
 `[retired: …; superseded by obs-2]`. Its facts, if it had any, are left to
-`retract` or `correct`: the reply names them (`facts_citing`), and
-`history` and `get_entity` mark the observation as retired beside them, so
-a fact's provenance never dead-ends unexplained. `status` counts retired
-observations beside the live count. Retiring it again is refused;
-`retire(…, undo: true)` reinstates it (back in the backlog if it never had
-a reading); `forget` remains the way to remove it. Before this the only
+`correct`: the reply names them (`facts_citing`), and `inspect` marks the
+observation as retired beside them, so a fact's provenance never dead-ends
+unexplained. `status` counts retired observations beside the live count.
+Retiring it again is refused; `correct(obs-1, { retired: false })`
+reinstates it (back in the backlog if it never had a reading); `forget`
+remains the way to remove it. Before this the only
 way to clear a wrong note was to forget it, which destroyed the record of
 the mistake.
 
@@ -505,11 +505,11 @@ remember(text: "I work at Hooli.")
 remember(text: "I work at Acme.")             # raises conflict
 remember(text: "Sorry, I meant I *consult* for Acme.",
          resolve: [{ question_id: <q>, choice: "reinterpret" }],
-         proposal: { facts: [ { predicate: "x:consults_for", object: "Acme" } ] })
+         proposal: { facts: [ { predicate: "consults_for", object: "Acme" } ] })
 ```
 
-Expect: `works_at(Mattias, Hooli)` still `current`; `x:consults_for` fact
-created; the earlier Acme observation is retained, and its pending fact
+Expect: `works_at(Mattias, Hooli)` still `current`; `consults_for` is
+registered from this use and its fact created; the earlier Acme observation is retained, and its pending fact
 becomes `rejected` with an `invalidation` supersession whose reason names
 the reinterpretation.
 
@@ -727,18 +727,19 @@ recall(query: "who is Bosse")
 Expect: entity `ent-TorstenBjork` (name `Torsten Björk`, alias `Bosse`) with its
 facts.
 
-### F8. Extended predicates are reachable lexically only
+### F8. A predicate registered from use cues on its own words only
 
 ```text
 remember(text: "I'm leading the Profiler team at Hooli.",
-         proposal: { facts: [ { predicate: "x:responsible_for", object: "Profiler team" } ] })
+         proposal: { facts: [ { predicate: "responsible_for", object: "Profiler team" } ] })
 recall(query: "what does Mattias lead")
 ```
 
 Expect: the fact is returned via the lexical channel (observation text
-matches "leading"). The verdict is not `matched` — `x:` predicates have no
-lexicon. With the core `leads` predicate proposed instead, the
-structured channel matches.
+matches "leading"). The verdict is not `matched` — the predicate's lexicon
+is the words of its name, and "lead" is not one of them; "what is Mattias
+responsible for" matches structurally. With the core `leads` predicate
+proposed instead, the structured channel matches.
 
 ### F9. Events are returned with facts
 
@@ -1040,7 +1041,7 @@ proposal processed normally.
 
 ```text
 remember(text: "<an email>", source_kind: connector, source_ref: "home/INBOX/943905")     # no proposal: refused with one
-propose(observation_id: obs-48, proposal: { events: [ paid(self, Tomas) 2026-09-11 ], facts: [...] })
+remember(observation_id: obs-48, proposal: { events: [ paid(self, Tomas) 2026-09-11 ], facts: [...] })
 ```
 
 Expect: the observation stored without a reading and listed in
@@ -1115,7 +1116,10 @@ remember(text: "Hooli is my godmother.",
 ```
 
 Expect: `godparent_of` has domain `person`; `Hooli` is an organization;
-response returns a question of kind `type_mismatch`. No fact created.
+response returns a question of kind `type_mismatch` that holds the fact,
+with candidates `retype:person` (Hooli is a person after all) and
+`dismiss`; a type registered from use also offers `kind:person` (every
+such thing is a kind of person). No fact created until answered (S20).
 
 ### J5. Predicate correction propagates
 
@@ -1204,18 +1208,18 @@ Expect: no fact, and a warning that `considering` (and `decided`) take a
 plan or an option as object, never a statement, with the way to store a
 recollection: the fact itself, with `caller_confidence` when unsure.
 
-### J6. Frequent x: predicates are proposed for registration
+### J6. Predicates registered from use are listed until described
 
 ```text
-remember(… proposal: { facts: [ { predicate: "x:mentors", object: "Anna" } ] })
-remember(… proposal: { facts: [ { predicate: "x:mentors", object: "Erik" } ] })
-remember(… proposal: { facts: [ { predicate: "x:mentors", object: "Sara" } ] })
+remember(… proposal: { facts: [ { predicate: "mentors", object: "Anna" } ] })
+remember(… proposal: { facts: [ { predicate: "mentors", object: "Erik" } ] })
+remember(… proposal: { facts: [ { predicate: "mentors", object: "Sara" } ] })
 consolidate(dry_run: true)
 ```
 
-Expect: report includes `suggested_registrations: [{ predicate: "x:mentors",
-uses: 3, observations: [...] }]`; nothing changes until a definition is
-supplied.
+Expect: report includes `inferred_vocabulary: [{ predicate: "mentors",
+uses: 3, observations: [...] }]`; nothing changes until a description is
+supplied through `correct` or a later definition.
 
 ---
 
@@ -1670,6 +1674,33 @@ question, the correction re-rendering the facts and logged as `renders.de`,
 and a template for a language the store does not know refused with a
 warning.
 
+### R5. Registering from use in a German store
+
+```text
+remember(text: "Ich betreue Anna.", proposal: { facts: [ betreut(self, Anna) ] })
+remember(text: "Ich habe 2019 die Hütte geerbt.", proposal: { events: [ geerbt(self, die Hütte) 2019 ] })
+```
+
+Expect: `betreut` is registered from use with its own word as lexicon and
+`{subject} betreut {object}` as template, so the fact reads "Mattias Sandell
+betreut Anna Lindqvist" and "wen betreut Mattias" matches structurally; the
+event type `geerbt` renders from its name and asks `event_effect` like any
+other. A later definition with `renders.de` completes the predicate
+(`definitions` says `defined`, with `rerendered_facts`) and the stored fact
+re-renders through the German template.
+
+### R6. A German name close in meaning to an English predicate is asked about
+
+Expect: with the embedder loaded, `betreut` after `mentors` raises the
+`predicate_resolution` question with `mentors` as a `semantic` candidate,
+exactly as an English near-synonym would. Answering with `mentors` records
+`betreut` as its alias, so the German name resolves silently from then on,
+and the alias cues the predicate: "wen betreut Mattias" matches `mentors`.
+Calibration against the real model (`VocabularyCalibrationTest`, German
+names against a German store): `wohnt_in`, `arbeitet_bei`, `verheiratet_mit`,
+`kennt` score as semantic; `angestellt_bei`, `vater_von`, `leitet` as
+ambiguous; nothing unrelated is flagged.
+
 ### R3. An unknown language is refused
 
 Expect: `fr` is refused at start (not a known language); unset means `en`.
@@ -1677,9 +1708,12 @@ Expect: `fr` is refused at start (not a known language); unset means `en`.
 ## S. Vocabularies
 
 Predicates, event types, and entity types are registries: seeded by the
-server, extended from a proposal, corrected through `correct`, listed by
-`list_predicates`. A registration is kept for good and is there at the next
-start.
+server, extended from a proposal or from a term's first use, corrected
+through `correct`, listed by `inspect('registry')`. A registration is kept
+for good and is there at the next start. A term used before anyone defined
+it is registered with everything inferred from its name, and the store asks
+once what it means (S13–S15, S18–S20); a definition arriving later completes
+it (S16).
 
 ### S1. An event type defined in a proposal takes effect
 
@@ -1687,13 +1721,13 @@ start.
 remember(text: "I inherited the cabin in Sälen from my grandmother.", proposal: {
   event_types: [ { name: "inherited", opens: ["owns"], lexicon: ["inherited", "inherit"] } ],
   entities: [ e1 "the Sälen cabin" (place) ], events: [ inherited(self, e1) ] })
-list_predicates()
+inspect(ref: "event:inherited")
 ```
 
 Expect: the event type is registered (`definitions` names it), the event
 opens `owns` so "Mattias Sandell owns the Sälen cabin" is stored, and
-`list_predicates` lists `inherited` with origin `defined` and the
-observation that defined it.
+`inspect` shows `inherited` with origin `defined` and the observation that
+defined it.
 
 ### S2. A defined vocabulary survives a restart
 
@@ -1771,35 +1805,129 @@ Expect: an event of a type that closed nothing when it happened, followed
 by a correction that makes the type close `owns`, dates the end of a fact
 flagged `ended` without a date at the next `consolidate` (`reclosed: 1`).
 
-### S13. An unregistered event type is a suggestion, not a silent occurrence
+### S13. An unregistered event type registers from use and asks what it does
 
 ```text
 remember(text: "I inherited the cabin in 2019.", proposal: { entities: [ the cabin (place) ], events: [ inherited(self, the cabin) 2019 ] })
 ```
 
-Expect: the event is stored with no effect on facts, and the reply carries
-`suggestions: [{kind: event_type, name: inherited, message, define}]` with a
-definition skeleton; nothing is held. Defining the type in the next remember
-registers it and the suggestion does not come back.
+Expect: the event is stored with no effect on facts; `inherited` is
+registered with the words of its name as lexicon and `{subject} inherited
+{object}` as template (`definitions` names it with resolution `inferred`);
+the reply carries one `event_effect` question whose candidates are
+`opens:<p>` and `closes:<p>` for every predicate whose domain and range fit
+the participants (`owns`, not `works_at` for a place), `ends_entity` when
+the event has one participant, and `none`. Nothing is held. A second event
+of the type before the answer asks nothing.
 
-### S14. An unregistered entity type is a suggestion
+### S14. An unregistered entity type registers from use and asks what kind it is
 
-Expect: an entity typed `canton` while no such type is registered is stored
-as written and the reply suggests an `entity_type` definition once, however
-many entities of that type the proposal names.
+Expect: entities typed `canton` while no such type is registered are stored
+as written; `canton` is registered without a parent; one `type_kind`
+question offers the root types (`place`, `organization`, …, not `country`)
+and `none`, however many entities of that type the proposal names. Later
+entities of the type ask nothing.
 
-### S15. A bare predicate is a suggestion as well as an extension
+### S15. A bare predicate registers from use
 
-Expect: a fact under `mentors` with no definition is stored under
-`x:mentors` with the existing warning, and the reply suggests a `predicate`
-definition with a skeleton; a predicate written as `x:` on purpose is not
-suggested.
+Expect: a fact under `mentors` with no definition is stored under `mentors`
+with a warning; the predicate has wildcard domain and range, the lexicon
+`[mentors, mentor]`, and no description, so "who does Mattias mentor"
+matches structurally. `correct(pred:mentors, {description, domain, range})`
+completes it; the name then resolves exactly, with no warning.
 
-### S16. Consolidate lists vocabulary in use without a definition
+### S16. Consolidate lists vocabulary registered from use until it is defined
 
-Expect: `suggested_registrations` names each unregistered event type and
-entity type the store holds with its number of uses, and drops an entry once
-the term is defined.
+Expect: `inferred_vocabulary` names each predicate, event type, and entity
+type registered from use with its number of uses (and the observations for a
+predicate). A definition arriving in a later proposal for a term registered
+from use completes it (`definitions` says `defined`) instead of being
+ignored as a duplicate, and the entry disappears.
+
+### S18. Answering what an event type does applies to its stored events
+
+```text
+remember(text: "I inherited the cabin in 2019.", proposal: { events: [ inherited(self, the cabin) 2019 ] })   # q-1 event_effect
+remember(text: "I inherited the boat in 2021.", proposal: { events: [ inherited(self, the boat) 2021 ] })
+remember(text: "Inheriting made them mine.", resolve: [{ question_id: q-1, choice: "opens:owns" }])
+```
+
+Expect: `inherited` now opens `owns` (and supersedes it when the predicate
+is functional); the answer's `applied` reports both stored events and the
+two facts they opened, dated from the events; the type is no longer listed
+as inferred; a later `inherited` event opens `owns` directly and asks
+nothing. `closes:<p>` ends the matching facts at the events' dates,
+`ends_entity` closes the participant, `none` records a plain occurrence.
+
+### S19. Answering what kind an entity type is makes it accepted where its parent is
+
+```text
+remember(text: "I live in Kanton Schwyz.", proposal: { entities: [ Kanton Schwyz (canton) ], facts: [ lives_in(self, Kanton Schwyz) ] })   # q-1 type_kind, q-2 type_mismatch
+remember(text: "A canton is a Swiss region.", resolve: [{ question_id: q-1, choice: "place" }])
+```
+
+Expect: `canton` gets `place` as parent; the `type_mismatch` question the
+parent resolves is settled in the same answer and its held fact stored
+("Mattias Sandell lives in Kanton Schwyz"); no question stays open; a later
+`born_in` a canton asks nothing.
+
+### S20. A type mismatch is answered by retyping or by a new kind
+
+Expect: an entity typed `organization` by mistake under `parent_of` raises a
+`type_mismatch` whose candidates are `retype:person` and `dismiss` (a seeded
+type is never re-parented); `retype:person` retypes the entity and stores
+the held fact. For a type registered from use the candidates also include
+`kind:place`, which sets the parent, stores the held fact, and settles the
+open `type_kind` question for the type. `dismiss` drops the fact.
+
+### S21. A partial definition counts as a definition
+
+Expect: a `predicates` entry with no description but `functional: true` and
+`range: person` completes a predicate registered from use (`definitions`
+says `defined`, with `rerendered_facts` and, when `functional` came on,
+`rechecked_conflicts`): it is no longer listed as inferred, the stated fields
+replace the inferred ones, and the unstated ones (domain, the name's
+lexicon) stay as inferred. A first use carrying such a partial definition is
+`registered`, not `inferred`.
+
+### S22. Making a predicate functional re-checks its facts
+
+```text
+remember(text: "I share a flat with Anna.", proposal: { facts: [ shares_a_flat_with(self, Anna) ] })
+remember(text: "I share a flat with Erik.", proposal: { facts: [ shares_a_flat_with(self, Erik) ] })   # both current
+correct(target: "pred:shares_a_flat_with", replacement: { functional: true })
+```
+
+Expect: the reply carries `rechecked_conflicts: 1`; the earlier fact stays
+current, the later one becomes `pending` behind a `conflict` question of the
+usual shape, answered like any other (`supersede` closes the earlier one).
+A correction that does not turn `functional` on re-checks nothing.
+
+### S23. A bare name close in meaning to a registered predicate is asked about
+
+```text
+remember(text: "I mentor Anna.", proposal: { facts: [ mentors(self, Anna) ] })
+remember(text: "I coach Erik.", proposal: { facts: [ coaches(self, Erik) ] })      # q-1 predicate_resolution
+remember(text: "Same thing.", resolve: [{ question_id: q-1, choice: "mentors" }])
+```
+
+Expect: with an embedder available, `coaches` shares no word with `mentors`
+but lies close to it in meaning, so the fact is held behind a
+`predicate_resolution` question whose first candidate is `mentors` with
+`match: semantic`, plus `new`. Answering with `mentors` stores the fact
+under `mentors` and records `coaches` as its alias, so the next `coaches`
+resolves silently. A name close to nothing registers from use as before.
+Without an embedder only word overlap is compared, as before.
+
+### S24. Consolidate reports close predicates, and correct merges them
+
+Expect: two predicates that lie close in meaning (after `new` was answered
+to S23's question, or when both were registered before the embedder
+loaded) are listed by `consolidate` under `similar_vocabulary` as
+`{predicate, close_to, score}`. `correct(pred:coaches, {merge_into:
+"mentors"})` re-keys and re-renders every fact under `coaches`, records the
+name as an alias of `mentors`, removes the `coaches` registration, logs the
+merge on `mentors`, and the pair disappears from the report.
 
 ### S17. An event type template renders its events
 

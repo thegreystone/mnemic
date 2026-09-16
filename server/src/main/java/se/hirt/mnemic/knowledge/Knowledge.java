@@ -28,10 +28,12 @@
  */
 package se.hirt.mnemic.knowledge;
 
+import se.hirt.mnemic.embed.Embedding;
 import se.hirt.mnemic.persistence.Database;
 
 import java.time.Clock;
 import java.util.List;
+import java.util.function.Supplier;
 
 /**
  * The knowledge layer over one database, wired once: the registries, entities, events, the question queue, the fact
@@ -43,9 +45,12 @@ public record Knowledge(EntityService entities, EntityTypeRegistry entityTypes, 
 		FactService factService, QuestionResolver resolver, Consolidator consolidator, FactRenderer renderer,
 		Containment containment) {
 
-	public static Knowledge open(Database db, Lang lang, String ownerName, List<String> ownerIdentity, Clock clock) {
+	/** {@code embedding}: the model that compares vocabulary by meaning, or a supplier of null while none is loaded. */
+	public static Knowledge open(
+		Database db, Lang lang, String ownerName, List<String> ownerIdentity, Clock clock,
+		Supplier<Embedding> embedding) {
 		var entityTypes = new EntityTypeRegistry(db);
-		var predicates = new PredicateRegistry(db, lang, entityTypes);
+		var predicates = new PredicateRegistry(db, lang, entityTypes, embedding);
 		var eventTypes = new EventTypeRegistry(db);
 		var entities = new EntityService(db, entityTypes, ownerName, ownerIdentity);
 		var questions = new QuestionService(db);
@@ -56,7 +61,8 @@ public record Knowledge(EntityService entities, EntityTypeRegistry entityTypes, 
 		var asks = new FactQuestions(questions, entities, facts);
 		var factService = new FactService(db, entities, predicates, eventTypes, events, questions, facts, asks,
 				renderer, ledger, entityTypes);
-		var resolver = new QuestionResolver(db, entities, predicates, questions, factService, ledger);
+		var resolver = new QuestionResolver(db, entities, predicates, eventTypes, entityTypes, questions, factService,
+				ledger);
 		var consolidator = new Consolidator(db, entities, predicates, eventTypes, entityTypes, events, facts, resolver,
 				ledger, renderer);
 		return new Knowledge(entities, entityTypes, predicates, eventTypes, events, questions, facts, factService,

@@ -30,6 +30,7 @@ package se.hirt.mnemic.knowledge;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import se.hirt.mnemic.embed.Embedding;
 import se.hirt.mnemic.persistence.Database;
 import se.hirt.mnemic.persistence.Row;
 import se.hirt.mnemic.persistence.Tx;
@@ -38,6 +39,7 @@ import se.hirt.mnemic.protocol.MnemicException;
 
 import java.time.Instant;
 import java.util.*;
+import java.util.function.Supplier;
 
 /**
  * The predicate registry: the seed vocabulary (EXTRACTION.md), caller definitions, resolution of proposed names to
@@ -76,19 +78,39 @@ public final class PredicateRegistry {
 	private static final TypeReference<List<String>> LIST = new TypeReference<>() {
 	};
 	private static final int SIMILAR_MIN_OVERLAP = 2;
+	/**
+	 * When a name is taken for an existing predicate by meaning. Sentence embedders score every pair of short phrases
+	 * highly (the granite model puts unrelated predicates at about 0.84), so the signal is the lead of the nearest
+	 * predicate over the next one as much as its score: a real match leads by 0.045 or more, noise by under 0.02 (see
+	 * {@code VocabularyCalibrationTest}). Asked as similar above the first pair, as ambiguous above the second.
+	 */
+	static final float SEMANTIC_SIMILAR = 0.88f;
+	static final float SEMANTIC_SIMILAR_LEAD = 0.04f;
+	static final float SEMANTIC_AMBIGUOUS = 0.86f;
+	static final float SEMANTIC_AMBIGUOUS_LEAD = 0.02f;
 
 	private final Database db;
 	private final Lang lang;
 	private final EntityTypeRegistry entityTypes;
+	/** The embedding model, when one is loaded; null means names are compared by their words only. */
+	private final Supplier<Embedding> embedding;
 	/** The negation templates of the language, by predicate; empty for the base language. */
 	private final Map<String, String> negated = new HashMap<>();
+	/** One vector per predicate for {@code vectorModel}, computed when first needed. */
+	private final Map<String, float[]> vectors = new HashMap<>();
+	private String vectorModel;
 	private Map<String, Predicate> cache;
 
 	/** {@code lang}: the store's language; its templates and cue words are loaded over the base (English) ones. */
 	public PredicateRegistry(Database db, Lang lang, EntityTypeRegistry entityTypes) {
+		this(db, lang, entityTypes, () -> null);
+	}
+
+	public PredicateRegistry(Database db, Lang lang, EntityTypeRegistry entityTypes, Supplier<Embedding> embedding) {
 		this.db = db;
 		this.entityTypes = entityTypes;
 		this.lang = lang;
+		this.embedding = embedding;
 		seedIfMissing();
 		seedRendersIfMissing();
 	}
@@ -238,14 +260,14 @@ public final class PredicateRegistry {
 	}
 
 	/**
-	 * Resolves a proposed predicate name, with an optional definition: exact name, alias, {@code x:} extension
-	 * (registered on first use), a similar existing predicate (same domain/range, at least two content tokens shared
-	 * across name, description, and lexicon, J2), an ambiguous one (exactly one token shared, J3), or a new
-	 * registration when a definition was supplied. Similar and ambiguous are both returned as a candidate for the
-	 * caller to confirm, never applied: token overlap cannot see meaning, and a restriction defined by the caller would
-	 * otherwise be mapped onto the relation it restricts. Confirming a similar candidate records the name as an alias,
-	 * so it is asked once. A bare unknown name without a definition becomes an {@code x:} predicate with a warning, so
-	 * nothing is lost.
+	 * Resolves a proposed predicate name, with an optional definition: exact name, alias, a similar existing predicate
+	 * (same domain/range, at least two content tokens shared across name, description, and lexicon, J2), an ambiguous
+	 * one (exactly one token shared, J3), or a registration. Similar and ambiguous are both returned as a candidate for
+	 * the caller to confirm, never applied: token overlap cannot see meaning, and a restriction defined by the caller
+	 * would otherwise be mapped onto the relation it restricts. Confirming a similar candidate records the name as an
+	 * alias, so it is asked once. A bare name without a definition is compared by its words alone and registered from
+	 * this use when nothing on record shares one: everything is inferred from the name, and a description can follow
+	 * through {@code correct}.
 	 */
 	public synchronized Resolution resolve(String name, PredicateDef def, Long observationId, List<String> warnings) {
 		if (name == null || name.isBlank()) {
@@ -255,22 +277,176 @@ public final class PredicateRegistry {
 		if (exact.isPresent()) {
 			return new Resolution(exact.get(), name.equals(exact.get().name()) ? "exact" : "alias", null);
 		}
-		if (name.startsWith("x:")) {
-			return new Resolution(registerExtended(name, observationId), "extended", null);
+		if (def == null) {
+			def = new PredicateDef(name, null, null, null, null, null, null, null, null, List.of(), null, List.of(),
+					List.of());
 		}
-		if (def != null) {
-			Similar similar = similar(def);
-			if (similar != null && similar.overlap() >= SIMILAR_MIN_OVERLAP) {
-				return new Resolution(null, "similar", similar.predicate());
-			}
-			if (similar != null && similar.overlap() == 1) {
-				return new Resolution(null, "ambiguous", similar.predicate());
-			}
-			return new Resolution(register(def, observationId), "registered", null);
+		Similar similar = similar(def);
+		if (similar != null && (similar.overlap() >= SIMILAR_MIN_OVERLAP || def.description() == null)) {
+			return new Resolution(null, "similar", similar.predicate());
 		}
-		warnings.add("Predicate '" + name + "' is not registered and no definition was supplied; stored as 'x:" + name
-				+ "' (lexical recall only). Define it in 'predicates' to make it structural.");
-		return new Resolution(registerExtended("x:" + name, observationId), "extended", null);
+		if (similar != null && similar.overlap() == 1) {
+			return new Resolution(null, "ambiguous", similar.predicate());
+		}
+		Nearest near = nearest(embeddingText(def), types(def.domain()), types(def.range()), null);
+		if (near != null && near.similar()) {
+			return new Resolution(null, "semantic", near.predicate());
+		}
+		if (near != null && near.ambiguous()) {
+			return new Resolution(null, "ambiguous", near.predicate());
+		}
+		return new Resolution(register(def, observationId), bare(def) ? "inferred" : "registered", null);
+	}
+
+	/** A definition that states nothing beyond the name. */
+	static boolean bare(PredicateDef d) {
+		return d.description() == null && d.domain() == null && d.range() == null && d.functional() == null
+				&& d.functionalScope() == null && d.symmetric() == null && d.inverse() == null && d.volatility() == null
+				&& d.lexicon().isEmpty() && d.render() == null && d.qualifiers().isEmpty() && d.aliases().isEmpty()
+				&& d.renders().isEmpty();
+	}
+
+	// ── meaning ──────────────────────────────────────────────────────────
+
+	/** The closest predicate by meaning, its score, and its lead over the runner-up. */
+	record Nearest(Predicate predicate, float score, float lead) {
+		boolean similar() {
+			return score >= SEMANTIC_SIMILAR && lead >= SEMANTIC_SIMILAR_LEAD;
+		}
+
+		boolean ambiguous() {
+			return score >= SEMANTIC_AMBIGUOUS && lead >= SEMANTIC_AMBIGUOUS_LEAD;
+		}
+	}
+
+	/** What a predicate means, as text for the embedding model: its name's words, its description, its lexicon. */
+	static String embeddingText(Predicate p) {
+		return embeddingText(p.name(), p.description(), p.lexicon());
+	}
+
+	/** A bare definition is embedded with the lexicon it would get, so it reads like the registered predicates do. */
+	private static String embeddingText(PredicateDef d) {
+		return embeddingText(d.name(), d.description(),
+				d.lexicon().isEmpty() && d.name() != null ? Predicate.lexiconOf(d.name()) : d.lexicon());
+	}
+
+	private static String embeddingText(String name, String description, List<String> lexicon) {
+		var sb = new StringBuilder(name == null ? "" : name.replace('_', ' '));
+		if (description != null) {
+			sb.append(". ").append(description);
+		}
+		if (!lexicon.isEmpty()) {
+			sb.append(". ").append(String.join(", ", lexicon));
+		}
+		return sb.toString();
+	}
+
+	/**
+	 * The registered predicate closest in meaning to a text, among those whose domain and range overlap the given ones
+	 * and that are not {@code except}; null when no model is loaded or the registry is empty. Vectors are computed once
+	 * per predicate and model and dropped when the predicate changes.
+	 */
+	private synchronized Nearest nearest(String text, List<String> domain, List<String> range, String except) {
+		Embedding emb = embedding.get();
+		if (emb == null) {
+			return null;
+		}
+		if (!emb.id().equals(vectorModel)) {
+			vectors.clear();
+			vectorModel = emb.id();
+		}
+		float[] q = emb.embed(text);
+		Predicate best = null;
+		float bestScore = 0;
+		float second = 0;
+		for (Predicate p : load().values()) {
+			if (p.name().equals(except) || p.literalRange() || !overlaps(p.domain(), domain)
+					|| !overlaps(p.range(), range)) {
+				continue;
+			}
+			float[] v = vectors.computeIfAbsent(p.name(), k -> emb.embed(embeddingText(p)));
+			float score = Embedding.dot(q, v);
+			if (score > bestScore) {
+				second = bestScore;
+				best = p;
+				bestScore = score;
+			} else if (score > second) {
+				second = score;
+			}
+		}
+		return best == null ? null : new Nearest(best, bestScore, bestScore - second);
+	}
+
+	/**
+	 * Predicates registered from use that lie close in meaning to another predicate, each pair once:
+	 * {@code {predicate, close_to, score}}. Empty without a model.
+	 */
+	public synchronized List<Map<String, Object>> closePairs() {
+		var out = new ArrayList<Map<String, Object>>();
+		var seen = new HashSet<String>();
+		for (Predicate p : load().values()) {
+			if (!p.isInferred()) {
+				continue;
+			}
+			Nearest n = nearest(embeddingText(p), p.domain(), p.range(), p.name());
+			if (n == null || !n.ambiguous()) {
+				continue;
+			}
+			String pair = p.name().compareTo(n.predicate().name()) < 0 ? p.name() + "|" + n.predicate().name()
+					: n.predicate().name() + "|" + p.name();
+			if (!seen.add(pair)) {
+				continue;
+			}
+			var m = new LinkedHashMap<String, Object>();
+			m.put("predicate", p.name());
+			m.put("close_to", n.predicate().name());
+			m.put("score", Math.round(n.score() * 100) / 100.0);
+			out.add(m);
+		}
+		return out;
+	}
+
+	/**
+	 * Folds one predicate into another: its facts are re-keyed, its name and aliases become aliases of the target,
+	 * event types that named it name the target, and its registration goes. The count of facts moved.
+	 */
+	public synchronized int merge(String from, String into, String reason) {
+		Predicate f = Optional.ofNullable(load().get(from))
+				.orElseThrow(() -> MnemicException.notFound("No predicate " + from));
+		Predicate t = get(into).orElseThrow(() -> MnemicException.notFound("No predicate " + into));
+		if (f.name().equals(t.name())) {
+			throw MnemicException.invalidArgument("'" + from + "' and '" + into + "' are the same predicate.");
+		}
+		if (f.seed()) {
+			throw MnemicException.invalidArgument("'" + from + "' is a seed predicate; merge the other way round.");
+		}
+		var aliases = new ArrayList<>(t.aliases());
+		for (String a : concat(List.of(f.name()), f.aliases())) {
+			if (!aliases.contains(a)) {
+				aliases.add(a);
+			}
+		}
+		int moved = db.write(tx -> {
+			int n = tx.update("UPDATE fact SET predicate = ? WHERE predicate = ?", t.name(), f.name());
+			tx.update("UPDATE question SET predicate = ? WHERE predicate = ?", t.name(), f.name());
+			tx.update("DELETE FROM predicate WHERE name = ?", f.name());
+			tx.update("UPDATE predicate SET aliases = ?, inferred = 0 WHERE name = ?", json(aliases), t.name());
+			tx.insert(
+					"INSERT INTO predicate_change(predicate, field, old_value, new_value, reason, changed_at) "
+							+ "VALUES (?,?,?,?,?,?)",
+					t.name(), "merged", f.name(), t.name(), reason, Instant.now().toString());
+			return n;
+		});
+		vectors.remove(f.name());
+		vectors.remove(t.name());
+		cache = null;
+		return moved;
+	}
+
+	private static List<String> concat(List<String> a, List<String> b) {
+		var out = new ArrayList<>(a);
+		out.addAll(b);
+		return out;
 	}
 
 	/**
@@ -281,9 +457,6 @@ public final class PredicateRegistry {
 		String q = " " + String.join(" ", Names.tokens(query)) + " ";
 		var out = new LinkedHashMap<String, Cue>();
 		for (Predicate p : load().values()) {
-			if (p.isExtended()) {
-				continue;
-			}
 			Cue best = null;
 			for (String term : p.qualifiers()) {
 				if (q.contains(" " + String.join(" ", Names.tokens(term)) + " ")
@@ -298,7 +471,11 @@ public final class PredicateRegistry {
 				}
 			}
 			if (best == null) {
-				for (String term : p.lexicon()) {
+				var terms = new ArrayList<>(p.lexicon());
+				for (String alias : p.aliases()) {
+					terms.addAll(Predicate.lexiconOf(alias)); // a name the caller once used, in any language
+				}
+				for (String term : terms) {
 					if (q.contains(" " + String.join(" ", Names.tokens(term)) + " ")
 							&& (best == null || term.length() > best.term().length())) {
 						best = new Cue(p, null, term, !p.symmetric() && p.sameType() ? "object" : "any");
@@ -314,17 +491,26 @@ public final class PredicateRegistry {
 		return cues;
 	}
 
-	/** Extended ({@code x:}) predicates used by at least {@code min} facts: candidates for registration (J6). */
-	public List<Map<String, Object>> frequentExtended(int min) {
-		return db.read(tx -> tx.query("""
-				SELECT predicate, COUNT(*) AS n, GROUP_CONCAT(DISTINCT observation_id) AS obs FROM fact
-				WHERE predicate LIKE 'x:%' GROUP BY predicate HAVING n >= ? ORDER BY n DESC""", min).stream().map(r -> {
+	/** Predicates registered from use and not yet described, with the facts that use them (J6). */
+	public synchronized List<Map<String, Object>> inferred() {
+		var out = new ArrayList<Map<String, Object>>();
+		for (Predicate p : load().values()) {
+			if (!p.isInferred()) {
+				continue;
+			}
+			List<Row> rows = db.read(tx -> tx.query(
+					"SELECT COUNT(*) AS n, GROUP_CONCAT(DISTINCT observation_id) AS obs FROM fact WHERE predicate = ?",
+					p.name()));
 			var m = new LinkedHashMap<String, Object>();
-			m.put("predicate", r.str("predicate"));
-			m.put("uses", r.lng("n"));
-			m.put("observations", Arrays.stream(r.str("obs").split(",")).map(x -> "obs-" + x).toList());
-			return (Map<String, Object>) m;
-		}).toList());
+			m.put("predicate", p.name());
+			m.put("uses", rows.getFirst().lng("n"));
+			String obs = rows.getFirst().str("obs");
+			m.put("observations",
+					obs == null ? List.of() : Arrays.stream(obs.split(",")).map(x -> "obs-" + x).toList());
+			out.add(m);
+		}
+		out.sort((a, b) -> Long.compare((Long) b.get("uses"), (Long) a.get("uses")));
+		return out;
 	}
 
 	// ── write ────────────────────────────────────────────────────────────
@@ -334,25 +520,67 @@ public final class PredicateRegistry {
 			throw MnemicException.invalidArgument("A predicate definition needs a 'name'.");
 		}
 		String name = def.name().trim().toLowerCase(Locale.ROOT).replace(' ', '_');
-		if (load().containsKey(name)) {
-			return load().get(name);
+		Predicate existing = load().get(name);
+		if (existing != null) {
+			return existing.isInferred() && !bare(def) ? define(existing, def) : existing;
 		}
 		List<String> domain = types(def.domain());
 		List<String> range = types(def.range());
 		String render = def.render() != null && !def.render().isBlank() ? def.render()
 				: "{subject} " + name.replace('_', ' ') + " {object}";
+		// Without cue words the name supplies them: its words become the search terms.
+		List<String> lexicon = def.lexicon().isEmpty() ? Predicate.lexiconOf(name) : def.lexicon();
 		var p = new Predicate(name, def.description(), domain, range, Boolean.TRUE.equals(def.functional()),
 				def.functionalScope(), Boolean.TRUE.equals(def.symmetric()), def.inverse(),
-				def.volatility() == null ? "medium" : def.volatility(), def.lexicon(), render, def.qualifiers(),
-				def.aliases(), List.of(), observationId, false);
+				def.volatility() == null ? "medium" : def.volatility(), lexicon, render, def.qualifiers(),
+				def.aliases(), List.of(), observationId, false, bare(def));
 		insert(p);
 		putRenders(name, def.renders());
 		return get(name).orElseThrow();
 	}
 
 	/**
+	 * A definition for a predicate registered from use: every property the definition states replaces the inferred one.
+	 */
+	private Predicate define(Predicate p, PredicateDef def) {
+		var replacement = new LinkedHashMap<String, Object>();
+		if (def.description() != null) {
+			replacement.put("description", def.description());
+		}
+		if (def.domain() != null) {
+			replacement.put("domain", def.domain());
+		}
+		if (def.range() != null) {
+			replacement.put("range", def.range());
+		}
+		if (def.functional() != null) {
+			replacement.put("functional", def.functional());
+		}
+		if (def.symmetric() != null) {
+			replacement.put("symmetric", def.symmetric());
+		}
+		if (def.volatility() != null) {
+			replacement.put("volatility", def.volatility());
+		}
+		if (!def.lexicon().isEmpty()) {
+			replacement.put("lexicon", def.lexicon());
+		}
+		if (def.render() != null && !def.render().isBlank()) {
+			replacement.put("render", def.render());
+		}
+		if (!def.qualifiers().isEmpty()) {
+			replacement.put("qualifiers", def.qualifiers());
+		}
+		if (!def.renders().isEmpty()) {
+			replacement.put("renders", def.renders());
+		}
+		return update(p.name(), replacement, "defined after registration from use");
+	}
+
+	/**
 	 * Corrects a predicate property (J5): {@code render}, {@code lexicon}, {@code qualifiers}, {@code functional},
-	 * {@code volatility}, {@code description}. Every change is logged; the caller re-renders the facts.
+	 * {@code symmetric}, {@code volatility}, {@code description}, {@code domain}, {@code range}. Every change is
+	 * logged; the caller re-renders the facts.
 	 */
 	public synchronized Predicate update(String name, Map<String, Object> replacement, String reason) {
 		Predicate p = get(name).orElseThrow(() -> MnemicException.notFound("No predicate " + name));
@@ -361,8 +589,11 @@ public final class PredicateRegistry {
 		List<String> qualifiers = p.qualifiers();
 		List<String> inverseLexicon = p.inverseLexicon();
 		boolean functional = p.functional();
+		boolean symmetric = p.symmetric();
 		String volatility = p.volatility();
 		String description = p.description();
+		List<String> domain = p.domain();
+		List<String> range = p.range();
 		var changes = new ArrayList<String[]>();
 		for (Map.Entry<String, Object> e : replacement.entrySet()) {
 			String old;
@@ -370,6 +601,20 @@ public final class PredicateRegistry {
 			case "render" -> {
 				old = render;
 				render = String.valueOf(e.getValue());
+			}
+			case "domain" -> {
+				old = json(domain);
+				domain = types(e.getValue() instanceof List<?> l ? String.join("|", strings(l))
+						: String.valueOf(e.getValue()));
+			}
+			case "range" -> {
+				old = json(range);
+				range = types(e.getValue() instanceof List<?> l ? String.join("|", strings(l))
+						: String.valueOf(e.getValue()));
+			}
+			case "symmetric" -> {
+				old = String.valueOf(symmetric);
+				symmetric = Boolean.parseBoolean(String.valueOf(e.getValue()));
 			}
 			case "lexicon" -> {
 				old = json(lexicon);
@@ -409,7 +654,8 @@ public final class PredicateRegistry {
 				continue;
 			}
 			default -> throw MnemicException.invalidArgument("Unknown predicate property '" + e.getKey()
-					+ "'; correctable: render, renders, lexicon, inverse_lexicon, qualifiers, functional, volatility, description.");
+					+ "'; correctable: description, domain, range, render, renders, lexicon, inverse_lexicon, qualifiers, "
+					+ "functional, symmetric, volatility.");
 			}
 			changes.add(new String[] {e.getKey(), old,
 					e.getValue() instanceof List<?> ? json(strings(e.getValue())) : String.valueOf(e.getValue())});
@@ -419,19 +665,24 @@ public final class PredicateRegistry {
 		final List<String> q = qualifiers;
 		final List<String> inv = inverseLexicon;
 		final boolean f = functional;
+		final boolean sym = symmetric;
 		final String v = volatility;
 		final String d = description;
+		final List<String> dom = domain;
+		final List<String> rng = range;
 		db.write(tx -> {
-			tx.update("""
-					UPDATE predicate SET render = ?, lexicon = ?, qualifiers = ?, functional = ?, volatility = ?,
-					description = ?, inverse_lexicon = ? WHERE name = ?""", r, json(l), json(q), f ? 1 : 0, v, d,
-					json(inv), p.name());
+			tx.update(
+					"""
+							UPDATE predicate SET render = ?, lexicon = ?, qualifiers = ?, functional = ?, symmetric = ?, volatility = ?,
+							description = ?, inverse_lexicon = ?, domain = ?, range = ?, inferred = 0 WHERE name = ?""",
+					r, json(l), json(q), f ? 1 : 0, sym ? 1 : 0, v, d, json(inv), json(dom), json(rng), p.name());
 			for (String[] c : changes) {
 				tx.insert("INSERT INTO predicate_change(predicate, field, old_value, new_value, reason, changed_at) "
 						+ "VALUES (?,?,?,?,?,?)", p.name(), c[0], c[1], c[2], reason, Instant.now().toString());
 			}
 			return null;
 		});
+		vectors.remove(p.name());
 		cache = null;
 		return get(p.name()).orElseThrow();
 	}
@@ -447,18 +698,6 @@ public final class PredicateRegistry {
 					m.put("changed_at", r.str("changed_at"));
 					return (Map<String, Object>) m;
 				}).toList());
-	}
-
-	private Predicate registerExtended(String name, Long observationId) {
-		Map<String, Predicate> all = load();
-		if (all.containsKey(name)) {
-			return all.get(name);
-		}
-		var p = new Predicate(name, null, List.of("*"), List.of("*"), false, null, false, null, "medium", List.of(),
-				"{subject} " + name.substring(2).replace('_', ' ') + " {object}", List.of(), List.of(), List.of(),
-				observationId, false);
-		insert(p);
-		return p;
 	}
 
 	/** Records {@code alias} as another name for {@code p}: the caller confirmed a similar match (J2). */
@@ -488,7 +727,7 @@ public final class PredicateRegistry {
 		int bestScore = 0;
 		boolean tie = false;
 		for (Predicate p : load().values()) {
-			if (p.isExtended() || !overlaps(p.domain(), domain) || !overlaps(p.range(), range)) {
+			if (!overlaps(p.domain(), domain) || !overlaps(p.range(), range)) {
 				continue;
 			}
 			var tokens = new HashSet<String>();
@@ -624,7 +863,7 @@ public final class PredicateRegistry {
 		boolean symmetric, String volatility, List<String> lexicon, String render, List<String> qualifiers,
 		List<String> inverseLexicon) {
 		return new Predicate(name, description, domain, range, functional, scope, symmetric, null, volatility, lexicon,
-				render, qualifiers, List.of(), inverseLexicon, null, true);
+				render, qualifiers, List.of(), inverseLexicon, null, true, false);
 	}
 
 	// ── persistence ──────────────────────────────────────────────────────
@@ -656,10 +895,9 @@ public final class PredicateRegistry {
 							inverse.add(t);
 						}
 					}
-					map.put(p.name(),
-							new Predicate(p.name(), p.description(), p.domain(), p.range(), p.functional(),
-									p.functionalScope(), p.symmetric(), p.inverse(), p.volatility(), lexicon,
-									r.str("render"), p.qualifiers(), p.aliases(), inverse, p.definedBy(), p.seed()));
+					map.put(p.name(), new Predicate(p.name(), p.description(), p.domain(), p.range(), p.functional(),
+							p.functionalScope(), p.symmetric(), p.inverse(), p.volatility(), lexicon, r.str("render"),
+							p.qualifiers(), p.aliases(), inverse, p.definedBy(), p.seed(), p.isInferred()));
 					if (r.str("negated") != null) {
 						negated.put(p.name(), r.str("negated"));
 					}
@@ -679,11 +917,12 @@ public final class PredicateRegistry {
 		tx.insert("""
 				INSERT INTO predicate(name, description, domain, range, functional, functional_scope, symmetric,
 				                      inverse, volatility, lexicon, render, qualifiers, aliases, inverse_lexicon,
-				                      defined_by, seed, created_at)
-				VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", p.name(), p.description(), json(p.domain()),
+				                      defined_by, seed, inferred, created_at)
+				VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", p.name(), p.description(), json(p.domain()),
 				json(p.range()), p.functional() ? 1 : 0, p.functionalScope(), p.symmetric() ? 1 : 0, p.inverse(),
 				p.volatility(), json(p.lexicon()), p.render(), json(p.qualifiers()), json(p.aliases()),
-				json(p.inverseLexicon()), p.definedBy(), p.seed() ? 1 : 0, Instant.now().toString());
+				json(p.inverseLexicon()), p.definedBy(), p.seed() ? 1 : 0, p.isInferred() ? 1 : 0,
+				Instant.now().toString());
 		return null;
 	}
 
@@ -691,7 +930,8 @@ public final class PredicateRegistry {
 		return new Predicate(r.str("name"), r.str("description"), list(r.str("domain")), list(r.str("range")),
 				r.lng("functional") == 1, r.str("functional_scope"), r.lng("symmetric") == 1, r.str("inverse"),
 				r.str("volatility"), list(r.str("lexicon")), r.str("render"), list(r.str("qualifiers")),
-				list(r.str("aliases")), list(r.str("inverse_lexicon")), r.lngOrNull("defined_by"), r.lng("seed") == 1);
+				list(r.str("aliases")), list(r.str("inverse_lexicon")), r.lngOrNull("defined_by"), r.lng("seed") == 1,
+				r.lng("inferred") == 1);
 	}
 
 	private List<String> types(String csv) {

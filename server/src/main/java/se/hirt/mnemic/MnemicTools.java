@@ -38,11 +38,17 @@ import se.hirt.mnemic.embed.EmbedderHolder;
 import se.hirt.mnemic.embed.OrtLibrary;
 import se.hirt.mnemic.embed.OrtProbe;
 import se.hirt.mnemic.knowledge.Entity;
+import se.hirt.mnemic.knowledge.EntityTypeRegistry;
 import se.hirt.mnemic.knowledge.Event;
+import se.hirt.mnemic.knowledge.EventTypeRegistry;
 import se.hirt.mnemic.knowledge.Fact;
+import se.hirt.mnemic.knowledge.FactQueries;
 import se.hirt.mnemic.knowledge.FactService.Applied;
 import se.hirt.mnemic.knowledge.FactService.Corrected;
+import se.hirt.mnemic.knowledge.Predicate;
+import se.hirt.mnemic.knowledge.Question;
 import se.hirt.mnemic.knowledge.QuestionResolver.Resolve;
+import se.hirt.mnemic.knowledge.Supersession;
 import se.hirt.mnemic.model.ModelProvider;
 import se.hirt.mnemic.observation.Observation;
 import se.hirt.mnemic.observation.Source;
@@ -62,8 +68,8 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * The MCP tool surface over the {@link Engine}: argument parsing, the JSON shape of each reply, and nothing else.
- * Descriptions live in {@link ToolDescriptions}.
+ * The MCP tool surface over the {@link Engine}: seven tools, one id scheme. Argument parsing and the JSON shape of each
+ * reply live here and nothing else; descriptions live in {@link ToolDescriptions}.
  */
 public class MnemicTools {
 
@@ -76,9 +82,13 @@ public class MnemicTools {
 	MnemicConfig config;
 
 	@Tool(name = "remember", description = ToolDescriptions.REMEMBER, annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = false, openWorldHint = false))
-	ToolResponse remember(@ToolArg(description = "The observation, verbatim. Required.")
-	String text, @ToolArg(description = "user | assistant | conversation | document | connector (default user)")
-	Optional<String> source_kind,
+	ToolResponse remember(@ToolArg(description = "The observation, verbatim. Required unless observation_id is given.")
+	Optional<String> text,
+		@ToolArg(description = "An observation already stored without a reading (obs-48): the proposal is attached to "
+				+ "it instead of a new text")
+		Optional<String> observation_id,
+		@ToolArg(description = "user | assistant | conversation | document | connector (default user)")
+		Optional<String> source_kind,
 		@ToolArg(description = "Document path, message id, or conversation id the text came from")
 		Optional<String> source_ref,
 		@ToolArg(description = "Chunk index within source_ref when a larger source was split")
@@ -94,6 +104,18 @@ public class MnemicTools {
 		Optional<String> idempotency_key, @ToolArg(required = false, description = ToolDescriptions.REMEMBER_RESOLVE)
 		List<Map<String, Object>> resolve) {
 		return ToolSupport.json("remember", () -> {
+			Proposal.Parsed parsed = Engine.proposalWithWarnings(proposal);
+			if (observation_id.isPresent()) {
+				if (text.isPresent() && !text.get().isBlank()) {
+					throw MnemicException.invalidArgument("Pass either 'text' (a new observation) or 'observation_id' "
+							+ "(a reading for one already stored), not both.");
+				}
+				if (parsed == null) {
+					throw MnemicException.invalidArgument("'proposal' is required with observation_id: the structured "
+							+ "reading of the observation.");
+				}
+				return attached(parseId(observation_id.get(), "obs-"), parsed);
+			}
 			Source source = new Source(source_kind.orElse("user"), source_ref.orElse(null), source_chunk.orElse(null),
 					null, session.orElse(null));
 			List<Resolve> resolves = (resolve == null ? List.<Map<String, Object>> of() : resolve).stream().map(m -> {
@@ -104,27 +126,16 @@ public class MnemicTools {
 				return new Resolve(String.valueOf(id),
 						m.get("choice") == null ? null : String.valueOf(m.get("choice")));
 			}).toList();
-			Proposal.Parsed parsed = Engine.proposalWithWarnings(proposal);
-			RememberOutcome o = engine.remember(text, source, observed_at.map(MnemicTools::instant).orElse(null),
-					parsed == null ? null : parsed.proposal(), spec_version.orElse(null), idempotency_key.orElse(null),
-					resolves);
+			RememberOutcome o = engine.remember(text.orElse(null), source,
+					observed_at.map(MnemicTools::instant).orElse(null), parsed == null ? null : parsed.proposal(),
+					spec_version.orElse(null), idempotency_key.orElse(null), resolves);
 			Applied a = o.applied();
 			var out = new LinkedHashMap<String, Object>();
 			out.put("observation_id", "obs-" + o.observation().observationId());
 			out.put("replayed", o.observation().replayed());
 			out.put("proposal_source", o.proposalSource());
 			out.put("duplicate_text", o.observation().duplicateText());
-			out.put("stored", stored(a));
-			out.put("predicates", a.predicates().stream()
-					.map(p -> Map.of("proposed", p.proposed(), "resolution", p.resolution(), "id", p.id())).toList());
-			out.put("superseded", a.superseded());
-			out.put("questions", a.questions());
-			if (!a.definitions().isEmpty()) {
-				out.put("definitions", a.definitions());
-			}
-			if (!a.suggestions().isEmpty()) {
-				out.put("suggestions", a.suggestions());
-			}
+			applied(out, a);
 			if (!o.resolved().isEmpty()) {
 				out.put("resolved", o.resolved());
 			}
@@ -137,6 +148,19 @@ public class MnemicTools {
 			out.put("pending_proposals", o.observation().pendingProposals());
 			return out;
 		});
+	}
+
+	/** A reading for an observation stored without one. */
+	private Map<String, Object> attached(long observationId, Proposal.Parsed parsed) {
+		Applied a = engine.propose(observationId, parsed.proposal());
+		var out = new LinkedHashMap<String, Object>();
+		out.put("observation_id", "obs-" + observationId);
+		applied(out, a);
+		var warnings = new ArrayList<>(parsed.warnings());
+		warnings.addAll(a.warnings());
+		out.put("warnings", warnings);
+		out.put("pending_proposals", engine.observations().pendingProposals());
+		return out;
 	}
 
 	@Tool(name = "recall", description = ToolDescriptions.RECALL, annotations = @Tool.Annotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
@@ -161,197 +185,130 @@ public class MnemicTools {
 		});
 	}
 
-	@Tool(name = "history", description = ToolDescriptions.HISTORY, annotations = @Tool.Annotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
-	ToolResponse history(@ToolArg(description = "Name, alias, or id (ent-N) of the entity")
-	String entity, @ToolArg(description = "Only this predicate, e.g. works_at")
-	Optional<String> predicate) {
-		return ToolSupport.json("history", () -> {
-			Entity e = engine.entities().byRef(entity)
-					.orElseThrow(() -> MnemicException.notFound("No entity matches '" + entity + "'."));
-			var h = engine.history(e.id(), predicate.orElse(null));
-			var out = new LinkedHashMap<String, Object>();
-			out.put("entity", Map.of("id", e.ref(), "name", e.name()));
-			var entries = new ArrayList<Map<String, Object>>();
-			for (var entry : h.entries()) {
-				Fact f = entry.fact();
-				var m = new LinkedHashMap<String, Object>();
-				m.put("id", f.ref());
-				m.put("predicate", f.predicate());
-				m.put("rendering", f.rendering());
-				m.put("status", f.status());
-				m.put("state", f.state(engine.clock().instant()));
-				m.put("valid_start", f.validStart());
-				m.put("valid_end", f.validEnd());
-				m.put("start_source", f.startSource());
-				m.put("end_source", f.endSource());
-				m.put("derivation", f.derivationKind());
-				provenance(m, f);
-				m.put("superseded_by", f.supersededBy() == null ? null : "f-" + f.supersededBy());
-				m.put("changes", entry.supersessions().stream().map(x -> {
-					var c = new LinkedHashMap<String, Object>();
-					c.put("kind", x.kind());
-					c.put("reason", x.reason());
-					c.put("by", x.supersededById() == null ? null : "f-" + x.supersededById());
-					c.put("event", x.eventId() == null ? null : "evt-" + x.eventId());
-					c.put("observation", x.observationId() == null ? null : "obs-" + x.observationId());
-					c.put("closed_at", x.closedAt());
-					c.put("recorded_at", x.recordedAt());
-					return c;
-				}).toList());
-				entries.add(m);
+	@Tool(name = "inspect", description = ToolDescriptions.INSPECT, annotations = @Tool.Annotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
+	ToolResponse inspect(
+		@ToolArg(description = "ent-12, a name or alias, f-12, obs-12, evt-3, q-3, pred:works_at, event:joined, "
+				+ "type:place, or 'registry'")
+		String ref,
+		@ToolArg(description = "For an entity: every fact that ever touched it, with its changes and tombstones "
+				+ "(default false)")
+		Optional<Boolean> history,
+		@ToolArg(description = "For an entity with history: only this predicate, e.g. works_at")
+		Optional<String> predicate) {
+		return ToolSupport.json("inspect", () -> {
+			String r = ref == null ? "" : ref.trim();
+			if (r.isEmpty()) {
+				throw MnemicException.invalidArgument("'ref' is required: ent-12, a name, f-12, obs-12, evt-3, q-3, "
+						+ "pred:works_at, event:joined, type:place, or 'registry'.");
 			}
-			out.put("facts", entries);
-			out.put("tombstones", h.tombstones().stream().map(t -> Map.of("kind", "forgotten", "observation",
-					"obs-" + t.observationId(), "forgotten_at", t.forgottenAt())).toList());
-			return out;
+			if (r.equalsIgnoreCase("registry")) {
+				return registry();
+			}
+			if (r.startsWith("f-")) {
+				return fact(parseId(r, "f-"));
+			}
+			if (r.startsWith("obs-")) {
+				return observation(parseId(r, "obs-"));
+			}
+			if (r.startsWith("evt-")) {
+				Event ev = engine.events().get(parseId(r, "evt-"))
+						.orElseThrow(() -> MnemicException.notFound("No event " + r));
+				return event(ev);
+			}
+			if (r.startsWith("q-")) {
+				return engine.questions().get(parseId(r, "q-")).map(Question::toMap)
+						.orElseThrow(() -> MnemicException.notFound("No question " + r));
+			}
+			if (r.startsWith("pred:")) {
+				return predicateEntry(r.substring(5));
+			}
+			if (r.startsWith("event:")) {
+				return eventTypeEntry(r.substring(6));
+			}
+			if (r.startsWith("type:")) {
+				return entityTypeEntry(r.substring(5));
+			}
+			Entity e = engine.entities().byRef(r).orElseThrow(() -> MnemicException
+					.notFound("No entity matches '" + r + "'. Try recall with the name to see what is known."));
+			return history.orElse(false) ? entityHistory(e, predicate.orElse(null)) : entity(e);
 		});
 	}
 
 	@Tool(name = "correct", description = ToolDescriptions.CORRECT, annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
-	ToolResponse correct(@ToolArg(description = "The fact to correct, e.g. f-12 (omit when correcting a predicate)")
-	Optional<String> fact_id, @ToolArg(description = ToolDescriptions.CORRECT_REPLACEMENT)
-	Map<String, Object> replacement, @ToolArg(description = "Why, in the user's words")
-	Optional<String> reason, @ToolArg(description = "The predicate to correct instead of a fact, e.g. parent_of")
-	Optional<String> predicate, @ToolArg(description = "The event type to correct instead of a fact, e.g. purchased")
-	Optional<String> event_type, @ToolArg(description = "The entity type to correct instead of a fact, e.g. place")
-	Optional<String> entity_type) {
+	ToolResponse correct(
+		@ToolArg(description = "What to correct: f-12, obs-51, pred:parent_of (or a bare predicate name), "
+				+ "event:purchased, type:canton")
+		String target,
+		@ToolArg(description = "The changed keys for the target; {\"wrong\": true} withdraws a fact, {\"retired\": "
+				+ "true|false} retires or reinstates an observation")
+		Map<String, Object> replacement, @ToolArg(description = "Why, in the user's words")
+		Optional<String> reason) {
 		return ToolSupport.json("correct", () -> {
-			if (predicate.isPresent()) {
-				return engine.correctPredicate(predicate.get(), replacement, reason.orElse(null));
+			String t = target == null ? "" : target.trim();
+			String why = reason.orElse(null);
+			if (t.startsWith("f-")) {
+				return correctedFact(parseId(t, "f-"), replacement, why);
 			}
-			if (event_type.isPresent()) {
-				return engine.correctEventType(event_type.get(), replacement, reason.orElse(null));
+			if (t.startsWith("obs-")) {
+				return correctedObservation(parseId(t, "obs-"), replacement, why);
 			}
-			if (entity_type.isPresent()) {
-				return engine.correctEntityType(entity_type.get(), replacement, reason.orElse(null));
+			if (t.startsWith("pred:")) {
+				return engine.correctPredicate(t.substring(5), replacement, why);
 			}
-			if (fact_id.isEmpty()) {
-				throw MnemicException.invalidArgument(
-						"Pass 'fact_id' (f-12), 'predicate' (parent_of), 'event_type' (purchased), or 'entity_type' (place).");
+			if (t.startsWith("event:")) {
+				return engine.correctEventType(t.substring(6), replacement, why);
 			}
-			Corrected c = engine.correct(parseId(fact_id.get(), "f-"), replacement, reason.orElse(null));
-			var out = new LinkedHashMap<String, Object>();
-			out.put("original", factSummary(c.original()));
-			if (c.replacement() == null) {
-				out.put("retracted", true);
-				out.put("replacement", null);
-			} else {
-				out.put("replacement", factSummary(c.replacement()));
+			if (t.startsWith("type:")) {
+				return engine.correctEntityType(t.substring(5), replacement, why);
 			}
-			return out;
+			if (!t.isEmpty() && engine.predicates().get(t).isPresent()) {
+				return engine.correctPredicate(t, replacement, why);
+			}
+			throw MnemicException
+					.invalidArgument("'" + t + "' names nothing to correct; pass f-12, obs-51, pred:parent_of, "
+							+ "event:purchased, or type:canton.");
 		});
 	}
 
-	@Tool(name = "propose", description = ToolDescriptions.PROPOSE, annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = false, openWorldHint = false))
-	ToolResponse propose(@ToolArg(description = "The observation, e.g. obs-48")
-	String observation_id,
-		@ToolArg(description = "Structured proposal, as for remember: {entities, events, facts, predicates, closures}")
-		Map<String, Object> proposal) {
-		return ToolSupport.json("propose", () -> {
-			Proposal.Parsed parsed = Engine.proposalWithWarnings(proposal);
-			if (parsed == null) {
-				throw MnemicException
-						.invalidArgument("'proposal' is required: the structured reading of the observation.");
-			}
-			long id = parseId(observation_id, "obs-");
-			Applied a = engine.propose(id, parsed.proposal());
-			var out = new LinkedHashMap<String, Object>();
-			out.put("observation_id", "obs-" + id);
-			out.put("stored", stored(a));
-			out.put("superseded", a.superseded());
-			out.put("questions", a.questions());
-			if (!a.definitions().isEmpty()) {
-				out.put("definitions", a.definitions());
-			}
-			if (!a.suggestions().isEmpty()) {
-				out.put("suggestions", a.suggestions());
-			}
-			var warnings = new ArrayList<>(parsed.warnings());
-			warnings.addAll(a.warnings());
-			out.put("warnings", warnings);
+	private Map<String, Object> correctedFact(long factId, Map<String, Object> replacement, String reason) {
+		Corrected c = engine.correct(factId, replacement, reason);
+		var out = new LinkedHashMap<String, Object>();
+		out.put("original", factSummary(c.original()));
+		if (c.replacement() == null) {
+			out.put("retracted", true);
+			out.put("reason", reason == null ? "never true" : reason);
+			out.put("replacement", null);
+		} else {
+			out.put("replacement", factSummary(c.replacement()));
+		}
+		return out;
+	}
+
+	private Map<String, Object> correctedObservation(long id, Map<String, Object> replacement, String reason) {
+		if (replacement == null || !(replacement.get("retired") instanceof Boolean retired)) {
+			throw MnemicException.invalidArgument("An observation is corrected with {\"retired\": true} (optionally "
+					+ "\"superseded_by\": \"obs-52\") or {\"retired\": false}.");
+		}
+		var out = new LinkedHashMap<String, Object>();
+		if (!retired) {
+			out.put("reinstated", engine.reinstateObservation(id).ref());
 			out.put("pending_proposals", engine.observations().pendingProposals());
 			return out;
-		});
-	}
-
-	@Tool(name = "retire", description = ToolDescriptions.RETIRE, annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
-	ToolResponse retire(@ToolArg(description = "The observation to retire, e.g. obs-51")
-	String observation_id, @ToolArg(description = "Why, in the user's words")
-	Optional<String> reason, @ToolArg(description = "The observation that supersedes it, e.g. obs-52")
-	Optional<String> superseded_by,
-		@ToolArg(description = "true to undo a retirement: the observation is live again (and back in pending_proposals if it never had a reading)")
-		Optional<Boolean> undo) {
-		return ToolSupport.json("retire", () -> {
-			long id = parseId(observation_id, "obs-");
-			var out = new LinkedHashMap<String, Object>();
-			if (undo.orElse(false)) {
-				out.put("reinstated", engine.reinstateObservation(id).ref());
-				out.put("pending_proposals", engine.observations().pendingProposals());
-				return out;
-			}
-			Observation o = engine.retireObservation(id, reason.orElse(null),
-					superseded_by.map(s -> parseId(s, "obs-")).orElse(null));
-			out.put("retired", o.ref());
-			out.put("reason", o.retiredReason());
-			out.put("superseded_by", o.supersededBy() == null ? null : "obs-" + o.supersededBy());
-			// The facts this observation produced stay, and cite it: the caller decides whether they stand.
-			List<String> citing = engine.facts().factsOfObservation(id).stream().filter(Fact::current).map(Fact::ref)
-					.toList();
-			out.put("facts_citing", citing);
-			if (!citing.isEmpty()) {
-				out.put("note", ToolDescriptions.FACTS_CITING_NOTE);
-			}
-			out.put("pending_proposals", engine.observations().pendingProposals());
-			return out;
-		});
-	}
-
-	@Tool(name = "retract", description = ToolDescriptions.RETRACT, annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
-	ToolResponse retract(@ToolArg(description = "The fact to withdraw, e.g. f-91")
-	String fact_id, @ToolArg(description = "Why it was never true, in the user's words")
-	Optional<String> reason) {
-		return ToolSupport.json("retract", () -> {
-			Corrected c = engine.correct(parseId(fact_id, "f-"), Map.of("wrong", true), reason.orElse(null));
-			var out = new LinkedHashMap<String, Object>();
-			out.put("retracted", factSummary(c.original()));
-			out.put("reason", reason.orElse("never true"));
-			return out;
-		});
-	}
-
-	@Tool(name = "get_entity", description = ToolDescriptions.GET_ENTITY, annotations = @Tool.Annotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
-	ToolResponse getEntity(@ToolArg(description = "Name, alias, or id (ent-N) of the entity")
-	String entity) {
-		return ToolSupport.json("get_entity", () -> {
-			Entity e = engine.entities().byRef(entity).orElseThrow(() -> MnemicException
-					.notFound("No entity matches '" + entity + "'. Try recall with the name to see what is known."));
-			var out = new LinkedHashMap<String, Object>();
-			out.put("id", e.ref());
-			out.put("name", e.name());
-			out.put("type", e.type());
-			out.put("aliases", engine.entities().aliases(e.id()));
-			var facts = new ArrayList<Map<String, Object>>();
-			for (Fact f : engine.facts().factsOf(e.id())) {
-				var m = new LinkedHashMap<String, Object>();
-				m.put("id", f.ref());
-				m.put("predicate", f.predicate());
-				m.put("rendering", f.rendering());
-				m.put("status", f.status());
-				m.put("derivation", f.derivationKind());
-				provenance(m, f);
-				m.put("corroborations", f.corroborations());
-				m.put("last_confirmed", f.lastConfirmed());
-				facts.add(m);
-			}
-			out.put("facts", facts);
-			var events = new ArrayList<Map<String, Object>>();
-			for (Event ev : engine.events().eventsOf(e.id())) {
-				events.add(Map.of("id", ev.ref(), "type", ev.type(), "rendering", ev.rendering(), "observation",
-						"obs-" + ev.observationId()));
-			}
-			out.put("events", events);
-			return out;
-		});
+		}
+		Object by = replacement.get("superseded_by");
+		Observation o = engine.retireObservation(id, reason, by == null ? null : parseId(String.valueOf(by), "obs-"));
+		out.put("retired", o.ref());
+		out.put("reason", o.retiredReason());
+		out.put("superseded_by", o.supersededBy() == null ? null : "obs-" + o.supersededBy());
+		// The facts this observation produced stay, and cite it: the caller decides whether they stand.
+		List<String> citing = engine.facts().factsOfObservation(id).stream().filter(Fact::current).map(Fact::ref)
+				.toList();
+		out.put("facts_citing", citing);
+		if (!citing.isEmpty()) {
+			out.put("note", ToolDescriptions.FACTS_CITING_NOTE);
+		}
+		out.put("pending_proposals", engine.observations().pendingProposals());
+		return out;
 	}
 
 	@Tool(name = "forget", description = ToolDescriptions.FORGET, annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = true, openWorldHint = false))
@@ -382,92 +339,12 @@ public class MnemicTools {
 			out.put("resolved_questions", c.resolvedQuestions());
 			out.put("backlog", c.backlog());
 			out.put("open_questions", c.openQuestions());
-			out.put("suggested_registrations", c.suggestedRegistrations());
+			out.put("inferred_vocabulary", c.inferredVocabulary());
+			out.put("similar_vocabulary", c.similarVocabulary());
 			out.put("review", c.review());
 			out.put("retired", c.retired());
 			out.put("embedded", c.embedded());
 			out.put("duplicates", c.duplicates());
-			return out;
-		});
-	}
-
-	@Tool(name = "list_predicates", description = ToolDescriptions.LIST_PREDICATES, annotations = @Tool.Annotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
-	ToolResponse list_predicates() {
-		return ToolSupport.json("list_predicates", () -> {
-			var out = new LinkedHashMap<String, Object>();
-			var preds = new ArrayList<Map<String, Object>>();
-			for (var p : engine.predicates().all()) {
-				var m = new LinkedHashMap<String, Object>();
-				m.put("name", p.name());
-				m.put("description", p.description());
-				m.put("domain", p.domain());
-				m.put("range", p.range());
-				m.put("functional", p.functional());
-				if (p.functionalScope() != null) {
-					m.put("functional_scope", p.functionalScope());
-				}
-				m.put("symmetric", p.symmetric());
-				m.put("volatility", p.volatility());
-				if (!p.qualifiers().isEmpty()) {
-					m.put("qualifiers", p.qualifiers());
-				}
-				m.put("render", p.render());
-				if (!p.aliases().isEmpty()) {
-					m.put("aliases", p.aliases());
-				}
-				m.put("lexicon", p.lexicon());
-				m.put("origin", p.seed() ? "seed" : p.isExtended() ? "extended" : "defined");
-				preds.add(m);
-			}
-			out.put("predicates", preds);
-			var types = new ArrayList<Map<String, Object>>();
-			for (var t : engine.eventTypes().all()) {
-				var m = new LinkedHashMap<String, Object>();
-				m.put("name", t.name());
-				m.put("description", t.description());
-				if (!t.opens().isEmpty()) {
-					m.put("opens", t.opens());
-				}
-				if (!t.closes().isEmpty()) {
-					m.put("closes", t.closes());
-				}
-				if (!t.supersedes().isEmpty()) {
-					m.put("supersedes", t.supersedes());
-				}
-				if (t.endsEntity()) {
-					m.put("ends_entity", true);
-				}
-				if (t.render() != null) {
-					m.put("render", t.render());
-				}
-				m.put("origin", t.seed() ? "seed" : "defined");
-				if (t.definedBy() != null) {
-					m.put("defined_by", "obs-" + t.definedBy());
-				}
-				types.add(m);
-			}
-			out.put("event_types", types);
-			var entityTypes = new ArrayList<Map<String, Object>>();
-			for (var t : engine.entityTypes().all()) {
-				var m = new LinkedHashMap<String, Object>();
-				m.put("name", t.name());
-				m.put("description", t.description());
-				if (t.parent() != null) {
-					m.put("parent", t.parent());
-				}
-				if (!t.synonyms().isEmpty()) {
-					m.put("synonyms", t.synonyms());
-				}
-				if (!t.typeWords().isEmpty()) {
-					m.put("type_words", t.typeWords());
-				}
-				m.put("origin", t.seed() ? "seed" : "defined");
-				if (t.definedBy() != null) {
-					m.put("defined_by", "obs-" + t.definedBy());
-				}
-				entityTypes.add(m);
-			}
-			out.put("entity_types", entityTypes);
 			return out;
 		});
 	}
@@ -562,8 +439,10 @@ public class MnemicTools {
 		});
 	}
 
-	/** What a proposal stored: entities, events, and facts with their resolutions. */
-	private static Map<String, Object> stored(Applied a) {
+	// ── reply shapes ────────────────────────────────────────────────────
+
+	/** What a proposal stored, and what it asked. */
+	private static void applied(Map<String, Object> out, Applied a) {
 		var stored = new LinkedHashMap<String, Object>();
 		stored.put("entities", a.entities().stream().map(e -> Map.of("ref", e.ref(), "id", e.id(), "name", e.name(),
 				"resolution", e.resolution(), "score", e.score())).toList());
@@ -571,11 +450,146 @@ public class MnemicTools {
 				a.events().stream().map(e -> Map.of("ref", e.ref(), "id", e.id(), "type", e.type())).toList());
 		stored.put("facts", a.facts().stream().map(f -> Map.of("id", f.id(), "predicate", f.predicate(), "rendering",
 				f.rendering(), "status", f.status(), "corroborated", f.corroborated())).toList());
-		return stored;
+		out.put("stored", stored);
+		if (!a.predicates().isEmpty()) {
+			out.put("predicates", a.predicates().stream()
+					.map(p -> Map.of("proposed", p.proposed(), "resolution", p.resolution(), "id", p.id())).toList());
+		}
+		if (!a.definitions().isEmpty()) {
+			out.put("definitions", a.definitions());
+		}
+		out.put("superseded", a.superseded());
+		out.put("questions", a.questions());
 	}
 
 	private static Map<String, Object> factSummary(Fact f) {
 		return Map.of("id", f.ref(), "status", f.status(), "rendering", f.rendering());
+	}
+
+	private Map<String, Object> entity(Entity e) {
+		var out = new LinkedHashMap<String, Object>();
+		out.put("id", e.ref());
+		out.put("name", e.name());
+		out.put("type", e.type());
+		out.put("aliases", engine.entities().aliases(e.id()));
+		var facts = new ArrayList<Map<String, Object>>();
+		for (Fact f : engine.facts().factsOf(e.id())) {
+			var m = new LinkedHashMap<String, Object>();
+			m.put("id", f.ref());
+			m.put("predicate", f.predicate());
+			m.put("rendering", f.rendering());
+			m.put("status", f.status());
+			m.put("derivation", f.derivationKind());
+			provenance(m, f);
+			m.put("corroborations", f.corroborations());
+			m.put("last_confirmed", f.lastConfirmed());
+			facts.add(m);
+		}
+		out.put("facts", facts);
+		out.put("events", engine.events().eventsOf(e.id()).stream().map(this::event).toList());
+		return out;
+	}
+
+	private Map<String, Object> entityHistory(Entity e, String predicate) {
+		FactQueries.History h = engine.history(e.id(), predicate);
+		var out = new LinkedHashMap<String, Object>();
+		out.put("entity", Map.of("id", e.ref(), "name", e.name()));
+		var entries = new ArrayList<Map<String, Object>>();
+		for (var entry : h.entries()) {
+			var m = factDetail(entry.fact());
+			m.put("changes", entry.supersessions().stream().map(MnemicTools::change).toList());
+			entries.add(m);
+		}
+		out.put("facts", entries);
+		out.put("tombstones", h.tombstones().stream().map(t -> Map.of("kind", "forgotten", "observation",
+				"obs-" + t.observationId(), "forgotten_at", t.forgottenAt())).toList());
+		return out;
+	}
+
+	private Map<String, Object> fact(long id) {
+		Fact f = engine.facts().get(id).orElseThrow(() -> MnemicException.notFound("No fact f-" + id));
+		var m = factDetail(f);
+		m.put("subject", Map.of("id", "ent-" + f.subjectId(), "name", engine.entities().nameOf(f.subjectId())));
+		if (f.objectId() != null) {
+			m.put("object", Map.of("id", "ent-" + f.objectId(), "name", engine.entities().nameOf(f.objectId())));
+		} else {
+			m.put("object", f.objectText());
+		}
+		m.put("qualifier", f.qualifier());
+		m.put("scope", f.scopeId() == null ? null : engine.entities().nameOf(f.scopeId()));
+		m.put("mode", f.mode());
+		m.put("corroborations", f.corroborations());
+		m.put("last_confirmed", f.lastConfirmed());
+		m.put("caller_confidence", f.callerConfidence());
+		m.put("confidence", engine.facts().confidence(f));
+		m.put("changes", engine.facts().supersessionsOf(f.id()).stream().map(MnemicTools::change).toList());
+		return m;
+	}
+
+	private Map<String, Object> factDetail(Fact f) {
+		var m = new LinkedHashMap<String, Object>();
+		m.put("id", f.ref());
+		m.put("predicate", f.predicate());
+		m.put("rendering", f.rendering());
+		m.put("status", f.status());
+		m.put("state", f.state(engine.clock().instant()));
+		m.put("valid_start", f.validStart());
+		m.put("valid_end", f.validEnd());
+		m.put("start_source", f.startSource());
+		m.put("end_source", f.endSource());
+		m.put("derivation", f.derivationKind());
+		provenance(m, f);
+		m.put("superseded_by", f.supersededBy() == null ? null : "f-" + f.supersededBy());
+		return m;
+	}
+
+	private static Map<String, Object> change(Supersession x) {
+		var c = new LinkedHashMap<String, Object>();
+		c.put("kind", x.kind());
+		c.put("reason", x.reason());
+		c.put("by", x.supersededById() == null ? null : "f-" + x.supersededById());
+		c.put("event", x.eventId() == null ? null : "evt-" + x.eventId());
+		c.put("observation", x.observationId() == null ? null : "obs-" + x.observationId());
+		c.put("closed_at", x.closedAt());
+		c.put("recorded_at", x.recordedAt());
+		return c;
+	}
+
+	private Map<String, Object> observation(long id) {
+		Observation o = engine.observations().get(id)
+				.orElseThrow(() -> MnemicException.notFound("No observation obs-" + id));
+		var m = new LinkedHashMap<String, Object>();
+		m.put("id", o.ref());
+		m.put("source", o.source().kind());
+		if (o.source().ref() != null) {
+			m.put("source_ref", o.source().ref() + (o.source().chunk() != null ? "#" + o.source().chunk() : ""));
+		}
+		m.put("observed_at", o.observedAt().toString());
+		m.put("recorded_at", o.recordedAt().toString());
+		m.put("forgotten", o.forgotten());
+		m.put("has_reading", o.proposalJson() != null && !"{}".equals(o.proposalJson()));
+		if (o.retired()) {
+			m.put("retired", true);
+			m.put("retired_reason", o.retiredReason());
+			m.put("superseded_by", o.supersededBy() == null ? null : "obs-" + o.supersededBy());
+		}
+		m.put("text", o.text());
+		m.put("facts", engine.facts().factsOfObservation(id).stream()
+				.map(f -> Map.of("id", f.ref(), "rendering", f.rendering(), "status", f.status())).toList());
+		m.put("events", engine.events().eventsOfObservation(id).stream().map(this::event).toList());
+		return m;
+	}
+
+	private Map<String, Object> event(Event ev) {
+		var m = new LinkedHashMap<String, Object>();
+		m.put("id", ev.ref());
+		m.put("type", ev.type());
+		m.put("rendering", ev.rendering());
+		m.put("participants", ev.participants().stream()
+				.map(id -> Map.of("id", "ent-" + id, "name", engine.entities().nameOf(id))).toList());
+		m.put("valid_start", ev.validStart());
+		m.put("observation", "obs-" + ev.observationId());
+		return m;
 	}
 
 	/** The observations behind a fact: its home, every one that stated or corroborated it, and those since retired. */
@@ -587,6 +601,114 @@ public class MnemicTools {
 		if (!retired.isEmpty()) {
 			m.put("observations_retired", retired.stream().sorted().map(o -> "obs-" + o).toList());
 		}
+	}
+
+	private Map<String, Object> registry() {
+		var out = new LinkedHashMap<String, Object>();
+		out.put("predicates", engine.predicates().all().stream().map(MnemicTools::predicateMap).toList());
+		out.put("event_types", engine.eventTypes().all().stream().map(MnemicTools::eventTypeMap).toList());
+		out.put("entity_types", engine.entityTypes().all().stream().map(MnemicTools::entityTypeMap).toList());
+		return out;
+	}
+
+	private Map<String, Object> predicateEntry(String name) {
+		Predicate p = engine.predicates().get(name).orElseThrow(() -> MnemicException.notFound("No predicate " + name));
+		var m = predicateMap(p);
+		m.put("changes", engine.predicates().changes(p.name()));
+		return m;
+	}
+
+	private Map<String, Object> eventTypeEntry(String name) {
+		EventTypeRegistry.EventType t = engine.eventTypes().get(name)
+				.orElseThrow(() -> MnemicException.notFound("No event type " + name));
+		var m = eventTypeMap(t);
+		m.put("changes", engine.eventTypes().changes(t.name()));
+		return m;
+	}
+
+	private Map<String, Object> entityTypeEntry(String name) {
+		EntityTypeRegistry.EntityType t = engine.entityTypes().get(name)
+				.orElseThrow(() -> MnemicException.notFound("No entity type " + name));
+		var m = entityTypeMap(t);
+		m.put("changes", engine.entityTypes().changes(t.name()));
+		return m;
+	}
+
+	private static Map<String, Object> predicateMap(Predicate p) {
+		var m = new LinkedHashMap<String, Object>();
+		m.put("id", "pred:" + p.name());
+		m.put("name", p.name());
+		m.put("description", p.description());
+		m.put("domain", p.domain());
+		m.put("range", p.range());
+		m.put("functional", p.functional());
+		if (p.functionalScope() != null) {
+			m.put("functional_scope", p.functionalScope());
+		}
+		m.put("symmetric", p.symmetric());
+		m.put("volatility", p.volatility());
+		if (!p.qualifiers().isEmpty()) {
+			m.put("qualifiers", p.qualifiers());
+		}
+		m.put("render", p.render());
+		if (!p.aliases().isEmpty()) {
+			m.put("aliases", p.aliases());
+		}
+		m.put("lexicon", p.lexicon());
+		m.put("origin", p.seed() ? "seed" : p.isInferred() ? "inferred" : "defined");
+		if (p.definedBy() != null) {
+			m.put("defined_by", "obs-" + p.definedBy());
+		}
+		return m;
+	}
+
+	private static Map<String, Object> eventTypeMap(EventTypeRegistry.EventType t) {
+		var m = new LinkedHashMap<String, Object>();
+		m.put("id", "event:" + t.name());
+		m.put("name", t.name());
+		m.put("description", t.description());
+		if (!t.opens().isEmpty()) {
+			m.put("opens", t.opens());
+		}
+		if (!t.closes().isEmpty()) {
+			m.put("closes", t.closes());
+		}
+		if (!t.supersedes().isEmpty()) {
+			m.put("supersedes", t.supersedes());
+		}
+		if (t.endsEntity()) {
+			m.put("ends_entity", true);
+		}
+		if (t.render() != null) {
+			m.put("render", t.render());
+		}
+		m.put("lexicon", t.lexicon());
+		m.put("origin", t.seed() ? "seed" : t.inferred() ? "inferred" : "defined");
+		if (t.definedBy() != null) {
+			m.put("defined_by", "obs-" + t.definedBy());
+		}
+		return m;
+	}
+
+	private static Map<String, Object> entityTypeMap(EntityTypeRegistry.EntityType t) {
+		var m = new LinkedHashMap<String, Object>();
+		m.put("id", "type:" + t.name());
+		m.put("name", t.name());
+		m.put("description", t.description());
+		if (t.parent() != null) {
+			m.put("parent", t.parent());
+		}
+		if (!t.synonyms().isEmpty()) {
+			m.put("synonyms", t.synonyms());
+		}
+		if (!t.typeWords().isEmpty()) {
+			m.put("type_words", t.typeWords());
+		}
+		m.put("origin", t.seed() ? "seed" : t.inferred() ? "inferred" : "defined");
+		if (t.definedBy() != null) {
+			m.put("defined_by", "obs-" + t.definedBy());
+		}
+		return m;
 	}
 
 	static long parseId(String ref, String prefix) {

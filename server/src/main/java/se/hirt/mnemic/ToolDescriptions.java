@@ -30,7 +30,8 @@ package se.hirt.mnemic;
 
 /**
  * What the model reads about each tool: when to use it, when not to, one example, the words users actually say. Kept
- * apart from the code so the tool methods read as code and the prose can be edited as prose.
+ * apart from the code so the tool methods read as code and the prose can be edited as prose. Rules the store can
+ * enforce or ask about live in the store, not here.
  */
 final class ToolDescriptions {
 
@@ -46,53 +47,42 @@ final class ToolDescriptions {
 			+ "the text, whenever you can: {\"facts\": [{\"subject\": \"self\", \"predicate\": \"works_at\", \"object\": "
 			+ "\"Hooli\", \"valid_time\": {\"start\": \"2018\"}}], \"events\": [{\"ref\": \"ev1\", \"type\": \"joined\", "
 			+ "\"participants\": [\"self\", \"Hooli\"], \"valid_time\": {\"start\": \"2018\"}}]}. Subjects and objects are "
-			+ "entity names or 'self'; predicates come from the registry (works_at, holds_role, leads, lives_in, born_in, "
+			+ "entity names or 'self'. Use the registry's predicates (works_at, holds_role, leads, lives_in, born_in, "
 			+ "member_of, parent_of[mother|father], spouse_of, sibling_of, owns, prefers, dislikes, uses, decided, "
-			+ "considering, related_to, knows, part_of, located_in) or are defined in 'predicates'. Vocabulary the "
-			+ "registry lacks is defined in the same proposal and kept for good: \"event_types\": [{\"name\": "
-			+ "\"inherited\", \"description\": ..., \"opens\": [\"owns\"], \"closes\": [], \"supersedes\": [], "
-			+ "\"ends_entity\": false, \"lexicon\": [\"inherited\", \"inherit\"], \"render\": \"{subject} inherited "
-			+ "{object}\"}] for an event type (what it opens, "
-			+ "closes, or supersedes must be registered predicates), and \"entity_types\": [{\"name\": \"canton\", "
-			+ "\"parent\": \"place\", \"synonyms\": [\"kanton\"], \"type_words\": [\"kanton\", \"canton\"]}] "
-			+ "for a kind of entity (parent nests it, so everything that accepts a place accepts a canton; type_words "
-			+ "say what kind of thing a name is rather than which one). Entity types are written in the 'type' of an "
-			+ "entity, e.g. {\"name\": \"Kanton Schwyz\", \"type\": \"canton\"}. A predicate definition may carry "
-			+ "\"renders\": {\"de\": {\"render\": ..., \"negated\": ..., \"lexicon\": [...]}}, its template and cue words "
-			+ "in another language the store may be in. A leaning, plan, or "
+			+ "considering, related_to, knows, part_of, located_in; inspect('registry') lists them all) and its event "
+			+ "types and entity types when they fit, and write a new name when none does: a predicate, event type, or "
+			+ "entity type the registry lacks registers itself from its first use, and the store asks you, through "
+			+ "'questions', only what it cannot infer (whether an event starts or ends a relation, what kind of thing a "
+			+ "new entity type is). A definition ('predicates', 'event_types', 'entity_types') is needed only to say more "
+			+ "than the name does: description, domain and range, a render template, a lexicon. A leaning, plan, or "
 			+ "intention ('leaning toward the H2D') is 'considering', never 'decided'. The store has a language (status: "
-			+ "'language'): write literal objects, qualifiers, event types, and predicate definitions in it, whatever "
-			+ "language the conversation was in; names and the observation text stay as they are. What is NOT so has its "
-			+ "own shapes: a fact with \"negated\": true ('I don't own a boat'; the object may be a class, 'anything in "
-			+ "Sweden'), a fact with \"only\": true whose object is a place ('I only own property in Switzerland', with "
-			+ "Switzerland typed 'country'), and top-level \"closures\": [{\"subject\": \"self\", \"predicate\": \"owns\", "
-			+ "\"type\": \"place\"}] ('those are all the properties I own'). Never store a restriction as an ordinary fact "
-			+ "with the bound as its object. A fact's 'qualifier' describes the SUBJECT's role toward the object, as in the "
-			+ "rendering '{subject} is {object}''s {qualifier}': sibling_of(subject Clara, object self, half-sister) says "
-			+ "Clara is your half-sister, parent_of(subject Anna, object self, mother) says Anna is your mother. Symmetric "
-			+ "relations (sibling_of, spouse_of, knows) are stored once from either side and found from both. 'scope' is "
-			+ "the organization for holds_role. A fact the user only believes ('I think', 'if I remember right') carries "
-			+ "\"caller_confidence\": 0.5 (1.0 is a firm statement, below 0.6 renders as '(believed)' and lowers the fact's "
-			+ "confidence); a firm restatement later corrects it. The proposal is validated, never trusted. Keys the spec "
-			+ "does not define are ignored and named in 'warnings' ('confidence' and 'certainty' on a fact are read as "
-			+ "caller_confidence). Returns ids, resolutions, warnings, and 'questions' you must put to the user; answer "
-			+ "them later with 'resolve': [{\"question_id\": \"q-3\", \"choice\": \"ent-7\"}] (entity or predicate "
-			+ "questions take a candidate id or \"new\"; conflicts take ended | supersede | reject | reinterpret | wrong, "
-			+ "where wrong means the earlier fact was an error and the new one corrects it; containment questions take "
-			+ "yes | no). 'suggestions' names vocabulary the proposal used that the registry lacks (an event type, an "
-			+ "entity type, or a predicate sent without a definition); nothing is held, but the store cannot reason "
-			+ "with an undefined term. Check with the user in one line what it should mean and define it in your next "
-			+ "remember, starting from the 'define' skeleton each suggestion carries.";
+			+ "'language'): write literal objects, qualifiers, and new names in it, whatever language the conversation "
+			+ "was in; entity names and the observation text stay as they are. What is NOT so has its own shapes: a fact "
+			+ "with \"negated\": true ('I don't own a boat'; the object may be a class, 'anything in Sweden'), a fact with "
+			+ "\"only\": true whose object is a place ('I only own property in Switzerland', with Switzerland typed "
+			+ "'country'), and top-level \"closures\": [{\"subject\": \"self\", \"predicate\": \"owns\", \"type\": "
+			+ "\"place\"}] ('those are all the properties I own'). A fact's 'qualifier' describes the SUBJECT's role "
+			+ "toward the object: parent_of(subject Anna, object self, mother) says Anna is your mother. Symmetric "
+			+ "relations are stored once from either side. 'scope' is the organization for holds_role. A fact the user "
+			+ "only believes carries \"caller_confidence\": 0.5. The proposal is validated, never trusted; keys the spec "
+			+ "does not define are named in 'warnings'. Returns ids, resolutions, warnings, and 'questions': answer each "
+			+ "with the user, then send 'resolve': [{\"question_id\": \"q-3\", \"choice\": \"ent-7\"}] with your next "
+			+ "remember (choices are numbered candidates; conflicts take ended | supersede | reject | reinterpret | "
+			+ "wrong). To give an observation stored without a reading its facts (a connector's email, a note), pass "
+			+ "'observation_id' instead of 'text' with the proposal.";
 
 	static final String REMEMBER_PROPOSAL = "Structured proposal: {entities:[{ref,name,type,aliases}], events:[{ref,type,"
 			+ "participants,valid_time}], facts:[{subject,predicate,object,qualifier,scope,valid_time,ended,"
-			+ "derived_from,derivation:{kind}}], predicates:[{name,description,domain,range,functional,lexicon,"
-			+ "render,qualifiers}]}. Dates are ISO (2018, 2018-03, 2018-03-05); resolve relative dates yourself.";
+			+ "derived_from,derivation:{kind},caller_confidence,negated,only}], closures:[{subject,predicate,type}], and "
+			+ "optionally predicates:[{name,description,domain,range,functional,lexicon,render,qualifiers}], "
+			+ "event_types:[{name,description,opens,closes,supersedes,ends_entity,lexicon,render}], "
+			+ "entity_types:[{name,description,parent,synonyms,type_words}]}. Dates are ISO (2018, 2018-03, "
+			+ "2018-03-05); resolve relative dates yourself.";
 
-	static final String REMEMBER_RESOLVE = "Answers to open questions: [{question_id: q-N, choice}]. Entity/predicate "
-			+ "questions: a candidate id or \"new\". Conflicts: ended | supersede | reject | reinterpret | wrong "
-			+ "(reinterpret rejects the pending fact and applies this call's proposal instead; wrong marks the earlier fact "
-			+ "corrected by the new one). Containment: yes | no.";
+	static final String REMEMBER_RESOLVE = "Answers to open questions: [{question_id: q-N, choice}]. The choice is one of the "
+			+ "question's numbered candidate ids; entity and predicate questions also take \"new\", conflicts take ended | "
+			+ "supersede | reject | reinterpret | wrong (reinterpret rejects the pending fact and applies this call's "
+			+ "proposal instead), containment questions take yes | no.";
 
 	static final String RECALL = "Retrieve what is known before answering anything about people, projects, decisions, places, "
 			+ "or dates, and before storing something that may already be known. USE at the start of a conversation and "
@@ -108,60 +98,34 @@ final class ToolDescriptions {
 			+ "for questions about a point in time. Omit 'query' at the start of a session for a briefing: the owner's "
 			+ "best-known facts, recently touched entities, and open questions.";
 
-	static final String HISTORY = "How knowledge about an entity changed over time: every fact that ever touched it, in "
-			+ "order, with its status (current, superseded, corrected, pending), what replaced it and why (event, "
-			+ "correction, supersession), the observation each came from, and tombstones for forgotten observations. USE "
-			+ "when the user asks 'what did I believe before', 'when did that change', or wants to audit a fact. Optionally "
-			+ "filter by predicate. Read-only.";
+	static final String INSPECT = "Everything the store knows about one thing, by its id or name. An entity (ent-12, a name, "
+			+ "or an alias): its aliases, its facts (current first) with status and provenance, and the events it took "
+			+ "part in; with history: true, every fact that ever touched it in order, what replaced each and why, and "
+			+ "tombstones for forgotten observations, optionally filtered by 'predicate'. A fact (f-12): its columns, the "
+			+ "observations behind it, and its changes. An observation (obs-12): its text, source, dates, whether it is "
+			+ "retired, and the facts and events it produced. An event (evt-3), a question (q-3), a vocabulary entry "
+			+ "(pred:works_at, event:joined, type:place) with its definition, origin, and corrections, or 'registry' for "
+			+ "every predicate, event type, and entity type at once. USE when the user asks 'what do you know about X', "
+			+ "'what did I believe before', 'when did that change', wants to audit a fact, or before proposing a relation "
+			+ "or type you are unsure the registry has. Read-only.";
 
-	static final String CORRECT = "Correct a fact the user says is wrong, without destroying history: the original keeps its "
-			+ "row marked 'corrected', a replacement fact is stored from a correction observation, and the reason is "
-			+ "recorded. USE when the user says 'no, it was X', 'actually', or fixes a detail. DO NOT use to record that "
+	static final String CORRECT = "Correct what the store holds, without destroying history. 'target' says what: a fact "
+			+ "(f-12) with a 'replacement' of the changed keys (object, subject, qualifier, scope, valid_time, ended, "
+			+ "caller_confidence) stores a corrected fact from a correction observation and marks the original; "
+			+ "{\"wrong\": true} instead withdraws a fact that was never true (it leaves recall, stays in history with the "
+			+ "reason). An observation (obs-51) with {\"retired\": true, \"superseded_by\": \"obs-52\"} marks it recorded "
+			+ "wrongly or superseded (text and history stay, it leaves recall and pending_proposals; its facts stay and are "
+			+ "listed as facts_citing for you to correct or withdraw); {\"retired\": false} reinstates it. A predicate "
+			+ "(pred:parent_of, or its bare name) with {render | renders | lexicon | qualifiers | functional | symmetric | "
+			+ "volatility | domain | range | description} re-renders every fact under it (turning functional on re-checks "
+			+ "its facts for conflicts), and {\"merge_into\": \"mentors\"} folds one predicate into another, its name "
+			+ "becoming an alias; an event type (event:purchased) with "
+			+ "{description | opens | closes | supersedes | ends_entity | lexicon | render} re-renders and re-applies its "
+			+ "events; an entity type (type:canton) with {description | parent | synonyms | type_words}. USE when the user "
+			+ "says 'no, it was X', 'actually', fixes a detail, or says a note was wrong. DO NOT use to record that "
 			+ "something changed over time (that is a new remember with an event or 'ended'), and not to delete (that is "
-			+ "forget). Example: {\"fact_id\": \"f-12\", \"replacement\": {\"object\": \"Schübelbach\"}, \"reason\": "
-			+ "\"wrong town\"}. Replacement keys: subject, object, qualifier, scope, valid_time, ended, caller_confidence. "
-			+ "A fact that was never true is withdrawn with 'retract' (or replacement {\"wrong\": true}). A superseded fact "
-			+ "can be corrected too (pass valid_time to fix an end date an event set wrongly); a corrected or rejected one "
-			+ "cannot. To correct a predicate's definition instead (its render template, lexicon, qualifiers, functional "
-			+ "flag, description) pass 'predicate' with the name and 'replacement' with the changed keys; every fact under "
-			+ "it is re-rendered; 'renders' corrects the templates of other languages. To correct an event type "
-			+ "(description, opens, closes, supersedes, ends_entity, lexicon, render; its events are re-rendered) "
-			+ "or an entity type (description, parent, synonyms, type_words) pass 'event_type' or 'entity_type' with the "
-			+ "name and 'replacement' with the changed keys.";
-
-	static final String CORRECT_REPLACEMENT = "Fact: {object | subject | qualifier | scope | valid_time | ended | "
-			+ "caller_confidence}, or {\"wrong\": true} when the fact was never true: it is retracted with the reason, no "
-			+ "replacement, and leaves recall. Predicate: {render | lexicon | qualifiers | functional | volatility | "
-			+ "description | renders}. Event type: {description | opens | closes | supersedes | ends_entity | lexicon | "
-			+ "render}. Entity " + "type: {description | parent | synonyms | type_words}";
-
-	static final String PROPOSE = "Give an observation already stored without a structured reading its facts: one that came "
-			+ "from a connector (an email, a document; connectors never carry a proposal) or one remembered without a "
-			+ "proposal. The proposal is the same shape as remember's; the facts carry that observation as their "
-			+ "provenance, its rows are embedded, and it leaves pending_proposals. USE for a pending observation whose text "
-			+ "you have read (status lists them as pending_proposal_ids). DO NOT use to change facts that exist (correct, "
-			+ "retract) or for an observation that already has a reading. Example: {\"observation_id\": \"obs-48\", "
-			+ "\"proposal\": {\"facts\": [...], \"events\": [...]}}.";
-
-	static final String RETIRE = "Mark an observation as recorded wrongly or superseded, without deleting it: the text and "
-			+ "history stay, the reason and the observation that supersedes it are recorded, it leaves pending_proposals "
-			+ "and, unless include_history is asked for, recall (where it is flagged). Its facts, if any, are not touched "
-			+ "(the reply lists them as facts_citing): retract or correct them. Pass undo: true to reinstate a retired "
-			+ "observation. USE when a later observation corrected an earlier note; DO NOT use to remove for privacy (that "
-			+ "is forget). Example: {\"observation_id\": \"obs-51\", \"reason\": \"said Slack; obs-52 says WhatsApp\", "
-			+ "\"superseded_by\": \"obs-52\"}.";
-
-	static final String RETRACT = "Withdraw a fact that was never true (a mistake, a misreading, a leaning recorded as a "
-			+ "decision): the fact is marked corrected with no replacement, leaves recall, and stays in history with the "
-			+ "reason. USE when the user says a recorded fact was wrong from the start and nothing replaces it; to replace "
-			+ "a detail use correct; to record that something stopped being so use remember with 'ended'; a fact under the "
-			+ "wrong predicate is retracted and remembered again under the right one. Example: {\"fact_id\": \"f-91\", "
-			+ "\"reason\": \"it was a leaning, never a decision\"}.";
-
-	static final String GET_ENTITY = "Everything known about one person, organization, project, place, or thing: its aliases, "
-			+ "its facts (current first) with their status and provenance, and the events it took part in. USE when the "
-			+ "user asks 'what do you know about X' or 'who is X', or to expand an item recall returned. Pass a name, an "
-			+ "alias, or an id like 'ent-12'. Read-only.";
+			+ "forget). Example: {\"target\": \"f-12\", \"replacement\": {\"object\": \"Schübelbach\"}, \"reason\": "
+			+ "\"wrong town\"}.";
 
 	static final String FORGET = "Permanently remove an observation and every fact and event derived from it, leaving only a "
 			+ "dated tombstone. USE only when the user explicitly asks to forget or delete something; corrections and "
@@ -174,39 +138,34 @@ final class ToolDescriptions {
 
 	static final String CONSOLIDATE = "Housekeeping over stored knowledge: merges entities that later evidence showed to be "
 			+ "the same, closes facts whose ending event was recorded afterwards, lists observations still waiting for a "
-			+ "proposal, open questions, predicates, event types, and entity types in use without a definition (suggested_registrations: "
-			+ "check with the user and define them), and 'review': "
-			+ "plans whose date has passed with no word since ('due': true; restate to confirm, correct to postpone or "
-			+ "end), then the open facts longest without confirmation on predicates that change (jobs, homes, ownership), "
-			+ "oldest first, for the user to confirm or end; a fact confirmed within two weeks, or within a third of its "
-			+ "predicate's staleness, is not listed. USE at the end of a session, at the start of one to confirm what may "
-			+ "have changed, or when the user asks to tidy up memory; pass dry_run to see what would change. 'retire': "
-			+ "[\"obs-N\", ...] marks observations that will never get a proposal (notes, chit-chat) so they leave "
+			+ "reading, open questions, vocabulary registered from use that still lacks a description or an effect "
+			+ "(inferred_vocabulary: settle them with the user through correct), predicates close in meaning to another "
+			+ "(similar_vocabulary: merge_into through correct when they are one relation), and 'review': plans whose date has "
+			+ "passed with no word since ('due': true; restate to confirm, correct to postpone or end), then the open "
+			+ "facts longest without confirmation on predicates that change (jobs, homes, ownership), oldest first, for "
+			+ "the user to confirm or end; a fact confirmed within two weeks, or within a third of its predicate's "
+			+ "staleness, is not listed. USE at the end of a session, at the start of one to confirm what may have "
+			+ "changed, or when the user asks to tidy up memory; pass dry_run to see what would change. 'retire': "
+			+ "[\"obs-N\", ...] marks observations that will never get a reading (notes, chit-chat) so they leave "
 			+ "pending_proposals. Never invents facts.";
 
 	static final String CONSOLIDATE_RETIRE = "Observations to take out of the proposal backlog because there is nothing to "
 			+ "extract from them (an answer, a note): [\"obs-12\", ...]. They keep their text and history.";
 
-	static final String LIST_PREDICATES = "The registry: every predicate a proposal may use (seed and caller-defined, with "
-			+ "description, domain, range, functional, symmetric, qualifiers, volatility, aliases, lexicon), every event "
-			+ "type (with the facts it opens, closes, or supersedes, and its lexicon), and every entity type (with its "
-			+ "parent, synonyms, and type words). USE before proposing a relation, event type, or entity type you are "
-			+ "unsure the registry has, after a remember reported a registered or similar predicate, or when the "
-			+ "predicate count in status changed. Read-only.";
-
 	static final String STATUS = "Server version, data home, schema version, owner, counts of observations, facts, and "
-			+ "predicates (list_predicates names them), the number of observations waiting for a structured proposal, open "
-			+ "questions, the model providers on the class path, and 'channels': which recall channels answer right now "
-			+ "(the semantic one reports downloading with a percentage, loading, on, failed with the reason, or off), with "
-			+ "'embedder' giving the model download per file, the runtime library, and the rows still without a vector. "
-			+ "USE to check the store is the one you expect or to report state to the user. Read-only.";
+			+ "predicates, the observations waiting for a reading (pending_proposal_ids: read each and give it its facts "
+			+ "with remember(observation_id, proposal), or retire it through correct), open questions, the model "
+			+ "providers on the class path, and 'channels': which recall channels answer right now (the semantic one "
+			+ "reports downloading with a percentage, loading, on, failed with the reason, or off), with 'embedder' "
+			+ "giving the model download per file, the runtime library, and the rows still without a vector. USE to check "
+			+ "the store is the one you expect or to report state to the user. Read-only.";
 
-	static final String PENDING_PROPOSALS_NOTE = "observations stored without a structured proposal: read each and give it "
-			+ "its facts with propose(observation_id, proposal) (a connector's observation can only get them this way, or "
-			+ "from a configured proposer in consolidate), or retire(observation_id, reason) for a note that was wrong or "
-			+ "has nothing to propose, so they leave this list";
+	static final String PENDING_PROPOSALS_NOTE = "observations stored without a structured reading: read each and give it "
+			+ "its facts with remember(observation_id, proposal) (a connector's observation can only get them this way, "
+			+ "or from a configured proposer in consolidate), or mark it retired through correct(obs-N, {retired: true}) "
+			+ "when it was wrong or has nothing to propose, so they leave this list";
 
-	static final String FACTS_CITING_NOTE = "these facts still stand and cite a retired observation; retract or correct the "
-			+ "ones the retirement invalidates, the rest keep their provenance (history and get_entity mark the observation "
-			+ "as retired)";
+	static final String FACTS_CITING_NOTE = "these facts still stand and cite a retired observation; withdraw or correct "
+			+ "the ones the retirement invalidates, the rest keep their provenance (inspect marks the observation as "
+			+ "retired beside them)";
 }

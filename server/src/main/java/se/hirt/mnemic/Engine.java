@@ -30,6 +30,7 @@ package se.hirt.mnemic;
 
 import se.hirt.mnemic.embed.Embedder;
 import se.hirt.mnemic.embed.EmbedderHolder;
+import se.hirt.mnemic.embed.Embedding;
 import se.hirt.mnemic.embed.VectorStore;
 import se.hirt.mnemic.knowledge.EntityService;
 import se.hirt.mnemic.knowledge.EntityTypeRegistry;
@@ -42,6 +43,7 @@ import se.hirt.mnemic.knowledge.FactService.Corrected;
 import se.hirt.mnemic.knowledge.FactService.FactOut;
 import se.hirt.mnemic.knowledge.Knowledge;
 import se.hirt.mnemic.knowledge.Lang;
+import se.hirt.mnemic.knowledge.Predicate;
 import se.hirt.mnemic.knowledge.PredicateRegistry;
 import se.hirt.mnemic.knowledge.QuestionResolver.Resolve;
 import se.hirt.mnemic.knowledge.QuestionService;
@@ -68,6 +70,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 
 /**
  * Every service over one {@link Database}, and the operations that span them. Constructed once per process by CDI
@@ -83,22 +86,22 @@ public final class Engine implements AutoCloseable {
 	/** How an engine is opened; {@link #of(Path, String)} gives the defaults, the {@code with} methods override. */
 	public record Options(Path home, String version, int observationSoftLimitChars, String ownerName, Clock clock,
 			ModelProposer proposer, int proposerBatch, List<String> ownerIdentity, String vecLibrary,
-			EmbedderHolder embedder, Lang lang) {
+			EmbedderHolder embedder, Lang lang, Supplier<Embedding> vocabulary) {
 
 		public static Options of(Path home, String version) {
 			return new Options(home, version, 4000, null, Clock.systemUTC(), null, 20, List.of(), null,
-					new EmbedderHolder(null), Lang.EN);
+					new EmbedderHolder(null), Lang.EN, null);
 		}
 
 		public Options withSoftLimit(int chars) {
 			return new Options(home, version, chars, ownerName, clock, proposer, proposerBatch, ownerIdentity,
-					vecLibrary, embedder, lang);
+					vecLibrary, embedder, lang, vocabulary);
 		}
 
 		/** {@code identity}: the owner's other names, addresses, and handles, seeded as aliases. */
 		public Options withOwner(String name, List<String> identity) {
 			return new Options(home, version, observationSoftLimitChars, name, clock, proposer, proposerBatch, identity,
-					vecLibrary, embedder, lang);
+					vecLibrary, embedder, lang, vocabulary);
 		}
 
 		public Options withOwner(String name) {
@@ -107,7 +110,7 @@ public final class Engine implements AutoCloseable {
 
 		public Options withClock(Clock clock) {
 			return new Options(home, version, observationSoftLimitChars, ownerName, clock, proposer, proposerBatch,
-					ownerIdentity, vecLibrary, embedder, lang);
+					ownerIdentity, vecLibrary, embedder, lang, vocabulary);
 		}
 
 		/**
@@ -115,13 +118,13 @@ public final class Engine implements AutoCloseable {
 		 */
 		public Options withProposer(ModelProposer proposer, int batch) {
 			return new Options(home, version, observationSoftLimitChars, ownerName, clock, proposer, batch,
-					ownerIdentity, vecLibrary, embedder, lang);
+					ownerIdentity, vecLibrary, embedder, lang, vocabulary);
 		}
 
 		/** The sqlite-vec loadable library to load at open. */
 		public Options withVecLibrary(String library) {
 			return new Options(home, version, observationSoftLimitChars, ownerName, clock, proposer, proposerBatch,
-					ownerIdentity, library, embedder, lang);
+					ownerIdentity, library, embedder, lang, vocabulary);
 		}
 
 		/** An embedder the caller owns and closes, so one model can serve many engines. */
@@ -132,13 +135,24 @@ public final class Engine implements AutoCloseable {
 		/** The embedder's lifecycle, which may deliver the embedder after the engine has started. */
 		public Options withEmbedder(EmbedderHolder holder) {
 			return new Options(home, version, observationSoftLimitChars, ownerName, clock, proposer, proposerBatch,
-					ownerIdentity, vecLibrary, holder, lang);
+					ownerIdentity, vecLibrary, holder, lang, vocabulary);
+		}
+
+		/** The model that compares vocabulary by meaning, in place of the store's embedder; for tests. */
+		public Options withVocabularyEmbedding(Embedding vocabulary) {
+			return withVocabularyEmbedding(() -> vocabulary);
+		}
+
+		/** As above, for a model that may arrive, change, or go away while the engine runs. */
+		public Options withVocabularyEmbedding(Supplier<Embedding> vocabulary) {
+			return new Options(home, version, observationSoftLimitChars, ownerName, clock, proposer, proposerBatch,
+					ownerIdentity, vecLibrary, embedder, lang, vocabulary);
 		}
 
 		/** The language of the fact layer; a change re-renders every fact at open. */
 		public Options withLang(Lang lang) {
 			return new Options(home, version, observationSoftLimitChars, ownerName, clock, proposer, proposerBatch,
-					ownerIdentity, vecLibrary, embedder, lang);
+					ownerIdentity, vecLibrary, embedder, lang, vocabulary);
 		}
 	}
 
@@ -152,10 +166,11 @@ public final class Engine implements AutoCloseable {
 
 	/** What {@code consolidate} found and did (EXTRACTION.md, Layer 3). */
 	public record Consolidation(long pendingProposals, List<Map<String, Object>> backlog,
-			List<Map<String, Object>> openQuestions, List<Map<String, Object>> suggestedRegistrations,
-			List<Map<String, Object>> merges, int reclosed, List<Map<String, Object>> proposed,
-			List<Map<String, Object>> resolvedQuestions, List<Map<String, Object>> review, List<String> retired,
-			int embedded, List<Map<String, Object>> duplicates) {
+			List<Map<String, Object>> openQuestions, List<Map<String, Object>> inferredVocabulary,
+			List<Map<String, Object>> similarVocabulary, List<Map<String, Object>> merges, int reclosed,
+			List<Map<String, Object>> proposed, List<Map<String, Object>> resolvedQuestions,
+			List<Map<String, Object>> review, List<String> retired, int embedded,
+			List<Map<String, Object>> duplicates) {
 	}
 
 	/** The vector scheme: 2 since a fact about the owner carries a first-person vector too ({@link OwnerAlias}). */
@@ -177,7 +192,7 @@ public final class Engine implements AutoCloseable {
 		this.db = new Database(options.home().resolve(DB_FILE), options.vecLibrary());
 		this.observations = new ObservationService(db, options.observationSoftLimitChars());
 		this.knowledge = Knowledge.open(db, options.lang(), options.ownerName(), options.ownerIdentity(),
-				options.clock());
+				options.clock(), options.vocabulary() != null ? options.vocabulary() : () -> options.embedder().get());
 		this.vectors = new VectorStore(db);
 		this.recall = new RecallService(db, knowledge.entities(), knowledge.predicates(), knowledge.facts(),
 				knowledge.events(), knowledge.containment(), TokenEstimator.CHARS_PER_TOKEN, options.clock(), vectors,
@@ -367,6 +382,9 @@ public final class Engine implements AutoCloseable {
 		}
 		var before = knowledge.predicates().get(name)
 				.orElseThrow(() -> MnemicException.notFound("No predicate " + name));
+		if (replacement.get("merge_into") != null) {
+			return mergePredicate(before, String.valueOf(replacement.get("merge_into")), replacement, reason);
+		}
 		var after = knowledge.predicates().update(name, replacement, reason);
 		int rerendered = knowledge.renderer().rerender(name);
 		var out = new LinkedHashMap<String, Object>();
@@ -376,7 +394,30 @@ public final class Engine implements AutoCloseable {
 		out.put("after", Map.of("render", after.render(), "lexicon", after.lexicon(), "qualifiers", after.qualifiers(),
 				"functional", after.functional()));
 		out.put("rerendered_facts", rerendered);
+		// A predicate that just became functional has facts stored as if it were not: they are checked now.
+		out.put("rechecked_conflicts",
+				!before.functional() && after.functional() ? knowledge.factService().recheckFunctional(name) : 0);
 		out.put("changes", knowledge.predicates().changes(name));
+		return out;
+	}
+
+	/** Folds one predicate into another: {@code correct(pred:coaches, {merge_into: "mentors"})}. */
+	private Map<String, Object> mergePredicate(
+		Predicate from, String into, Map<String, Object> replacement, String reason) {
+		if (replacement.size() > 1) {
+			throw MnemicException.invalidArgument("'merge_into' stands alone; correct the target afterwards.");
+		}
+		var target = knowledge.predicates().get(into)
+				.orElseThrow(() -> MnemicException.notFound("No predicate " + into));
+		int moved = knowledge.predicates().merge(from.name(), target.name(), reason);
+		knowledge.eventTypes().renamePredicate(from.name(), target.name(), reason);
+		knowledge.renderer().rerender(target.name());
+		var out = new LinkedHashMap<String, Object>();
+		out.put("predicate", from.name());
+		out.put("merged_into", target.name());
+		out.put("merged_facts", moved);
+		out.put("aliases", knowledge.predicates().get(target.name()).orElseThrow().aliases());
+		out.put("changes", knowledge.predicates().changes(target.name()));
 		return out;
 	}
 
@@ -483,8 +524,9 @@ public final class Engine implements AutoCloseable {
 			return (Map<String, Object>) m;
 		}).toList();
 		List<Map<String, Object>> open = knowledge.questions().open(20).stream().map(q -> q.toMap()).toList();
-		return new Consolidation(observations.pendingProposals(), backlog, open, c.suggestedRegistrations(), c.merges(),
-				c.reclosed(), proposed, c.resolvedQuestions(), c.review(), retired, embedded, c.duplicates());
+		return new Consolidation(observations.pendingProposals(), backlog, open, c.inferredVocabulary(),
+				c.similarVocabulary(), c.merges(), c.reclosed(), proposed, c.resolvedQuestions(), c.review(), retired,
+				embedded, c.duplicates());
 	}
 
 	private List<Map<String, Object>> proposeBacklog() {
