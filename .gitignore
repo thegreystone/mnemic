@@ -41,3 +41,9 @@ bench/cache/
 
 # Internal working notes (research on third-party projects and the pre-implementation stack memo); not for publication
 docs/other/
+
+# A copy of a real store for local upgrade checks; never committed.
+.mnemic/
+
+# Written by the flatten plugin at build time.
+.flattened-pom.xml

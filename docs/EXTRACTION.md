@@ -221,7 +221,11 @@ from use that lie close to another under `similar_vocabulary`, and
 `correct(pred:x, {merge_into: "y"})` folds one into the other. Event types and entity types register from use the same way
 (see Event effects below): the store asks once what a new event type does
 (`event_effect`) and what kind of thing a new entity type is (`type_kind`),
-and the answer applies to everything already stored under the term.
+and the answer applies to everything already stored under the term. Event
+type names are spelled one way, lowercase words joined by underscores, and
+only a name that is a type (at most three words, two of them content words,
+no number) is registered: a sentence where the type goes is stored as the
+occurrence it describes, with a warning, and never becomes vocabulary.
 
 #### Seed vocabulary
 
@@ -544,10 +548,21 @@ the same call). A fact's `status` is `current` or `pending`; `corroborated`
 means the fact was already on record and gained a corroboration. `predicates`
 lists what each proposed definition resolved to (`registered`, `similar`,
 `ambiguous`, `exact`, `alias`, or `inferred` for a name registered from use); `definitions` names every
-term the proposal defined or that registered itself from a first use here. A fact closed by an event's `closes` or
+term the proposal defined or that registered itself from a first use here, and for the latter carries
+`inferred`: what the store assumed (a predicate's domain, range, direction, functional, volatility, lexicon,
+and template; an event type's template, lexicon, and effects; an entity type's parent) and the `correct` call
+that changes it. The assumptions are defaults, not decisions: the same proposal may state any of them in
+`predicates`, `event_types`, or `entity_types`, and then nothing is inferred. A fact closed by an event's `closes` or
 `ends_entity` effect appears in `superseded` with `ended_at` instead of
 `superseded_by` and `closed_at`. `resolved` appears when the call answered
-questions. Ids are `obs-N`, `ent-N`, `evt-N`, `f-N`, `q-N`.
+questions. `replaced` appears when `observation_id` named an observation that already had a reading: the facts
+and events the old reading produced and were taken back, and `reopened_facts`, the number of facts that had been
+closed by them and are current again. Re-read when the reading was wrong; `correct` when the user says the world
+is otherwise. Fact and event ids are handles for a conversation; observation ids last. `resolve` alone, with neither
+`text` nor `observation_id`, answers questions without recording an observation. `correct` takes an entity too
+(`ent-12` with `name`, `type`, or `aliases`, the list to keep). A fact's `status` is its standing in the record and
+`state` its standing in time; a fact whose dates have passed keeps status `current`. A fact stated beside the event that
+opens it takes that event as its explanation even without `derived_from`. Ids are `obs-N`, `ent-N`, `evt-N`, `f-N`, `q-N`.
 
 **Questions.** `questions` carries every check the caller must settle, each as
 `{id, kind, status, subject?, predicate?, candidates, message, pending_fact?,
@@ -591,12 +606,20 @@ caller: the `backlog` of observations still without a proposal (with an
 excerpt each; `propose` gives them their reading), `open_questions`,
 `inferred_vocabulary` (terms registered from use and not yet described),
 `similar_vocabulary` (predicates registered from use that lie close in meaning
-to another), and
+to another), `descriptive_events` (events whose type is a sentence, with the
+observation to re-read), `removed_entities` (entities a forgotten observation created that nothing refers to any
+more), and
 `review`: plans whose date has passed with no word since (`due: true`), then
 the open facts longest without confirmation on predicates that age, oldest
 first, skipping anything confirmed within two weeks or within a third of its
 predicate's staleness threshold, and flagging `likely_changed` past it.
 `dry_run` reports without changing anything.
+
+`consolidate(rebuild: true)` re-derives every fact and event from the observations and their readings, in order:
+correction records are replayed against the fact their key names (their reading holds the key, the reason, and the
+replacement), answers once given are given again, entities keep their ids, facts and events get new ones. The reply's
+`rebuilt` reports `observations`, `corrections`, `answers`, `facts_before`, `facts_after`, and `unmatched`, the
+correction records whose fact no longer exists (what they stated stands as facts of the record). Never on a dry run.
 
 Mnemic is correct without a proposer. It is only less refined.
 

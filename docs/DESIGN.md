@@ -172,6 +172,12 @@ The `recall` tool hides this machinery from the calling model; `status` reports 
 
 ## MCP surface
 
+The observation is the source of truth and a reading is how it was understood. `remember(observation_id, proposal)`
+gives an observation its reading, or replaces the one it has: what the old reading produced is taken back, closures
+it caused are undone, and the text keeps its id and date. `correct` records that the user says the world is
+otherwise; it is a log entry of its own, never an edit of a derived row. `consolidate(rebuild: true)` re-derives the
+whole projection from the log. See ARCHITECTURE.md, "The log and the projection".
+
 The MCP surface is seven tools:
 
 ```text

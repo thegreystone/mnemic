@@ -32,6 +32,7 @@ import se.hirt.mnemic.persistence.Database;
 import se.hirt.mnemic.persistence.Row;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -45,8 +46,9 @@ public final class Consolidator {
 
 	/** What consolidation did or would do. */
 	public record Outcome(List<Map<String, Object>> merges, int reclosed, List<Map<String, Object>> inferredVocabulary,
-			List<Map<String, Object>> similarVocabulary, List<Map<String, Object>> resolvedQuestions,
-			List<Map<String, Object>> review, List<Map<String, Object>> duplicates) {
+			List<Map<String, Object>> similarVocabulary, List<Map<String, Object>> descriptiveEvents,
+			List<Map<String, Object>> resolvedQuestions, List<Map<String, Object>> review,
+			List<Map<String, Object>> duplicates, int removedEntities) {
 	}
 
 	private final Database db;
@@ -82,8 +84,12 @@ public final class Consolidator {
 		var duplicates = new ArrayList<Map<String, Object>>();
 		foldDuplicateFacts(dryRun, duplicates);
 		foldDuplicateEvents(dryRun, duplicates);
-		return new Outcome(merges, reclosed, inferredVocabulary(), predicates.closePairs(), resolved, facts.review(5),
-				duplicates);
+		int removed = dryRun ? 0 : entities.removeOrphansOfForgotten();
+		if (!dryRun) {
+			forgetDefinedBy();
+		}
+		return new Outcome(merges, reclosed, inferredVocabulary(), predicates.closePairs(), descriptiveEvents(),
+				resolved, facts.review(5), duplicates, removed);
 	}
 
 	/**
@@ -103,6 +109,42 @@ public final class Consolidator {
 				long n = db.read(tx -> tx
 						.queryLong("SELECT COUNT(*) FROM entity WHERE type = ? AND merged_into IS NULL", t.name()));
 				out.add(Map.of("entity_type", t.name(), "uses", n));
+			}
+		}
+		return out;
+	}
+
+	/** Vocabulary defined by an observation since forgotten stays, but no longer points at a tombstone. */
+	private void forgetDefinedBy() {
+		int n = db.write(tx -> {
+			int changed = 0;
+			for (String table : List.of("predicate", "event_type", "entity_type")) {
+				changed += tx.update("UPDATE " + table + " SET defined_by = NULL WHERE defined_by IN "
+						+ "(SELECT id FROM observation WHERE forgotten_at IS NOT NULL)");
+			}
+			return changed;
+		});
+		if (n > 0) {
+			predicates.reload();
+			eventTypes.reload();
+			entityTypes.reload();
+		}
+	}
+
+	/**
+	 * Events whose type is a sentence rather than a type: the reading put the description where the type goes. Each
+	 * names the observation to re-read with a proper type and the detail in the text.
+	 */
+	private List<Map<String, Object>> descriptiveEvents() {
+		var out = new ArrayList<Map<String, Object>>();
+		for (Row r : db.read(tx -> tx.query("SELECT id, type, observation_id FROM event ORDER BY id"))) {
+			String type = r.str("type");
+			if (type != null && !EventTypeRegistry.typeLike(type) && eventTypes.get(type).isEmpty()) {
+				var m = new LinkedHashMap<String, Object>();
+				m.put("event", "evt-" + r.lng("id"));
+				m.put("type", type);
+				m.put("observation", "obs-" + r.lng("observation_id"));
+				out.add(m);
 			}
 		}
 		return out;

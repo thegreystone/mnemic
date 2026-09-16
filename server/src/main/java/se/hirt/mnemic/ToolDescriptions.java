@@ -69,15 +69,22 @@ final class ToolDescriptions {
 			+ "with the user, then send 'resolve': [{\"question_id\": \"q-3\", \"choice\": \"ent-7\"}] with your next "
 			+ "remember (choices are numbered candidates; conflicts take ended | supersede | reject | reinterpret | "
 			+ "wrong). To give an observation stored without a reading its facts (a connector's email, a note), pass "
-			+ "'observation_id' instead of 'text' with the proposal.";
+			+ "'observation_id' instead of 'text' with the proposal. To answer questions and nothing else, pass 'resolve' "
+			+ "alone: no observation is recorded, the answers live on the questions. The same call on an observation that already has a "
+			+ "reading replaces it: what the old reading produced is taken back (listed as 'replaced'), the text keeps its "
+			+ "id, date, and provenance, and the new reading applies. USE that when the reading was wrong (a mis-filed "
+			+ "event, a sentence where the type goes, a wrong object); use correct when the user says the world is "
+			+ "otherwise. Fact and event ids are handles for a conversation; observation ids last.";
 
 	static final String REMEMBER_PROPOSAL = "Structured proposal: {entities:[{ref,name,type,aliases}], events:[{ref,type,"
 			+ "participants,valid_time}], facts:[{subject,predicate,object,qualifier,scope,valid_time,ended,"
 			+ "derived_from,derivation:{kind},caller_confidence,negated,only}], closures:[{subject,predicate,type}], and "
 			+ "optionally predicates:[{name,description,domain,range,functional,lexicon,render,qualifiers}], "
 			+ "event_types:[{name,description,opens,closes,supersedes,ends_entity,lexicon,render}], "
-			+ "entity_types:[{name,description,parent,synonyms,type_words}]}. Dates are ISO (2018, 2018-03, "
-			+ "2018-03-05); resolve relative dates yourself.";
+			+ "entity_types:[{name,description,parent,synonyms,type_words}]}. An event's type is a verb or two words "
+			+ "(joined, purchased_property), never a sentence: a sentence where the type goes is kept as a plain "
+			+ "occurrence and never becomes vocabulary, so put the detail in the text and the things involved in "
+			+ "participants. Dates are ISO (2018, 2018-03, 2018-03-05); resolve relative dates yourself.";
 
 	static final String REMEMBER_RESOLVE = "Answers to open questions: [{question_id: q-N, choice}]. The choice is one of the "
 			+ "question's numbered candidate ids; entity and predicate questions also take \"new\", conflicts take ended | "
@@ -98,7 +105,9 @@ final class ToolDescriptions {
 			+ "for questions about a point in time. Omit 'query' at the start of a session for a briefing: the owner's "
 			+ "best-known facts, recently touched entities, and open questions.";
 
-	static final String INSPECT = "Everything the store knows about one thing, by its id or name. An entity (ent-12, a name, "
+	static final String INSPECT = "Everything the store knows about one thing, by its id or name. A fact's 'status' is its "
+			+ "standing in the record (current, superseded, corrected, pending, rejected) and 'state' where it stands in time "
+			+ "(future, current, ended): a fact that ended by its dates keeps status current. An entity (ent-12, a name, "
 			+ "or an alias): its aliases, its facts (current first) with status and provenance, and the events it took "
 			+ "part in; with history: true, every fact that ever touched it in order, what replaced each and why, and "
 			+ "tombstones for forgotten observations, optionally filtered by 'predicate'. A fact (f-12): its columns, the "
@@ -115,7 +124,8 @@ final class ToolDescriptions {
 			+ "{\"wrong\": true} instead withdraws a fact that was never true (it leaves recall, stays in history with the "
 			+ "reason). An observation (obs-51) with {\"retired\": true, \"superseded_by\": \"obs-52\"} marks it recorded "
 			+ "wrongly or superseded (text and history stay, it leaves recall and pending_proposals; its facts stay and are "
-			+ "listed as facts_citing for you to correct or withdraw); {\"retired\": false} reinstates it. A predicate "
+			+ "listed as facts_citing for you to correct or withdraw); {\"retired\": false} reinstates it. An entity (ent-12) "
+			+ "with {name | type | aliases}, where aliases is the list to keep: drop the alias a wrong match left. A predicate "
 			+ "(pred:parent_of, or its bare name) with {render | renders | lexicon | qualifiers | functional | symmetric | "
 			+ "volatility | domain | range | description} re-renders every fact under it (turning functional on re-checks "
 			+ "its facts for conflicts), and {\"merge_into\": \"mentors\"} folds one predicate into another, its name "
@@ -140,7 +150,9 @@ final class ToolDescriptions {
 			+ "the same, closes facts whose ending event was recorded afterwards, lists observations still waiting for a "
 			+ "reading, open questions, vocabulary registered from use that still lacks a description or an effect "
 			+ "(inferred_vocabulary: settle them with the user through correct), predicates close in meaning to another "
-			+ "(similar_vocabulary: merge_into through correct when they are one relation), and 'review': plans whose date has "
+			+ "(similar_vocabulary: merge_into through correct when they are one relation), events whose type is a sentence "
+			+ "(descriptive_events: re-read the observation with remember(observation_id, proposal) and a proper type), "
+			+ "and 'review': plans whose date has "
 			+ "passed with no word since ('due': true; restate to confirm, correct to postpone or end), then the open "
 			+ "facts longest without confirmation on predicates that change (jobs, homes, ownership), oldest first, for "
 			+ "the user to confirm or end; a fact confirmed within two weeks, or within a third of its predicate's "
@@ -148,6 +160,12 @@ final class ToolDescriptions {
 			+ "changed, or when the user asks to tidy up memory; pass dry_run to see what would change. 'retire': "
 			+ "[\"obs-N\", ...] marks observations that will never get a reading (notes, chit-chat) so they leave "
 			+ "pending_proposals. Never invents facts.";
+
+	static final String CONSOLIDATE_REBUILD = "Re-derive every fact and event from the observations and their readings, "
+			+ "in order (default false): corrections are done again, answers once given are given again, entities keep "
+			+ "their ids, facts and events get new ones. USE after an upgrade that changed how readings are applied, or "
+			+ "when the store looks inconsistent; never on a dry run. The reply's 'rebuilt' says what was replayed and "
+			+ "names any correction whose fact no longer exists.";
 
 	static final String CONSOLIDATE_RETIRE = "Observations to take out of the proposal backlog because there is nothing to "
 			+ "extract from them (an answer, a note): [\"obs-12\", ...]. They keep their text and history.";

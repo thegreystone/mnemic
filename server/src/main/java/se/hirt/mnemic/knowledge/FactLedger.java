@@ -44,9 +44,11 @@ import java.util.Optional;
 final class FactLedger {
 
 	private final FactRenderer renderer;
+	private final PredicateRegistry predicates;
 
-	FactLedger(FactRenderer renderer) {
+	FactLedger(FactRenderer renderer, PredicateRegistry predicates) {
 		this.renderer = renderer;
+		this.predicates = predicates;
 	}
 
 	/** Records that an observation stated or corroborated a fact. The fact's own observation is its home. */
@@ -98,6 +100,29 @@ final class FactLedger {
 				fact.id());
 		renderer.rerender(tx, fact.id());
 		supersession(tx, fact.id(), byId, kind, reason, eventId, obsId, b.end());
+		closeScoped(tx, fact, eventId, obsId, b.end(), b.endPrecision());
+	}
+
+	/**
+	 * A fact functional per scope (a role at an organization) cannot outlive the subject's relation to that scope: when
+	 * {@code works_at(s, o)} ends, every open fact of {@code s} scoped to {@code o} ends with it, at the same date,
+	 * whatever ended the relation.
+	 */
+	private void closeScoped(Tx tx, Fact ended, Long eventId, Long obsId, String end, String endPrecision) {
+		if (ended.objectId() == null || ended.scopeId() != null) {
+			return;
+		}
+		for (Row r : tx.query("""
+				SELECT * FROM fact WHERE subject_id = ? AND scope_id = ? AND status = 'current' AND valid_end IS NULL
+				AND id <> ?""", ended.subjectId(), ended.objectId(), ended.id())) {
+			Fact scoped = Fact.from(r);
+			boolean perScope = predicates.get(scoped.predicate()).map(p -> "scope".equals(p.functionalScope()))
+					.orElse(false);
+			if (perScope) {
+				close(tx, scoped, null, "dependency", "the relation it was scoped to ended", eventId, obsId, end,
+						endPrecision, "current");
+			}
+		}
 	}
 
 	/**

@@ -1814,6 +1814,11 @@ remember(text: "I inherited the cabin in 2019.", proposal: { entities: [ the cab
 Expect: the event is stored with no effect on facts; `inherited` is
 registered with the words of its name as lexicon and `{subject} inherited
 {object}` as template (`definitions` names it with resolution `inferred`);
+names are spelled one way (`Purchased Property` and `co-founded` become
+`purchased_property` and `co_founded`); a sentence where the type goes
+("dealer confirmed receipt of the payment", more than three words or two
+content words, or a number) is not a type: the event is stored as a plain
+occurrence, nothing is registered or asked, and a warning says so;
 the reply carries one `event_effect` question whose candidates are
 `opens:<p>` and `closes:<p>` for every predicate whose domain and range fit
 the participants (`owns`, not `works_at` for a place), `ends_entity` when
@@ -1833,8 +1838,12 @@ entities of the type ask nothing.
 Expect: a fact under `mentors` with no definition is stored under `mentors`
 with a warning; the predicate has wildcard domain and range, the lexicon
 `[mentors, mentor]`, and no description, so "who does Mattias mentor"
-matches structurally. `correct(pred:mentors, {description, domain, range})`
-completes it; the name then resolves exactly, with no warning.
+matches structurally. The reply's `definitions` entry carries `inferred`:
+the assumed domain, range, direction, functional, volatility, lexicon, and
+template, and the `correct` call that changes them. Stating domain and
+range in the same proposal's `predicates` makes the registration `defined`
+with nothing inferred. `correct(pred:mentors, {description, domain, range})`
+completes it later; the name then resolves exactly, with no warning.
 
 ### S16. Consolidate lists vocabulary registered from use until it is defined
 
@@ -1929,6 +1938,95 @@ loaded) are listed by `consolidate` under `similar_vocabulary` as
 name as an alias of `mentors`, removes the `coaches` registration, logs the
 merge on `mentors`, and the pair disappears from the report.
 
+### S25. An inferred direction is corrected at once and recall follows it
+
+```text
+remember(text: "Anna mentors me.", proposal: { facts: [ mentors(Anna, self) ] })      # definitions: inferred domain/range *
+remember(text: "I mentor Erik.", proposal: { facts: [ mentors(self, Erik) ] })
+recall(query: "who is Mattias's mentor")                                              # both facts: no direction on record
+correct(target: "pred:mentors", replacement: { domain: "person", range: "person" })
+recall(query: "who is Mattias's mentor")                                              # Anna mentors Mattias
+```
+
+Expect: the reply to the first remember shows the assumed wildcard domain
+and range under `definitions[].inferred`. "Who does Mattias mentor" says
+which side Mattias is on and returns his mentee alone; "who mentors Mattias"
+and "Mattias's mentor" return both facts until the sides are known. The correction takes effect at once: the predicate is no
+longer inferred, its facts are re-rendered, "Mattias's mentor" returns only
+the fact where Mattias is the object, and an organization as a mentee is a
+`type_mismatch` from then on.
+
+### S26. A store from 2.2 opens with its vocabulary registered from use
+
+Expect: a store at schema 18 holding an `x:consults_for` predicate with no
+lexicon, an event of the unregistered type "purchased property", and an
+entity of the unregistered type `canton` opens under this release with the
+predicate renamed `consults_for` (facts, renders, changes, and questions
+following), the words of its name as lexicon, the event type spelled
+`purchased_property` and registered from use, a sentence-long type spelled
+the same way but left unregistered, the entity type registered from use, the
+three registered terms listed under `inferred_vocabulary`, and no question
+asked at start. A second open changes nothing, and `consolidate(rebuild: true)`
+re-derives the same store from its 2.2 readings: the `x:` prefix in an old
+reading is dropped, the sentence-typed event stays an occurrence, and the
+only question raised is `event_effect` for the two-word type nobody has
+described, asked once.
+
+### S27. A reading is replaced and the observation keeps its identity
+
+```text
+remember(text: "I ordered a red bicycle from Nordvik Cycles in March.", proposal: { events: [ "ordered a red bicycle from the shop in town"(self, Nordvik Cycles) ] })   # obs-1
+remember(observation_id: obs-1, proposal: { entities: [ the red bicycle (thing) ], events: [ ordered(self, the red bicycle) 2025-03 ], facts: [ buys_from(self, Nordvik Cycles) ] })
+```
+
+Expect: the second call replaces the reading rather than being refused. What
+the old reading produced is taken back and listed under `replaced` (facts,
+events, `reopened_facts`); the observation keeps its id, text, and observed
+date; the new facts carry it as provenance; entities keep their ids; a fact
+another observation also stated survives there with one corroboration
+fewer; open questions of the observation are dismissed and raised afresh
+by the new reading. A correction record is refused: it is not a reading of
+the world. Rule of thumb: re-read when the reading was wrong; `correct` when
+the user says the world is otherwise.
+
+### S28. Closures are undone when their cause goes
+
+Expect: a fact an event closed (`left` ending `works_at`), superseded (a
+`moved` event's `lives_in` replacing the earlier one), or corrected is
+current again when the observation behind that event or fact is re-read or
+forgotten; its end is cleared when the closure gave it, the supersession
+record goes, and an entity a `died` event ended exists again. `forget` shares
+the same undoing.
+
+### S29. A rebuild re-derives the projection from the log
+
+```text
+consolidate(rebuild: true)
+```
+
+Expect: every observation with a reading is read again in order; correction
+records do their work again against the fact their key now names; answers
+once given to an observation's questions are given again when the same
+question comes back; entities keep their ids, facts and events get new ones;
+the current knowledge is the same as before; a second rebuild changes
+nothing. `rebuilt` reports observations, corrections, answers, and
+`unmatched`: correction records whose fact no longer exists, left for a
+person. Never on a dry run.
+
+### S30. A correction record carries its reading
+
+Expect: the observation a correction or retraction creates stores a reading:
+`corrects` or `retracts` with the fact's key (subject, predicate, object,
+qualifier, scope, mode), the reason, and the replacement fact (none for a
+retraction). It is what a rebuild replays, and it takes the record out of
+the proposal backlog.
+
+### S31. Events typed by a sentence are reported for re-reading
+
+Expect: `consolidate` lists under `descriptive_events` every event whose
+type is a sentence rather than a type, with the observation to re-read; a
+re-read with a proper type removes the entry.
+
 ### S17. An event type template renders its events
 
 Expect: with `render: "{subject} inherited {object}"`, the event reads
@@ -1970,3 +2068,89 @@ reference MCP memory server, adapting calls to each tool surface, as the
 minimum evidence for the differences the internal competitive analysis
 claims in temporal reasoning, conflict handling, unknown bounds, and the
 structured miss; that document is a source reading, not a run.
+
+## T. Field feedback
+
+What a day of real use against the installed binary found (2026-09-16), each
+fixed with the case that found it.
+
+### T1. A fact stated beside the event that opens it takes the event
+
+```text
+remember(text: "I work at Acme.", proposal: { facts: [ works_at(self, Acme) ] })
+remember(text: "I joined Globex in March 2024.", proposal: { events: [ joined(self, Globex) 2024-03 ], facts: [ works_at(self, Globex) ] })
+```
+
+Expect: no conflict question. The stated fact names no `derived_from`, but
+the proposal's `joined` opens `works_at` between the same participants, so
+the fact takes the event: it starts at the event's date with
+`start_source: event`, and the earlier job is superseded at that date, as
+it would be had the fact been derived from the event.
+
+### T2. Answers need no observation
+
+```text
+remember(resolve: [{ question_id: q-5, choice: "ent-7" }])
+```
+
+Expect: accepted with neither `text` nor `observation_id`; the answers are
+applied against each question's own observation, the closing date of a
+`supersede` is today, `resolved` is returned, and no observation is
+recorded. Answers live on the questions.
+
+### T3. A name that says more is asked about, not merged; forget takes an alias back
+
+Expect: "Raspberry Pi 5" against a known "Raspberry Pi", and "Luzern"
+against a known "Kanton Luzern", are `entity_resolution` questions (a
+number is an identity token; a place word names another level), and no
+alias is added until the answer. "Hooli Inc" against "Hooli" still merges
+silently, since an organization's type word is a suffix of the same thing.
+Forgetting the observation that added an alias to an existing entity
+removes the alias; the entity's own name stays.
+
+### T4. Forgetting a fact forgets its corrections
+
+Expect: `forget` on the observation behind a fact also forgets the
+correction records that corrected or retracted it, recursively, since a
+correction restates the fact; no fact, record, or recall hit survives.
+
+### T5. A role at an organization ends with the employment
+
+Expect: when `works_at(s, o)` ends, whatever ended it (an event, a conflict
+answer, a correction), every open fact of `s` scoped to `o` under a
+predicate functional per scope (`holds_role`) ends at the same date with
+`end_source: dependency`; an unrelated closure leaves it alone.
+
+### T6. A stored qualifier cues its predicate
+
+Expect: "who is Mattias's cousin" matches `related_to` structurally through
+the qualifier `cousin` stored on a fact, returning only the fact with that
+qualifier; the same for "former partner". Free-text qualifiers in use are
+cues, from either side.
+
+### T7. Consolidate removes what forgetting left behind
+
+Expect: an entity created by a forgotten observation is removed as soon as
+the `forget` that took its last reference runs, even when that is a later
+observation than the one that created it; a `forget` with `keep_entities`
+leaves it for `consolidate`, which sweeps the same way (`removed_entities`),
+never on a dry run and never the owner; vocabulary a forgotten observation
+defined stays, with `defined_by` cleared.
+
+### T8. An entity is corrected by id
+
+```text
+correct(target: "ent-12", replacement: { aliases: ["Kanton Luzern", "LU"] }, reason: "the city is not the canton")
+```
+
+Expect: `aliases` is the list to keep, so the alias a wrong match left
+("Luzern" on Kanton Luzern) is dropped and the next "Luzern" is asked
+about; the entity's own name and the owner's configured identity never
+drop; `name` renames and re-renders every fact that mentions the entity;
+`type` retypes.
+
+A fact's `status` is its standing in the record (current, superseded,
+corrected, pending, rejected) and `state` where it stands in time (future,
+current, ended): a fact whose dates have passed keeps status current, and
+a replacement that inherits a closed interval is current in the record and
+ended in time. Both are shown, and they answer different questions.

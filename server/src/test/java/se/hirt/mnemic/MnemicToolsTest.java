@@ -104,7 +104,7 @@ class MnemicToolsTest {
 		ToolResponse status = tools.status();
 		assertFalse(status.isError(), text(status));
 		Map<String, Object> result = result(status);
-		assertEquals(21, ((Number) result.get("schema_version")).intValue());
+		assertEquals(22, ((Number) result.get("schema_version")).intValue());
 		assertTrue(result.containsKey("pending_proposals"));
 		assertTrue(result.get("model_providers").toString().contains("openai-compatible"), result.toString());
 		// Every recall channel reports whether it answers; the test profile keeps the semantic one off and says so.
@@ -148,9 +148,20 @@ class MnemicToolsTest {
 		assertEquals(1, ((List<?>) got.get("events")).size(), got.toString());
 		assertEquals(pendingBefore - 1, ((Number) result(attached).get("pending_proposals")).longValue(),
 				"it left the backlog");
-		// A second reading is refused: the facts exist and are corrected, not proposed again.
-		assertTrue(tools.remember(NONE, Optional.of(obs), NONE, NONE, Optional.empty(), NONE, NONE, proposal,
-				Optional.empty(), NONE, null).isError());
+		// A second reading replaces the first: what it produced is taken back and listed, and the text keeps its id.
+		Map<String, Object> again = Map.of("entities", List.of(Map.of("ref", "e1", "name", "Dario", "type", "person")),
+				"facts", List.of(Map.of("subject", "self", "predicate", "knows", "object", "e1")));
+		ToolResponse reread = tools.remember(NONE, Optional.of(obs), NONE, NONE, Optional.empty(), NONE, NONE, again,
+				Optional.empty(), NONE, null);
+		assertFalse(reread.isError(), text(reread));
+		@SuppressWarnings("unchecked")
+		Map<String, Object> replaced = (Map<String, Object>) result(reread).get("replaced");
+		assertEquals(1, ((List<?>) replaced.get("events")).size(), replaced.toString());
+		assertEquals(0, ((List<?>) replaced.get("facts")).size());
+		assertEquals(0, replaced.get("reopened_facts"));
+		assertEquals(1, ((List<?>) ((Map<?, ?>) result(reread).get("stored")).get("facts")).size());
+		assertEquals(obs, result(reread).get("observation_id"));
+		assertFalse(text(tools.inspect(obs, Optional.empty(), NONE)).contains("evt-"), "the old event is gone");
 		// Text and observation_id together are refused, and so is an observation_id without a proposal.
 		assertTrue(tools.remember(Optional.of("x"), Optional.of(obs), NONE, NONE, Optional.empty(), NONE, NONE,
 				proposal, Optional.empty(), NONE, null).isError());
@@ -262,6 +273,31 @@ class MnemicToolsTest {
 				Map.of("lexicon", List.of("joined", "join", "started", "onboarded")), Optional.of("onboarding counts"));
 		assertFalse(c.isError(), text(c));
 		assertTrue(text(tools.inspect("event:joined", Optional.empty(), NONE)).contains("onboarded"));
+	}
+
+	@Test
+	void consolidateRebuildsAndReportsEventsToReRead() {
+		ToolResponse stored = remember("The dealer confirmed the payment for the boat on 11 September.",
+				Map.of("entities", List.of(Map.of("ref", "e1", "name", "Nordvik Marin", "type", "organization")),
+						"events",
+						List.of(Map.of("ref", "ev1", "type", "dealer confirmed receipt of the payment for the boat",
+								"participants", List.of("e1", "self"), "valid_time", Map.of("start", "2026-09-11")))),
+				"tools-rebuild-1");
+		assertFalse(stored.isError(), text(stored));
+		String obs = (String) result(stored).get("observation_id");
+		ToolResponse report = tools.consolidate(Optional.of(true), Optional.empty(), Optional.empty());
+		assertFalse(report.isError(), text(report));
+		List<?> descriptive = (List<?>) result(report).get("descriptive_events");
+		assertTrue(descriptive.stream().anyMatch(d -> obs.equals(((Map<?, ?>) d).get("observation"))),
+				descriptive.toString());
+		assertFalse(result(report).containsKey("rebuilt"), "a dry run never rebuilds");
+		ToolResponse rebuilt = tools.consolidate(Optional.of(false), Optional.empty(), Optional.of(true));
+		assertFalse(rebuilt.isError(), text(rebuilt));
+		@SuppressWarnings("unchecked")
+		Map<String, Object> r = (Map<String, Object>) result(rebuilt).get("rebuilt");
+		assertTrue(((Number) r.get("observations")).intValue() >= 1, r.toString());
+		assertEquals(List.of(), r.get("unmatched"));
+		assertTrue(r.containsKey("facts_before") && r.containsKey("facts_after"));
 	}
 
 	@SuppressWarnings("unchecked")

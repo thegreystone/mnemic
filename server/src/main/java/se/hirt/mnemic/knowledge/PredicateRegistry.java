@@ -113,6 +113,20 @@ public final class PredicateRegistry {
 		this.embedding = embedding;
 		seedIfMissing();
 		seedRendersIfMissing();
+		fillLexicons();
+	}
+
+	/** A predicate from before names supplied their own words (a 2.2 {@code x:} predicate) gets them now. */
+	private void fillLexicons() {
+		for (Predicate p : List.copyOf(load().values())) {
+			if (!p.seed() && p.lexicon().isEmpty()) {
+				List<String> words = Predicate.lexiconOf(p.name());
+				if (!words.isEmpty()) {
+					db.write(tx -> tx.update("UPDATE predicate SET lexicon = ? WHERE name = ?", json(words), p.name()));
+					cache = null;
+				}
+			}
+		}
 	}
 
 	public Lang lang() {
@@ -237,6 +251,11 @@ public final class PredicateRegistry {
 
 	// ── read ─────────────────────────────────────────────────────────────
 
+	/** Reads the table again, after a change made beside the registry. */
+	public synchronized void reload() {
+		cache = null;
+	}
+
 	public synchronized List<Predicate> all() {
 		return List.copyOf(load().values());
 	}
@@ -272,6 +291,9 @@ public final class PredicateRegistry {
 	public synchronized Resolution resolve(String name, PredicateDef def, Long observationId, List<String> warnings) {
 		if (name == null || name.isBlank()) {
 			throw MnemicException.invalidArgument("A fact needs a 'predicate'. Example: \"predicate\": \"works_at\"");
+		}
+		if (name.startsWith("x:")) {
+			name = name.substring(2); // how a 2.2 reading spelled a predicate it had not defined
 		}
 		Optional<Predicate> exact = get(name);
 		if (exact.isPresent()) {
@@ -456,9 +478,20 @@ public final class PredicateRegistry {
 	public synchronized List<Cue> cues(String query) {
 		String q = " " + String.join(" ", Names.tokens(query)) + " ";
 		var out = new LinkedHashMap<String, Cue>();
+		Map<String, List<String>> inUse = qualifiersInUse();
 		for (Predicate p : load().values()) {
 			Cue best = null;
-			for (String term : p.qualifiers()) {
+			// A predicate with a vocabulary is cued by it; one that takes free text is cued by the qualifiers actually
+			// stored under it ("cousin" on related_to), from either side.
+			boolean free = p.qualifiers().isEmpty();
+			for (String term : free ? inUse.getOrDefault(p.name(), List.of()) : p.qualifiers()) {
+				if (free) {
+					if (q.contains(" " + String.join(" ", Names.tokens(term)) + " ")
+							&& (best == null || term.length() > best.term().length())) {
+						best = new Cue(p, term, term, "any");
+					}
+					continue;
+				}
 				if (q.contains(" " + String.join(" ", Names.tokens(term)) + " ")
 						&& (best == null || term.length() > best.term().length())) {
 					best = new Cue(p, term, term, p.symmetric() ? "any" : "object");
@@ -489,6 +522,16 @@ public final class PredicateRegistry {
 		var cues = new ArrayList<>(out.values());
 		cues.sort((a, b) -> Integer.compare(b.term().length(), a.term().length()));
 		return cues;
+	}
+
+	/** The qualifiers stored on current facts, by predicate: the words a free-text qualifier gave a relation. */
+	private Map<String, List<String>> qualifiersInUse() {
+		var out = new HashMap<String, List<String>>();
+		for (Row r : db.read(tx -> tx.query(
+				"SELECT DISTINCT predicate, qualifier FROM fact WHERE qualifier IS NOT NULL AND status = 'current'"))) {
+			out.computeIfAbsent(r.str("predicate"), k -> new ArrayList<>()).add(r.str("qualifier"));
+		}
+		return out;
 	}
 
 	/** Predicates registered from use and not yet described, with the facts that use them (J6). */

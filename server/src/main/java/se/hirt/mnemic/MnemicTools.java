@@ -116,8 +116,6 @@ public class MnemicTools {
 				}
 				return attached(parseId(observation_id.get(), "obs-"), parsed);
 			}
-			Source source = new Source(source_kind.orElse("user"), source_ref.orElse(null), source_chunk.orElse(null),
-					null, session.orElse(null));
 			List<Resolve> resolves = (resolve == null ? List.<Map<String, Object>> of() : resolve).stream().map(m -> {
 				Object id = m.containsKey("question_id") ? m.get("question_id") : m.get("question");
 				if (id == null) {
@@ -126,6 +124,15 @@ public class MnemicTools {
 				return new Resolve(String.valueOf(id),
 						m.get("choice") == null ? null : String.valueOf(m.get("choice")));
 			}).toList();
+			if ((text.isEmpty() || text.get().isBlank()) && parsed == null && !resolves.isEmpty()) {
+				// Answers alone: nothing to observe, the answers live on the questions.
+				var out = new LinkedHashMap<String, Object>();
+				out.put("resolved", engine.answer(resolves));
+				out.put("pending_proposals", engine.observations().pendingProposals());
+				return out;
+			}
+			Source source = new Source(source_kind.orElse("user"), source_ref.orElse(null), source_chunk.orElse(null),
+					null, session.orElse(null));
 			RememberOutcome o = engine.remember(text.orElse(null), source,
 					observed_at.map(MnemicTools::instant).orElse(null), parsed == null ? null : parsed.proposal(),
 					spec_version.orElse(null), idempotency_key.orElse(null), resolves);
@@ -150,11 +157,19 @@ public class MnemicTools {
 		});
 	}
 
-	/** A reading for an observation stored without one. */
+	/** A reading for an observation: its first, or one that replaces what it had. */
 	private Map<String, Object> attached(long observationId, Proposal.Parsed parsed) {
-		Applied a = engine.propose(observationId, parsed.proposal());
+		Engine.Reading reading = engine.reread(observationId, parsed.proposal());
+		Applied a = reading.applied();
 		var out = new LinkedHashMap<String, Object>();
 		out.put("observation_id", "obs-" + observationId);
+		if (reading.replaced()) {
+			var replaced = new LinkedHashMap<String, Object>();
+			replaced.put("facts", reading.removed().facts());
+			replaced.put("events", reading.removed().events());
+			replaced.put("reopened_facts", reading.removed().reopened());
+			out.put("replaced", replaced);
+		}
 		applied(out, a);
 		var warnings = new ArrayList<>(parsed.warnings());
 		warnings.addAll(a.warnings());
@@ -265,7 +280,7 @@ public class MnemicTools {
 				return engine.correctPredicate(t, replacement, why);
 			}
 			throw MnemicException
-					.invalidArgument("'" + t + "' names nothing to correct; pass f-12, obs-51, pred:parent_of, "
+					.invalidArgument("'" + t + "' names nothing to correct; pass f-12, obs-51, ent-12, pred:parent_of, "
 							+ "event:purchased, or type:canton.");
 		});
 	}
@@ -326,10 +341,22 @@ public class MnemicTools {
 	@Tool(name = "consolidate", description = ToolDescriptions.CONSOLIDATE, annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
 	ToolResponse consolidate(@ToolArg(description = "Report what would change without changing it (default false)")
 	Optional<Boolean> dry_run, @ToolArg(required = false, description = ToolDescriptions.CONSOLIDATE_RETIRE)
-	Optional<List<String>> retire) {
+	Optional<List<String>> retire, @ToolArg(required = false, description = ToolDescriptions.CONSOLIDATE_REBUILD)
+	Optional<Boolean> rebuild) {
 		return ToolSupport.json("consolidate", () -> {
 			List<Long> retireIds = retire.orElse(List.of()).stream().map(r -> parseId(r, "obs-")).toList();
-			var c = engine.consolidate(dry_run.orElse(false), retireIds);
+			var c = engine.consolidate(dry_run.orElse(false), retireIds, rebuild.orElse(false));
+			Map<String, Object> out_rebuilt = null;
+			if (c.rebuilt() != null) {
+				var r = new LinkedHashMap<String, Object>();
+				r.put("observations", c.rebuilt().observations());
+				r.put("corrections", c.rebuilt().corrections());
+				r.put("answers", c.rebuilt().answers());
+				r.put("unmatched", c.rebuilt().unmatched());
+				r.put("facts_before", c.rebuilt().factsBefore());
+				r.put("facts_after", c.rebuilt().factsAfter());
+				out_rebuilt = r;
+			}
 			var out = new LinkedHashMap<String, Object>();
 			out.put("dry_run", dry_run.orElse(false));
 			out.put("merges", c.merges());
@@ -341,6 +368,11 @@ public class MnemicTools {
 			out.put("open_questions", c.openQuestions());
 			out.put("inferred_vocabulary", c.inferredVocabulary());
 			out.put("similar_vocabulary", c.similarVocabulary());
+			out.put("descriptive_events", c.descriptiveEvents());
+			out.put("removed_entities", c.removedEntities());
+			if (out_rebuilt != null) {
+				out.put("rebuilt", out_rebuilt);
+			}
 			out.put("review", c.review());
 			out.put("retired", c.retired());
 			out.put("embedded", c.embedded());

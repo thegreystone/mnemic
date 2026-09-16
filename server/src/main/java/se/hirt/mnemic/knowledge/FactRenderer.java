@@ -85,6 +85,19 @@ public final class FactRenderer {
 		return rendering;
 	}
 
+	/** Recomputes the renderings of every fact that mentions an entity, after its name changed; the count. */
+	public int rerenderMentioning(long entityId) {
+		return db.write(tx -> {
+			int n = 0;
+			for (Row r : tx.query("SELECT * FROM fact WHERE subject_id = ? OR object_id = ? OR scope_id = ?", entityId,
+					entityId, entityId)) {
+				rerender(tx, r.lng("id"));
+				n++;
+			}
+			return n;
+		});
+	}
+
 	/** Re-renders every fact under a predicate, after its template changed (EVALUATION.md J5); the count. */
 	public int rerender(String predicate) {
 		Predicate p = predicates.get(predicate)

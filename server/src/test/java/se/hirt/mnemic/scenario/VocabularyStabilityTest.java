@@ -35,6 +35,7 @@ import se.hirt.mnemic.FixedEmbedding;
 import se.hirt.mnemic.Scenario;
 import se.hirt.mnemic.TestHomes;
 import se.hirt.mnemic.embed.Embedding;
+import se.hirt.mnemic.knowledge.EventTypeRegistry;
 import se.hirt.mnemic.knowledge.Fact;
 import se.hirt.mnemic.knowledge.Predicate;
 import se.hirt.mnemic.knowledge.QuestionResolver.Resolve;
@@ -211,6 +212,58 @@ class VocabularyStabilityTest {
 					proposal().entity("e1", "Lisa Berg", "person").event("ev1", "took_on", "2025", "self", "e1"));
 			assertEquals("mentors", later.applied().facts().getFirst().predicate());
 			assertTrue(e.predicates().get("coaches").orElseThrow().aliases().contains("coaches"));
+		}
+	}
+
+	@Test
+	@Scenario("S13")
+	void aDescriptionWhereTheTypeGoesIsAnOccurrenceNotVocabulary() {
+		try (Engine e = TestHomes.engine("stab-description-type")) {
+			RememberOutcome o = remember(e, "The dealer confirmed the payment for the boat on 11 September.",
+					proposal().entity("e1", "Nordvik Marin", "organization").event("ev1",
+							"dealer confirmed receipt of the payment for the boat", "2026-09-11", "e1", "self"));
+			assertEquals(1, o.applied().events().size(), "the occurrence is kept");
+			assertEquals(List.of(), o.applied().questions(), "nothing is asked about a sentence");
+			assertEquals(List.of(), o.applied().definitions(), "and nothing registered");
+			assertTrue(o.applied().warnings().getFirst().contains("reads as a description"),
+					o.applied().warnings().toString());
+			assertTrue(e.eventTypes().all().stream().noneMatch(t -> t.name().startsWith("dealer")));
+			long id = Long.parseLong(o.applied().events().getFirst().id().substring(4));
+			assertEquals("dealer_confirmed_receipt_of_the_payment_for_the_boat",
+					e.events().get(id).orElseThrow().type());
+			assertEquals(
+					"dealer confirmed receipt of the payment for the boat (Nordvik Marin, Mattias Sandell) (since 2026-09-11)",
+					e.events().get(id).orElseThrow().rendering());
+			assertEquals(List.of(), e.consolidate(true).inferredVocabulary());
+			// The same words as a proper type register as usual.
+			RememberOutcome typed = remember(e, "Payment confirmed.",
+					proposal().entity("e1", "Nordvik Marin", "organization").event("ev1", "confirmed payment",
+							"2026-09-11", "e1", "self"));
+			assertEquals("confirmed_payment", typed.applied().events().getFirst().type());
+			assertEquals(1, typed.applied().definitions().size());
+			assertEquals(1, typed.applied().questions().size());
+			// Types are spelled one way whatever the caller's punctuation.
+			assertTrue(EventTypeRegistry.typeLike("co-founded") && EventTypeRegistry.typeLike("Purchased Property"));
+			assertFalse(EventTypeRegistry.typeLike("swiss 2025 tax return deadline"));
+			assertFalse(EventTypeRegistry.typeLike("moved to the lake house"));
+			assertEquals("co_founded", EventTypeRegistry.key("Co-Founded"));
+		}
+	}
+
+	@Test
+	@Scenario("S13")
+	void aFactWithoutAPredicateBesideAnOpeningEventIsSkippedNotFatal() {
+		// Seen from a local model on LongMemEval: a fact missing its predicate next to a purchase crashed the
+		// check for whether the proposal already stated what the event opens.
+		try (Engine e = TestHomes.engine("stab-no-predicate")) {
+			RememberOutcome o = remember(e, "I bought the boat in 2024.",
+					proposal().entity("e1", "the boat", "thing").event("ev1", "purchased", "2024", "self", "e1")
+							.fact(new se.hirt.mnemic.proposal.Proposal.FactRef("self", null, "e1", null, null, null,
+									null, List.of(), null, null)));
+			assertEquals(List.of("Mattias Sandell owns the boat (since 2024)"),
+					o.applied().facts().stream().map(f -> f.rendering()).toList(), "the event still opens owns");
+			assertTrue(o.applied().warnings().stream().anyMatch(w -> w.contains("predicate")),
+					o.applied().warnings().toString());
 		}
 	}
 

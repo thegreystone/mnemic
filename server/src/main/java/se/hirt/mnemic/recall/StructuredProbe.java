@@ -82,7 +82,7 @@ final class StructuredProbe {
 		var near = new ArrayList<Fact>();
 		var future = new ArrayList<Fact>();
 		for (Entity e : q.spotted()) {
-			String direction = direction(cue, e);
+			String direction = direction(cue, e, q.text());
 			// A past-tense yes/no question is answered by ended facts too.
 			for (Fact f : facts.probe(e.id(), cue.predicate().name(), asOf, now, includeHistory || q.past())) {
 				if (q.past() && "corrected".equals(f.status())) {
@@ -333,8 +333,16 @@ final class StructuredProbe {
 		return false;
 	}
 
-	/** The side of the relation the entity is on, from the cue, else from its type against domain and range. */
-	private String direction(Cue cue, Entity e) {
+	/**
+	 * The side of the relation the entity is on: from the question's word order when it says ("who mentors Mattias":
+	 * the verb before the name makes Mattias the object; "who does Mattias mentor": the name between the auxiliary and
+	 * the verb makes Mattias the subject), else from the cue, else from the entity's type against domain and range.
+	 */
+	private String direction(Cue cue, Entity e, String question) {
+		String bySyntax = directionBySyntax(cue, e, question);
+		if (bySyntax != null) {
+			return bySyntax;
+		}
 		if (!"any".equals(cue.direction())) {
 			return cue.direction();
 		}
@@ -352,6 +360,34 @@ final class StructuredProbe {
 			return "object";
 		}
 		return "any";
+	}
+
+	private static final Set<String> AUXILIARIES = Set.of("does", "did", "do");
+
+	/**
+	 * {@code subject} for "does <entity> <term>" ("who does Mattias mentor"), else null. Word order before the name is
+	 * not used: "who mentors Mattias" and "wo arbeitet Mattias" put the name on opposite sides.
+	 */
+	static String directionBySyntax(Cue cue, Entity e, String question) {
+		List<String> toks = Names.tokens(question);
+		List<String> term = Names.tokens(cue.term());
+		Set<String> entity = new HashSet<>(Names.tokens(e.name()));
+		if (term.isEmpty() || entity.isEmpty()) {
+			return null;
+		}
+		for (int i = 0; i + 1 < toks.size(); i++) {
+			if (!AUXILIARIES.contains(toks.get(i)) || !entity.contains(toks.get(i + 1))) {
+				continue;
+			}
+			int j = i + 2;
+			while (j < toks.size() && entity.contains(toks.get(j))) {
+				j++;
+			}
+			if (j + term.size() <= toks.size() && toks.subList(j, j + term.size()).equals(term)) {
+				return "subject";
+			}
+		}
+		return null;
 	}
 
 	/**

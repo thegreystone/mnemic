@@ -40,6 +40,8 @@ import se.hirt.mnemic.knowledge.FactQueries;
 import se.hirt.mnemic.knowledge.FactQueries.History;
 import se.hirt.mnemic.knowledge.FactService.Applied;
 import se.hirt.mnemic.knowledge.FactService.Corrected;
+import se.hirt.mnemic.knowledge.Question;
+import se.hirt.mnemic.knowledge.FactService.Removed;
 import se.hirt.mnemic.knowledge.FactService.FactOut;
 import se.hirt.mnemic.knowledge.Knowledge;
 import se.hirt.mnemic.knowledge.Lang;
@@ -67,9 +69,12 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Objects;
 import java.util.function.Supplier;
 
 /**
@@ -167,10 +172,10 @@ public final class Engine implements AutoCloseable {
 	/** What {@code consolidate} found and did (EXTRACTION.md, Layer 3). */
 	public record Consolidation(long pendingProposals, List<Map<String, Object>> backlog,
 			List<Map<String, Object>> openQuestions, List<Map<String, Object>> inferredVocabulary,
-			List<Map<String, Object>> similarVocabulary, List<Map<String, Object>> merges, int reclosed,
-			List<Map<String, Object>> proposed, List<Map<String, Object>> resolvedQuestions,
-			List<Map<String, Object>> review, List<String> retired, int embedded,
-			List<Map<String, Object>> duplicates) {
+			List<Map<String, Object>> similarVocabulary, List<Map<String, Object>> descriptiveEvents,
+			List<Map<String, Object>> merges, int reclosed, List<Map<String, Object>> proposed,
+			List<Map<String, Object>> resolvedQuestions, List<Map<String, Object>> review, List<String> retired,
+			int embedded, List<Map<String, Object>> duplicates, Rebuilt rebuilt, int removedEntities) {
 	}
 
 	/** The vector scheme: 2 since a fact about the owner carries a first-person vector too ({@link OwnerAlias}). */
@@ -206,6 +211,8 @@ public final class Engine implements AutoCloseable {
 			knowledge.events().rerenderAll();
 			db.setMeta("language", options.lang().code());
 		}
+		// Records from before readings were kept on them get one from what they did, so a rebuild can replay them.
+		knowledge.factService().backfillCorrectionReadings();
 		if (!VECTOR_SCHEME.equals(db.meta("vector_scheme"))) {
 			vectors.dropKind(VectorStore.FACT); // the backfill makes them again from the renderings
 			db.setMeta("vector_scheme", VECTOR_SCHEME);
@@ -260,28 +267,115 @@ public final class Engine implements AutoCloseable {
 		return new RememberOutcome(r, applied, resolved, "server:" + proposer.id());
 	}
 
+	/** A reading given to an observation: what it produced, and what the reading it replaced had produced. */
+	public record Reading(Applied applied, Removed removed, boolean replaced) {
+	}
+
 	/**
-	 * A structured reading for an observation already stored without one (EVALUATION.md I5): a connector's email, a
-	 * note remembered in a hurry. The proposal is attached to that observation, its facts carry that observation as
-	 * their provenance, its rows are embedded, and it leaves the backlog. An observation that already has a reading is
-	 * refused: its facts are corrected, not proposed again.
+	 * The reading of an observation (EVALUATION.md I5, S27): the proposal is attached to it, its facts carry that
+	 * observation as their provenance, its rows are embedded, and it leaves the backlog. An observation that already
+	 * has a reading gets this one instead: what the old reading produced is taken back first, closures it caused
+	 * undone, and the text keeps its id, date, and provenance. The observation is the source of truth; a reading is how
+	 * it was understood, and can be understood again.
 	 */
-	public Applied propose(long observationId, Proposal proposal) {
+	public Reading reread(long observationId, Proposal proposal) {
 		Observation obs = observations.get(observationId)
 				.orElseThrow(() -> MnemicException.notFound("No observation obs-" + observationId));
 		if (obs.forgotten()) {
 			throw MnemicException.conflict("obs-" + observationId + " is forgotten.", Map.of());
 		}
-		if (obs.proposalJson() != null && !"{}".equals(obs.proposalJson())) {
-			throw MnemicException.conflict("obs-" + observationId
-					+ " already has a structured reading; correct its facts " + "instead of proposing again.",
-					Map.of("observation", obs.ref()));
+		if ("correction".equals(obs.source().kind())) {
+			throw MnemicException.invalidArgument(
+					obs.ref() + " is a correction record; correct the fact it produced " + "instead of re-reading it.");
+		}
+		boolean replaced = obs.proposalJson() != null && !"{}".equals(obs.proposalJson());
+		Removed removed = Removed.NONE;
+		if (replaced) {
+			removed = knowledge.factService().forgetDerived(obs.id(), true);
+			vectors.forget(obs.id());
 		}
 		observations.attachProposal(obs.id(), Json.write(proposal), Proposal.CURRENT_SPEC_VERSION, null);
 		Observation stored = observations.get(obs.id()).orElseThrow();
 		Applied applied = knowledge.factService().apply(stored, proposal);
 		embed(stored, applied);
-		return applied;
+		return new Reading(applied, removed, replaced);
+	}
+
+	/** {@link #reread}, for callers that only need what the reading produced. */
+	public Applied propose(long observationId, Proposal proposal) {
+		return reread(observationId, proposal).applied();
+	}
+
+	/** What a rebuild did: the log entries re-derived, and what could not be done again. */
+	public record Rebuilt(int observations, int corrections, int answers, List<String> unmatched, long factsBefore,
+			long factsAfter) {
+	}
+
+	/**
+	 * Re-derives the projection from the log: every observation with a reading is read again in order, correction
+	 * records do their work again against the fact their key now names, and the answers once given to an observation's
+	 * questions are given again when the same question comes back. Entities keep their ids; facts and events get new
+	 * ones. What could not be replayed (a correction whose fact no longer exists) is reported.
+	 */
+	public Rebuilt rebuild() {
+		long before = knowledge.facts().count();
+		List<Observation> log = observations.all().stream()
+				.filter(o -> !o.retired() && o.proposalJson() != null && !"{}".equals(o.proposalJson())).toList();
+		// The answers on record, kept before the questions go with the projection.
+		var prior = new HashMap<Long, List<Question>>();
+		for (Observation o : log) {
+			prior.put(o.id(), knowledge.questions().ofObservation(o.id()));
+		}
+		// A clean projection first, newest entry back, so nothing derived from a later reading outlives a rebuild.
+		for (Observation o : log.reversed()) {
+			knowledge.factService().forgetDerived(o.id(), true);
+			vectors.forget(o.id());
+			knowledge.questions().deleteOf(o.id());
+		}
+		int n = 0;
+		int corrections = 0;
+		int answers = 0;
+		var unmatched = new ArrayList<String>();
+		for (Observation o : log) {
+			if ("correction".equals(o.source().kind())) {
+				if (knowledge.factService().replayCorrection(o)) {
+					corrections++;
+				} else {
+					unmatched.add(o.ref());
+				}
+				continue;
+			}
+			Applied applied = knowledge.factService().apply(o, Proposal.parse(o.proposalJson()));
+			embed(o, applied);
+			answers += replayAnswers(o, prior.getOrDefault(o.id(), List.of()));
+			n++;
+		}
+		embedMissing(500);
+		return new Rebuilt(n, corrections, answers, unmatched, before, knowledge.facts().count());
+	}
+
+	/** Answers once given to this observation's questions, given again to the questions its re-reading raised. */
+	private int replayAnswers(Observation o, List<Question> prior) {
+		int n = 0;
+		for (Question q : knowledge.questions().open(500)) {
+			if (q.observationId() == null || q.observationId() != o.id()) {
+				continue;
+			}
+			Optional<Question> earlier = prior.stream()
+					.filter(p -> "answered".equals(p.status()) && p.kind().equals(q.kind())
+							&& Objects.equals(p.subject(), q.subject()) && Objects.equals(p.predicate(), q.predicate()))
+					.findFirst();
+			if (earlier.isEmpty()) {
+				continue;
+			}
+			try {
+				knowledge.resolver().resolve(o, List.of(new Resolve(q.ref(), earlier.get().answer())));
+				n++;
+			} catch (MnemicException e) {
+				// The answer no longer applies (a candidate gone): the question stays open for a person.
+			}
+		}
+		return n;
 	}
 
 	/** Stores the server-made proposal on the observation, with its provenance, then applies it. */
@@ -330,9 +424,52 @@ public final class Engine implements AutoCloseable {
 
 	/** {@code keepEntities}: a re-seed keeps the entities the observation created (ids, aliases); privacy does not. */
 	public boolean forget(long observationId, boolean keepEntities) {
+		// A correction restates the fact it corrects: forgetting the fact for privacy forgets its corrections too.
+		List<Long> records = knowledge.factService().correctionRecordsOf(observationId);
 		knowledge.factService().forgetDerived(observationId, keepEntities);
 		vectors.forget(observationId); // after: a re-homed fact keeps its vector, a deleted one loses it
-		return observations.forget(observationId);
+		boolean forgotten = observations.forget(observationId);
+		for (long record : records) {
+			forget(record, keepEntities);
+		}
+		if (!keepEntities) {
+			// An entity created by an earlier forgotten observation may have lost its last reference just now.
+			knowledge.entities().removeOrphansOfForgotten();
+		}
+		return forgotten;
+	}
+
+	/**
+	 * Corrects an entity: its name, its type, or the aliases it keeps ({@code aliases} is the list to keep; the
+	 * entity's own name and the owner's identity always stay). The user says what a thing is called; a wrong fuzzy
+	 * match earlier is undone by dropping the alias it left.
+	 */
+	public Map<String, Object> correctEntity(long entityId, Map<String, Object> replacement, String reason) {
+		requireReplacement(replacement, "{\"aliases\": [\"Hooli\", \"Hooli Inc\"]} or {\"name\": \"Hooli AG\"} or "
+				+ "{\"type\": \"organization\"}");
+		var before = knowledge.entities().get(entityId)
+				.orElseThrow(() -> MnemicException.notFound("No entity ent-" + entityId));
+		List<String> aliasesBefore = knowledge.entities().aliases(entityId);
+		var after = knowledge.entities().correct(entityId, replacement);
+		int rerendered = 0;
+		if (!after.name().equals(before.name())) {
+			rerendered = knowledge.renderer().rerenderMentioning(entityId);
+		}
+		var out = new LinkedHashMap<String, Object>();
+		out.put("entity", after.ref());
+		out.put("before", Map.of("name", before.name(), "type", before.type(), "aliases", aliasesBefore));
+		out.put("after",
+				Map.of("name", after.name(), "type", after.type(), "aliases", knowledge.entities().aliases(entityId)));
+		out.put("rerendered_facts", rerendered);
+		out.put("reason", reason);
+		return out;
+	}
+
+	/** Answers open questions without recording an observation: the answers live on the questions themselves. */
+	public List<Map<String, Object>> answer(List<Resolve> resolves) {
+		List<Map<String, Object>> resolved = knowledge.resolver().resolve(resolves, options.clock().instant());
+		embedMissing(50);
+		return resolved;
 	}
 
 	// ── corrections ─────────────────────────────────────────────────────
@@ -499,6 +636,12 @@ public final class Engine implements AutoCloseable {
 	 * model reads a batch of the backlog per call.
 	 */
 	public Consolidation consolidate(boolean dryRun, List<Long> retire) {
+		return consolidate(dryRun, retire, false);
+	}
+
+	/** {@code rebuild}: re-derive the projection from the log first (never on a dry run). */
+	public Consolidation consolidate(boolean dryRun, List<Long> retire, boolean rebuild) {
+		Rebuilt rebuilt = rebuild && !dryRun ? rebuild() : null;
 		var retired = new ArrayList<String>();
 		if (!dryRun) {
 			for (long id : retire) {
@@ -525,8 +668,8 @@ public final class Engine implements AutoCloseable {
 		}).toList();
 		List<Map<String, Object>> open = knowledge.questions().open(20).stream().map(q -> q.toMap()).toList();
 		return new Consolidation(observations.pendingProposals(), backlog, open, c.inferredVocabulary(),
-				c.similarVocabulary(), c.merges(), c.reclosed(), proposed, c.resolvedQuestions(), c.review(), retired,
-				embedded, c.duplicates());
+				c.similarVocabulary(), c.descriptiveEvents(), c.merges(), c.reclosed(), proposed, c.resolvedQuestions(),
+				c.review(), retired, embedded, c.duplicates(), rebuilt, c.removedEntities());
 	}
 
 	private List<Map<String, Object>> proposeBacklog() {

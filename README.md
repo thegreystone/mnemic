@@ -169,6 +169,12 @@ Behind that are seven tools: `remember`, `recall`, `inspect`, `correct`, `forget
 one tells the assistant when to use it and when not to, and everything the store holds has one kind of id (`obs-12`,
 `f-12`, `ent-12`, `evt-3`, `q-3`, `pred:works_at`, `event:joined`, `type:place`) that `inspect` and `correct` take.
 
+The text of an observation is the source of truth, kept word for word; everything else is derived from the reading the
+assistant attached to it. When a reading was wrong, the assistant reads the observation again with `remember` and the
+store takes back what the old reading produced; when the user says the world is otherwise, `correct` records that as an
+entry of its own. `consolidate` can rebuild every fact and event from the observations, so nothing derived is ever the
+only copy.
+
 Every answer from `recall` starts with a verdict the assistant can rely on: *matched* (the fact is known),
 *MISS* (the question was understood and no such fact is known, which is not the same as no), *KNOWN FALSE*
 (something you said rules it out), or *NOT YET* (a plan whose date has not come). A second line says which

@@ -115,6 +115,34 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
             </plugins>
         </pluginManagement>
         <plugins>
+            <!-- Installed and deployed poms carry the resolved version instead of ${revision}, so a consumer outside
+                 the reactor (the bench run from its own directory, a downloaded jar) can read them. Only the
+                 CI-friendly properties are resolved; the rest of the pom is left as written. -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>flatten-maven-plugin</artifactId>
+                <version>1.5.0</version>
+                <configuration>
+                    <updatePomFile>true</updatePomFile>
+                    <flattenMode>resolveCiFriendliesOnly</flattenMode>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>flatten</id>
+                        <phase>process-resources</phase>
+                        <goals>
+                            <goal>flatten</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>flatten-clean</id>
+                        <phase>clean</phase>
+                        <goals>
+                            <goal>clean</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
             <!-- Formatting: the Eclipse JDT profile in config/formatter (tabs, 120 columns), applied to every
                  module. `mvn spotless:apply` fixes; `check` runs in validate, so unformatted code fails the build. -->
             <plugin>

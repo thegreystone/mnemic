@@ -220,7 +220,7 @@ class VocabularyTest {
 			assertEquals("events", r.structured().state(), r.text());
 			assertEquals(1, r.events().size(), r.text());
 			assertEquals("inherited", r.events().getFirst().type());
-			assertTrue(r.text().contains("inherited(Mattias Sandell, the cabin) (since 2019)"), r.text());
+			assertTrue(r.text().contains("inherited (Mattias Sandell, the cabin) (since 2019)"), r.text());
 		}
 	}
 
@@ -326,8 +326,13 @@ class VocabularyTest {
 					proposal().entity("e1", "the cabin", "place").event("ev1", "inherited", "2019", "self", "e1"));
 			assertEquals(1, o.applied().events().size(), "the occurrence is stored");
 			assertEquals(0, o.applied().facts().size(), "with no effect on facts until the type has one");
-			assertEquals(List.of(Map.of("kind", "event_type", "name", "inherited", "resolution", "inferred")),
-					o.applied().definitions());
+			Map<String, Object> defined = o.applied().definitions().getFirst();
+			assertEquals("inferred", defined.get("resolution"), defined.toString());
+			@SuppressWarnings("unchecked")
+			Map<String, Object> assumed = (Map<String, Object>) defined.get("inferred");
+			assertEquals("{subject} inherited {object}", assumed.get("render"), "what was assumed is shown");
+			assertEquals("none", assumed.get("effects"));
+			assertTrue(assumed.get("correct").toString().startsWith("correct(\"event:inherited\""));
 			var t = e.eventTypes().get("inherited").orElseThrow();
 			assertTrue(t.inferred());
 			assertEquals(List.of("inherited", "inherit"), t.lexicon(), "the name's words are its cue");
@@ -386,8 +391,10 @@ class VocabularyTest {
 			RememberOutcome o = remember(e, "Two cantons.", proposal().entity("e1", "Kanton Schwyz", "canton")
 					.entity("e2", "Kanton Luzern", "canton").entity("e3", "Anna Lindqvist", "person"));
 			assertEquals(3, o.applied().entities().size());
-			assertEquals(List.of(Map.of("kind", "entity_type", "name", "canton", "resolution", "inferred")),
-					o.applied().definitions());
+			Map<String, Object> defined = o.applied().definitions().getFirst();
+			assertEquals("inferred", defined.get("resolution"), defined.toString());
+			assertTrue(((Map<?, ?>) defined.get("inferred")).containsKey("parent"),
+					"the assumed parent (none) is shown");
 			var t = e.entityTypes().get("canton").orElseThrow();
 			assertTrue(t.inferred());
 			assertEquals(null, t.parent());
@@ -473,8 +480,15 @@ class VocabularyTest {
 			assertEquals("Mattias Sandell mentors Anna Lindqvist", o.applied().facts().getFirst().rendering());
 			assertTrue(o.applied().warnings().getFirst().contains("registered from this use"),
 					o.applied().warnings().toString());
-			assertEquals(List.of(Map.of("kind", "predicate", "name", "mentors", "resolution", "inferred")),
-					o.applied().definitions());
+			Map<String, Object> defined = o.applied().definitions().getFirst();
+			assertEquals("inferred", defined.get("resolution"), defined.toString());
+			@SuppressWarnings("unchecked")
+			Map<String, Object> assumed = (Map<String, Object>) defined.get("inferred");
+			assertEquals(List.of("*"), assumed.get("domain"), "the assumed direction is shown, to be corrected");
+			assertEquals(List.of("*"), assumed.get("range"));
+			assertEquals(false, assumed.get("functional"));
+			assertEquals(List.of("mentors", "mentor"), assumed.get("lexicon"));
+			assertTrue(assumed.get("correct").toString().contains("pred:mentors"));
 			var p = e.predicates().get("mentors").orElseThrow();
 			assertTrue(p.isInferred());
 			assertEquals(List.of("mentors", "mentor"), p.lexicon(), "the name's words are its cue");
@@ -484,9 +498,9 @@ class VocabularyTest {
 			e.correctPredicate("mentors",
 					Map.of("description", "Subject guides object's career.", "domain", "person", "range", "person"),
 					"the user explained");
-			var defined = e.predicates().get("mentors").orElseThrow();
-			assertFalse(defined.isInferred());
-			assertEquals(List.of("person"), defined.range());
+			var completed = e.predicates().get("mentors").orElseThrow();
+			assertFalse(completed.isInferred());
+			assertEquals(List.of("person"), completed.range());
 			RememberOutcome again = remember(e, "I mentor Erik.",
 					proposal().entity("e1", "Erik Nyberg", "person").fact("self", "mentors", "e1"));
 			assertEquals(List.of(), again.applied().warnings());
@@ -654,6 +668,44 @@ class VocabularyTest {
 			assertEquals(2, recall(e, "who does Mattias mentor").hits().size());
 			assertEquals(1, e.predicates().changes("mentors").size(), "the merge is on record");
 		}
+	}
+
+	@Test
+	@Scenario("S25")
+	void anInferredDirectionIsCorrectedAtOnceAndRecallFollowsIt() {
+		try (Engine e = TestHomes.engine("s25-direction")) {
+			RememberOutcome o = remember(e, "Anna mentors me.",
+					proposal().entity("e1", "Anna Lindqvist", "person").fact("e1", "mentors", "self"));
+			remember(e, "I mentor Erik.",
+					proposal().entity("e1", "Erik Nyberg", "person").fact("self", "mentors", "e1"));
+			@SuppressWarnings("unchecked")
+			Map<String, Object> assumed = (Map<String, Object>) o.applied().definitions().getFirst().get("inferred");
+			assertEquals(List.of("*"), assumed.get("domain"), "either side, until somebody says");
+			// "does Mattias mentor" says which side Mattias is on; the other questions do not, so both facts come back.
+			assertEquals(List.of("Mattias Sandell mentors Erik Nyberg"), structured(e, "who does Mattias mentor"));
+			assertEquals(2, structured(e, "who mentors Mattias").size(), "no direction on record yet");
+			assertEquals(2, structured(e, "who is Mattias's mentor").size());
+			// The model corrects the assumption at once, as the reply's correct line says.
+			Map<String, Object> c = e.correctPredicate("mentors",
+					Map.of("domain", "person", "range", "person", "description", "Subject guides object's career."),
+					"mentors are people guiding people");
+			assertEquals(List.of("person"), e.predicates().get("mentors").orElseThrow().domain());
+			assertEquals(List.of("person"), e.predicates().get("mentors").orElseThrow().range());
+			assertFalse(e.predicates().get("mentors").orElseThrow().isInferred());
+			assertEquals(2, c.get("rerendered_facts"));
+			// Now a relation between like things: "Mattias's mentor" names the one whose mentee Mattias is.
+			assertEquals(List.of("Anna Lindqvist mentors Mattias Sandell"), structured(e, "who is Mattias's mentor"));
+			assertEquals(List.of("Anna Lindqvist mentors Mattias Sandell"), structured(e, "who mentors Mattias"));
+			assertEquals(List.of("Mattias Sandell mentors Erik Nyberg"), structured(e, "who does Mattias mentor"));
+			// And the types are checked from now on.
+			RememberOutcome org = remember(e, "I mentor Hooli.",
+					proposal().entity("e1", "Hooli", "organization").fact("self", "mentors", "e1"));
+			assertEquals("type_mismatch", question(org, "type_mismatch").get("kind"));
+		}
+	}
+
+	private static List<String> structured(Engine e, String query) {
+		return recall(e, query).structured().facts().stream().map(Fact::rendering).sorted().toList();
 	}
 
 	@Test

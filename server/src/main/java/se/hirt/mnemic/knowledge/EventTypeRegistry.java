@@ -37,7 +37,6 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Matcher;
@@ -83,11 +82,47 @@ public final class EventTypeRegistry {
 				insert(t);
 			}
 		}
+		// A store from before 2.3: types are spelled the registry's way, and those that are types (not descriptions
+		// the caller put where the type goes) are registered from use.
+		for (Row r : db.read(tx -> tx.query("SELECT DISTINCT type FROM event"))) {
+			String stored = r.str("type");
+			if (stored == null) {
+				continue;
+			}
+			String k = key(stored);
+			if (!k.equals(stored)) {
+				db.write(tx -> tx.update("UPDATE event SET type = ? WHERE type = ?", k, stored));
+			}
+			if (!byName.containsKey(k) && typeLike(stored)) {
+				registerInferred(stored, null);
+			}
+		}
+	}
+
+	/** Reads the table again, after a change made beside the registry. */
+	public synchronized void reload() {
+		byName.clear();
+		load();
 	}
 
 	public synchronized Optional<EventType> get(String name) {
-		return name == null ? Optional.empty()
-				: Optional.ofNullable(byName.get(name.trim().toLowerCase(Locale.ROOT).replace(' ', '_')));
+		return name == null ? Optional.empty() : Optional.ofNullable(byName.get(key(name)));
+	}
+
+	/** The registry's spelling of a name: its words, lowercase, joined by underscores ({@code purchased_property}). */
+	public static String key(String name) {
+		return String.join("_", Names.tokens(name));
+	}
+
+	/**
+	 * Whether a name is a type at all, rather than a description the caller put where the type goes ("dealer confirmed
+	 * receipt of the payment"): at most three words, two of them content words, and no number. A description is stored
+	 * as a plain occurrence and never registered, since a registry of one-off sentences would be no vocabulary.
+	 */
+	public static boolean typeLike(String name) {
+		List<String> tokens = Names.tokens(name);
+		return !tokens.isEmpty() && tokens.size() <= 3 && Names.contentTokens(name).size() <= 2
+				&& tokens.stream().noneMatch(t -> t.chars().allMatch(Character::isDigit));
 	}
 
 	public synchronized List<EventType> all() {
@@ -115,7 +150,7 @@ public final class EventTypeRegistry {
 		EventType t = byName.get(type);
 		String template = t == null ? null : t.render();
 		if (template == null || template.isBlank()) {
-			return type + "(" + String.join(", ", participants) + ")";
+			return type.replace('_', ' ') + " (" + String.join(", ", participants) + ")";
 		}
 		String subject = participants.isEmpty() ? "" : participants.getFirst();
 		String object = participants.size() < 2 ? "" : String.join(", ", participants.subList(1, participants.size()));
@@ -139,7 +174,7 @@ public final class EventTypeRegistry {
 		if (def.name() == null || def.name().isBlank()) {
 			throw MnemicException.invalidArgument("An event type definition needs a 'name'.");
 		}
-		String name = def.name().trim().toLowerCase(Locale.ROOT).replace(' ', '_');
+		String name = key(def.name());
 		EventType existing = byName.get(name);
 		if (existing != null) {
 			if (!existing.inferred() || bare(def)) {
@@ -188,7 +223,7 @@ public final class EventTypeRegistry {
 	 * no description until somebody answers what it does. An existing name is returned as it is.
 	 */
 	public synchronized EventType registerInferred(String name, Long observationId) {
-		String n = name.trim().toLowerCase(Locale.ROOT).replace(' ', '_');
+		String n = key(name);
 		if (byName.containsKey(n)) {
 			return byName.get(n);
 		}

@@ -43,6 +43,7 @@ import se.hirt.mnemic.proposal.Proposal.EventRef;
 import se.hirt.mnemic.proposal.Proposal.FactRef;
 import se.hirt.mnemic.proposal.Proposal.PredicateDef;
 import se.hirt.mnemic.proposal.Proposal.ValidTime;
+import se.hirt.mnemic.protocol.Json;
 import se.hirt.mnemic.protocol.MnemicException;
 
 import java.time.Instant;
@@ -57,6 +58,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * Turns a validated proposal into rows (EXTRACTION.md, Layer 2): predicates and entities are resolved, domain and range
@@ -101,6 +103,11 @@ public final class FactService {
 	public record Corrected(Fact original, Fact replacement) {
 	}
 
+	/** What taking an observation's reading back removed: its own facts and events, and the closures it had caused. */
+	public record Removed(List<Map<String, Object>> facts, List<Map<String, Object>> events, int reopened) {
+		public static final Removed NONE = new Removed(List.of(), List.of(), 0);
+	}
+
 	/** The resolved parts of one fact to store. */
 	record Operands(Entity subject, Predicate predicate, Entity object, String objectText, String qualifier,
 			Entity scope, String mode) {
@@ -132,6 +139,9 @@ public final class FactService {
 		final Map<String, Entity> refs = new LinkedHashMap<>();
 		final Map<String, PredicateDef> defs = new HashMap<>();
 		final Map<String, Long> eventIds = new HashMap<>();
+		/** The events of this proposal by key: their type and participant ids, for a stated fact to find its event. */
+		final Map<String, String> eventTypeOf = new HashMap<>();
+		final Map<String, List<Long>> eventParticipants = new HashMap<>();
 		final List<String> warnings = new ArrayList<>();
 		final List<Map<String, Object>> questions = new ArrayList<>();
 		final List<Map<String, Object>> superseded = new ArrayList<>();
@@ -165,8 +175,17 @@ public final class FactService {
 
 		/** Records a registration once per name. */
 		void defined(String kind, String name, String resolution) {
+			defined(kind, name, resolution, null);
+		}
+
+		/** {@code inferred}: what the store assumed about a term registered from use, for the caller to correct. */
+		void defined(String kind, String name, String resolution, Map<String, Object> inferred) {
 			if (definitions.stream().noneMatch(d -> kind.equals(d.get("kind")) && name.equals(d.get("name")))) {
-				definitions.add(definition(kind, name, resolution));
+				var m = definition(kind, name, resolution);
+				if (inferred != null) {
+					m.put("inferred", inferred);
+				}
+				definitions.add(m);
 			}
 		}
 
@@ -340,7 +359,11 @@ public final class FactService {
 			return;
 		}
 		EntityTypeRegistry.EntityType t = types.registerInferred(type, a.obs.id());
-		a.defined("entity_type", t.name(), "inferred");
+		var inferred = new LinkedHashMap<String, Object>();
+		inferred.put("parent", null);
+		inferred.put("type_words", List.of());
+		inferred.put("correct", "correct(\"type:" + t.name() + "\", {parent, description, synonyms, type_words})");
+		a.defined("entity_type", t.name(), "inferred", inferred);
 		asks.typeKind(a.obs, t, e, types.roots()).ifPresent(a::ask);
 	}
 
@@ -436,22 +459,35 @@ public final class FactService {
 				continue; // waits with the entity question
 			}
 			Bounds b = Bounds.of(ev.validTime(), a.obs.observedAt(), a.warnings);
-			String type = ev.type().trim().toLowerCase(Locale.ROOT).replace(' ', '_');
-			boolean fresh = eventTypes.get(type).isEmpty();
-			EventType et = fresh ? eventTypes.registerInferred(type, a.obs.id()) : eventTypes.get(type).orElseThrow();
-			if (fresh) {
-				a.defined("event_type", et.name(), "inferred");
+			String type = EventTypeRegistry.key(ev.type());
+			EventType et = eventTypes.get(type).orElse(null);
+			if (et == null && !EventTypeRegistry.typeLike(ev.type())) {
+				// A sentence where the type goes: kept as the occurrence it describes, never as vocabulary.
+				a.warnings.add("Event type '" + ev.type() + "' reads as a description, not a type: stored as a plain "
+						+ "occurrence with no effect on facts and not registered. Use a short type (a verb, one or two "
+						+ "words) and keep the detail in the observation text.");
+			} else if (et == null) {
+				et = eventTypes.registerInferred(type, a.obs.id());
+				var inferred = new LinkedHashMap<String, Object>();
+				inferred.put("render", et.render());
+				inferred.put("lexicon", et.lexicon());
+				inferred.put("effects", "none");
+				inferred.put("correct", "correct(\"event:" + et.name()
+						+ "\", {opens, closes, supersedes, ends_entity, render, lexicon, description})");
+				a.defined("event_type", et.name(), "inferred", inferred);
 			}
 			String rendering = events.render(type, participants.stream().map(Entity::name).toList(), b);
 			EventService.Stored stored = events.store(type, participants, b, rendering, a.obs);
 			String key = ev.ref() != null ? ev.ref() : "evt-" + stored.id();
 			a.eventIds.put(key, stored.id());
+			a.eventTypeOf.put(key, type);
+			a.eventParticipants.put(key, participants.stream().map(Entity::id).toList());
 			a.eventOut.add(new EventOut(key, "evt-" + stored.id(), type));
 			if (stored.effects()) {
 				events.applyEffects(stored.id(), type, participants, b, a.obs, a.superseded);
 			}
 			opened.addAll(openedBy(a, ev, type, participants, key));
-			if (et.inferred()) {
+			if (et != null && et.inferred()) {
 				asks.eventEffect(a.obs, et, participants, stored.id(), fitting(participants)).ifPresent(a::ask);
 			}
 		}
@@ -541,8 +577,9 @@ public final class FactService {
 		Entity subj = participants.getFirst();
 		for (int i = 1; i < participants.size(); i++) {
 			Entity obj = participants.get(i);
-			boolean stated = a.p.facts().stream().anyMatch(f -> et.get().opens().contains(f.predicate())
-					&& bound(a.refs, f.subject()) == subj.id() && bound(a.refs, f.object()) == obj.id());
+			boolean stated = a.p.facts().stream()
+					.anyMatch(f -> f.predicate() != null && et.get().opens().contains(f.predicate())
+							&& bound(a.refs, f.subject()) == subj.id() && bound(a.refs, f.object()) == obj.id());
 			if (stated) {
 				continue;
 			}
@@ -620,10 +657,22 @@ public final class FactService {
 			a.predicateOut.add(new PredicateOut(f.predicate(), res.how(), named == null ? null : named.name()));
 		}
 		if ("inferred".equals(res.how())) {
-			a.defined("predicate", res.predicate().name(), "inferred");
+			Predicate p = res.predicate();
+			var inferred = new LinkedHashMap<String, Object>();
+			inferred.put("domain", p.domain());
+			inferred.put("range", p.range());
+			inferred.put("direction",
+					"either: any subject, any object; state domain and range to fix which side is which");
+			inferred.put("functional", p.functional());
+			inferred.put("symmetric", p.symmetric());
+			inferred.put("volatility", p.volatility());
+			inferred.put("lexicon", p.lexicon());
+			inferred.put("render", p.render());
+			inferred.put("correct", "correct(\"pred:" + p.name()
+					+ "\", {domain, range, functional, symmetric, volatility, lexicon, render, description})");
+			a.defined("predicate", p.name(), "inferred", inferred);
 			a.warnings.add("Predicate '" + f.predicate() + "' was registered from this use with everything inferred "
-					+ "from its name (any subject and object, several values at a time); describe it through correct "
-					+ "when the user says more.");
+					+ "from its name (see definitions); state what you know in 'predicates' or through correct.");
 		}
 		if (res.asks()) {
 			a.ask(asks.predicate(a.obs, f, res.candidate(), res.how(), def, FactQuestions.heldProposal(a.p, f, def)));
@@ -636,7 +685,9 @@ public final class FactService {
 		String kind = derivationKind(f, a.obs, a.warnings);
 		boolean ended = Boolean.TRUE.equals(f.ended());
 		Bounds b = Bounds.of(f.validTime(), a.obs.observedAt(), a.warnings);
-		Long eventId = f.derivedFrom().stream().map(a.eventIds::get).filter(Objects::nonNull).findFirst().orElse(null);
+		Long named = f.derivedFrom().stream().map(a.eventIds::get).filter(Objects::nonNull).findFirst().orElse(null);
+		// Stated beside the event that opens it, without naming it: the event explains it all the same.
+		final Long eventId = named != null ? named : eventBehind(a, op);
 		Event event = eventId == null ? null : events.get(eventId).orElse(null);
 		if (event != null && b.start() == null && event.validStart() != null) {
 			b = b.withStart(event.validStart(), event.validStartPrecision(), "event");
@@ -701,6 +752,25 @@ public final class FactService {
 			asks.containment(a.obs, ask[0], ask[1], ask[2]).ifPresent(a::ask);
 		}
 		return Optional.ofNullable(stored.out());
+	}
+
+	/**
+	 * The event in the same proposal that opens this fact's predicate between its subject and object, when the caller
+	 * stated the fact beside the event without naming it in {@code derived_from}. Null when there is none.
+	 */
+	private Long eventBehind(Application a, Operands op) {
+		if (op.object() == null) {
+			return null;
+		}
+		for (Map.Entry<String, Long> ev : a.eventIds.entrySet()) {
+			List<Long> ids = a.eventParticipants.getOrDefault(ev.getKey(), List.of());
+			Optional<EventType> et = eventTypes.get(a.eventTypeOf.get(ev.getKey()));
+			if (et.isPresent() && et.get().opens().contains(op.predicate().name()) && !ids.isEmpty()
+					&& ids.getFirst() == op.subject().id() && ids.contains(op.object().id())) {
+				return ev.getValue();
+			}
+		}
+		return null;
 	}
 
 	/**
@@ -1070,16 +1140,12 @@ public final class FactService {
 	/**
 	 * Replaces a fact without destroying history (EVALUATION.md D1): the original is marked {@code corrected}, the
 	 * replacement is derived from the correction observation through the same path as any fact, and the two are linked.
-	 * A superseded fact can be corrected too, since an event may have closed it at the wrong date.
+	 * The correction observation's reading records which fact it corrects (by key, since fact ids do not survive a
+	 * rebuild) and the replacement, so a rebuild replays it. A superseded fact can be corrected too, since an event may
+	 * have closed it at the wrong date.
 	 */
 	public Corrected correct(long factId, Map<String, Object> replacement, String reason, Observation correction) {
-		Fact original = queries.get(factId).orElseThrow(() -> MnemicException.notFound("No fact f-" + factId));
-		if (!original.current() && !"superseded".equals(original.status())) {
-			throw MnemicException.conflict("f-" + factId + " is " + original.status() + ", not current; correct "
-					+ (original.supersededBy() != null ? "f-" + original.supersededBy() : "the current fact")
-					+ " instead.", Map.of("status", original.status()));
-		}
-		db.write(tx -> tx.update("UPDATE fact SET status = 'corrected' WHERE id = ?", factId));
+		Fact original = correctable(factId);
 		String subject = str(replacement, "subject",
 				original.subjectId() == entities.owner().id() ? "self" : entities.nameOf(original.subjectId()));
 		String object = str(replacement, "object",
@@ -1101,20 +1167,37 @@ public final class FactService {
 				new Proposal.Derivation("explicit"), callerConfidence,
 				"negated".equals(original.mode()) ? Boolean.TRUE : null,
 				"only".equals(original.mode()) ? Boolean.TRUE : null);
+		return correctWith(original, ref, reason, correction);
+	}
+
+	private Fact correctable(long factId) {
+		Fact original = queries.get(factId).orElseThrow(() -> MnemicException.notFound("No fact f-" + factId));
+		if (!original.current() && !"superseded".equals(original.status())) {
+			throw MnemicException.conflict("f-" + factId + " is " + original.status() + ", not current; correct "
+					+ (original.supersededBy() != null ? "f-" + original.supersededBy() : "the current fact")
+					+ " instead.", Map.of("status", original.status()));
+		}
+		return original;
+	}
+
+	/** The correction itself: the record's reading written, the original marked, the replacement derived and linked. */
+	Corrected correctWith(Fact original, FactRef ref, String reason, Observation correction) {
+		storeReading(correction, reading("corrects", original, reason, List.of(ref)));
+		db.write(tx -> tx.update("UPDATE fact SET status = 'corrected' WHERE id = ?", original.id()));
 		Applied a = apply(correction,
 				new Proposal(Proposal.CURRENT_SPEC_VERSION, List.of(), List.of(), List.of(ref), List.of()));
 		if (a.facts().isEmpty()) {
-			db.write(tx -> tx.update("UPDATE fact SET status = 'current' WHERE id = ?", factId));
+			db.write(tx -> tx.update("UPDATE fact SET status = 'current' WHERE id = ?", original.id()));
 			throw MnemicException.invalidArgument("The correction produced no fact: " + String.join("; ", a.warnings())
 					+ (a.questions().isEmpty() ? "" : " " + a.questions()));
 		}
 		long newId = Long.parseLong(a.facts().getFirst().id().substring(2));
 		db.write(tx -> {
-			tx.update("UPDATE fact SET superseded_by = ? WHERE id = ?", newId, factId);
-			FactLedger.supersession(tx, factId, newId, "correction", reason, null, correction.id(), null);
+			tx.update("UPDATE fact SET superseded_by = ? WHERE id = ?", newId, original.id());
+			FactLedger.supersession(tx, original.id(), newId, "correction", reason, null, correction.id(), null);
 			return null;
 		});
-		return new Corrected(queries.get(factId).orElseThrow(), queries.get(newId).orElseThrow());
+		return new Corrected(queries.get(original.id()).orElseThrow(), queries.get(newId).orElseThrow());
 	}
 
 	/**
@@ -1122,11 +1205,8 @@ public final class FactService {
 	 * recorded as a retraction, so it leaves recall and stays in history.
 	 */
 	public Corrected retract(long factId, String reason, Observation correction) {
-		Fact original = queries.get(factId).orElseThrow(() -> MnemicException.notFound("No fact f-" + factId));
-		if (!original.current() && !"superseded".equals(original.status())) {
-			throw MnemicException.conflict("f-" + factId + " is " + original.status() + ", not current.",
-					Map.of("status", original.status()));
-		}
+		Fact original = correctable(factId);
+		storeReading(correction, reading("retracts", original, reason, List.of()));
 		db.write(tx -> {
 			tx.update("UPDATE fact SET status = 'corrected', superseded_by = NULL WHERE id = ?", factId);
 			FactLedger.supersession(tx, factId, null, "retraction",
@@ -1134,6 +1214,145 @@ public final class FactService {
 			return null;
 		});
 		return new Corrected(queries.get(factId).orElseThrow(), null);
+	}
+
+	/**
+	 * The reading of a correction record: the fact it is about, named by its key rather than its id, the reason, and
+	 * the replacement it states (none for a retraction). What a rebuild needs to do it again.
+	 */
+	private Map<String, Object> reading(String kind, Fact about, String reason, List<FactRef> facts) {
+		var key = new LinkedHashMap<String, Object>();
+		key.put("subject", about.subjectId() == entities.owner().id() ? "self" : entities.nameOf(about.subjectId()));
+		key.put("predicate", about.predicate());
+		key.put("object", about.objectId() != null ? entities.nameOf(about.objectId()) : about.objectText());
+		key.put("qualifier", about.qualifier());
+		key.put("scope", about.scopeId() == null ? null : entities.nameOf(about.scopeId()));
+		key.put("mode", about.mode());
+		var m = new LinkedHashMap<String, Object>();
+		m.put(kind, key);
+		m.put("reason", reason);
+		m.put("facts", facts);
+		return m;
+	}
+
+	private void storeReading(Observation record, Map<String, Object> reading) {
+		db.write(tx -> tx.update("UPDATE observation SET proposal_json = ? WHERE id = ?", Json.write(reading),
+				record.id()));
+	}
+
+	/**
+	 * Does a correction record's work again from its reading, against whatever fact now matches its key: a rebuild
+	 * re-derives the log in order and reaches the record after the observation it corrected. When no current fact
+	 * matches, what the user stated still stands: the replacement is stored as a fact of the record, with nothing
+	 * marked corrected, and the rebuild reports the record for a person to check. False then.
+	 */
+	public boolean replayCorrection(Observation record) {
+		Map<String, Object> reading = Json.readMap(record.proposalJson());
+		boolean retraction = reading.get("retracts") instanceof Map<?, ?>;
+		Object key = retraction ? reading.get("retracts") : reading.get("corrects");
+		if (!(key instanceof Map<?, ?> k)) {
+			return false;
+		}
+		String reason = reading.get("reason") == null ? null : String.valueOf(reading.get("reason"));
+		Proposal p = Proposal.parse(record.proposalJson());
+		Optional<Fact> target = findByKey(k);
+		if (target.isEmpty()) {
+			if (!p.facts().isEmpty()) {
+				apply(record, new Proposal(Proposal.CURRENT_SPEC_VERSION, List.of(), List.of(), p.facts(), List.of()));
+			}
+			return false;
+		}
+		if (retraction) {
+			retract(target.get().id(), reason, record);
+			return true;
+		}
+		if (p.facts().isEmpty()) {
+			return false;
+		}
+		correctWith(target.get(), p.facts().getFirst(), reason, record);
+		return true;
+	}
+
+	/**
+	 * Correction records from before readings were stored on them (2.2) get one from what they did: the supersession
+	 * row the record wrote names the original, the reason, and the replacement, and the replacement row, wherever it
+	 * lives now (a later fold may have re-homed it), says what the record stated. The count given a reading.
+	 * Idempotent: a record with a reading is left alone.
+	 */
+	public int backfillCorrectionReadings() {
+		int n = 0;
+		for (Row r : db.read(tx -> tx.query("SELECT * FROM observation WHERE source_kind = 'correction' "
+				+ "AND forgotten_at IS NULL AND (proposal_json IS NULL OR proposal_json = '{}') ORDER BY id"))) {
+			Observation record = Observation.from(r);
+			Optional<Row> change = db.read(tx -> tx.queryOne(
+					"SELECT * FROM supersession WHERE observation_id = ? AND kind IN ('correction', 'retraction') "
+							+ "ORDER BY id LIMIT 1",
+					record.id()));
+			if (change.isEmpty()) {
+				continue;
+			}
+			Optional<Fact> original = queries.get(change.get().lng("fact_id"));
+			if (original.isEmpty()) {
+				continue;
+			}
+			boolean retraction = "retraction".equals(change.get().str("kind"));
+			Long replacementId = change.get().lngOrNull("superseded_by_id");
+			if (replacementId == null) {
+				replacementId = original.get().supersededBy();
+			}
+			List<FactRef> facts = retraction ? List.of()
+					: replacementId != null && queries.get(replacementId).isPresent()
+							? List.of(refOf(queries.get(replacementId).get()))
+							: queries.factsOfObservation(record.id()).stream().map(this::refOf).toList();
+			storeReading(record,
+					reading(retraction ? "retracts" : "corrects", original.get(), change.get().str("reason"), facts));
+			n++;
+		}
+		return n;
+	}
+
+	/**
+	 * A stored fact as the proposal fragment that stated it: the bounds it was given, not those a later event or
+	 * sequence gave it, since those follow from other entries of the log.
+	 */
+	FactRef refOf(Fact f) {
+		String subject = f.subjectId() == entities.owner().id() ? "self" : entities.nameOf(f.subjectId());
+		String object = f.objectId() != null ? entities.nameOf(f.objectId()) : f.objectText();
+		String scope = f.scopeId() == null ? null : entities.nameOf(f.scopeId());
+		boolean statedStart = f.validStart() != null && !"event".equals(f.startSource());
+		boolean statedEnd = f.validEnd() != null
+				&& (f.endSource() == null || "stated".equals(f.endSource()) || "resolved".equals(f.endSource()));
+		ValidTime vt = !statedStart && !statedEnd ? null : new ValidTime(statedStart ? f.validStart() : null,
+				statedEnd ? f.validEnd() : null, statedStart ? f.validStartPrecision() : f.validEndPrecision());
+		Boolean ended = f.ended() && !statedEnd && f.endSource() == null ? Boolean.TRUE : null;
+		return new FactRef(subject, f.predicate(), object, f.qualifier(), scope, vt, ended, List.of(),
+				new Proposal.Derivation("explicit"), f.callerConfidence(),
+				"negated".equals(f.mode()) ? Boolean.TRUE : null, "only".equals(f.mode()) ? Boolean.TRUE : null);
+	}
+
+	/** The current fact a correction key names, by the names of its subject, object, and scope. */
+	Optional<Fact> findByKey(Map<?, ?> key) {
+		String subject = str(key, "subject", null);
+		Entity s = subject == null || EntityService.SELF.contains(Names.norm(subject)) ? entities.owner()
+				: entities.byRef(subject).orElse(null);
+		if (s == null) {
+			return Optional.empty();
+		}
+		String predicate = str(key, "predicate", null);
+		String object = str(key, "object", null);
+		String qualifier = str(key, "qualifier", null);
+		String scope = str(key, "scope", null);
+		String mode = str(key, "mode", "asserted");
+		return queries.factsOf(s.id()).stream().filter(f -> f.subjectId() == s.id() && f.current())
+				.filter(f -> f.predicate().equals(predicate) && mode.equals(f.mode()))
+				.filter(f -> object == null ? f.objectId() == null && f.objectText() == null
+						: f.objectId() != null ? Names.norm(entities.nameOf(f.objectId())).equals(Names.norm(object))
+								: f.objectText() != null && f.objectText().equalsIgnoreCase(object))
+				.filter(f -> Objects.equals(qualifier, f.qualifier())
+						|| freeQualifier(predicates.get(f.predicate()).orElseThrow()))
+				.filter(f -> scope == null ? f.scopeId() == null
+						: f.scopeId() != null && Names.norm(entities.nameOf(f.scopeId())).equals(Names.norm(scope)))
+				.findFirst();
 	}
 
 	private static String str(Map<?, ?> m, String key, String dflt) {
@@ -1148,8 +1367,8 @@ public final class FactService {
 	 * survives, re-homed there with one corroboration fewer. {@code keepEntities} leaves the entities the observation
 	 * created in place, for a re-seed of the same text; forgetting for privacy removes those nothing else references.
 	 */
-	public void forgetDerived(long observationId, boolean keepEntities) {
-		db.write(tx -> {
+	public Removed forgetDerived(long observationId, boolean keepEntities) {
+		Removed removed = db.write(tx -> {
 			tx.update("""
 					INSERT OR IGNORE INTO forgotten_link(observation_id, entity_id)
 					SELECT observation_id, subject_id FROM fact WHERE observation_id = ?""", observationId);
@@ -1159,23 +1378,100 @@ public final class FactService {
 					observationId);
 			tx.update("UPDATE question SET status = 'dismissed', answer = 'forgotten' WHERE observation_id = ? "
 					+ "AND status = 'open'", observationId);
-			for (Row r : tx.query("SELECT id FROM fact WHERE observation_id = ?", observationId)) {
-				long factId = r.lng("id");
-				List<Long> others = FactLedger.observationsOf(tx, factId).stream().filter(o -> o != observationId)
+			var facts = new ArrayList<Map<String, Object>>();
+			var goneFacts = new ArrayList<Long>();
+			for (Row r : tx.query("SELECT * FROM fact WHERE observation_id = ?", observationId)) {
+				Fact f = Fact.from(r);
+				List<Long> others = FactLedger.observationsOf(tx, f.id()).stream().filter(o -> o != observationId)
 						.toList();
 				if (!others.isEmpty()) {
+					// Another observation also stated it: it survives there, with one corroboration fewer.
 					tx.update(
 							"UPDATE fact SET observation_id = ?, corroborations = MAX(1, corroborations - 1) WHERE id = ?",
-							others.getFirst(), factId);
+							others.getFirst(), f.id());
+				} else {
+					goneFacts.add(f.id());
+					facts.add(Map.of("id", f.ref(), "rendering", f.rendering(), "status", f.status()));
+				}
+			}
+			var events = new ArrayList<Map<String, Object>>();
+			var goneEvents = new ArrayList<Long>();
+			for (Event ev : EventService.events(tx,
+					tx.query("SELECT * FROM event WHERE observation_id = ?", observationId))) {
+				goneEvents.add(ev.id());
+				events.add(Map.of("id", ev.ref(), "type", ev.type(), "rendering", ev.rendering()));
+				// An event that ended its subject took the entity with it; the entity is back.
+				if (eventTypes.get(ev.type()).map(EventType::endsEntity).orElse(false)
+						&& !ev.participants().isEmpty()) {
+					tx.update("UPDATE entity SET existed_end = NULL WHERE id = ?", ev.participants().getFirst());
+				}
+			}
+			int reopened = reopen(tx, goneFacts, goneEvents);
+			// Aliases this observation added to entities it did not create (a fuzzy match's name) go with it; an
+			// entity's own name stays whatever added it.
+			for (Row al : tx.query("SELECT a.id, a.alias_norm, e.name FROM entity_alias a JOIN entity e ON e.id = "
+					+ "a.entity_id WHERE a.source_observation = ?", observationId)) {
+				if (!Names.norm(al.str("name")).equals(al.str("alias_norm"))) {
+					tx.update("DELETE FROM entity_alias WHERE id = ?", al.lng("id"));
 				}
 			}
 			tx.update("DELETE FROM fact_source WHERE observation_id = ?", observationId);
 			tx.update("DELETE FROM fact WHERE observation_id = ?", observationId);
 			tx.update("DELETE FROM event WHERE observation_id = ?", observationId);
-			return null;
+			return new Removed(facts, events, reopened);
 		});
 		if (!keepEntities) {
 			entities.removeOrphansCreatedBy(observationId);
 		}
+		return removed;
+	}
+
+	/** The correction records that corrected or retracted this observation's facts: they restate what it said. */
+	public List<Long> correctionRecordsOf(long observationId) {
+		return db.read(tx -> tx.query("""
+				SELECT DISTINCT s.observation_id AS id FROM supersession s
+				JOIN fact f ON f.id = s.fact_id JOIN observation o ON o.id = s.observation_id
+				WHERE f.observation_id = ? AND s.kind IN ('correction', 'retraction') AND o.source_kind = 'correction'
+				AND o.forgotten_at IS NULL""", observationId)).stream().map(r -> r.lng("id")).toList();
+	}
+
+	/**
+	 * Undoes what the facts and events being removed did to other facts: a fact they closed, superseded, or corrected
+	 * is current again, its end cleared when that closure gave it, and the record of the closure goes. The count.
+	 */
+	private int reopen(Tx tx, List<Long> goneFacts, List<Long> goneEvents) {
+		if (goneFacts.isEmpty() && goneEvents.isEmpty()) {
+			return 0;
+		}
+		String facts = goneFacts.isEmpty() ? "-1"
+				: goneFacts.stream().map(String::valueOf).collect(Collectors.joining(","));
+		String events = goneEvents.isEmpty() ? "-1"
+				: goneEvents.stream().map(String::valueOf).collect(Collectors.joining(","));
+		int n = 0;
+		for (Row s : tx.query("SELECT * FROM supersession WHERE superseded_by_id IN (" + facts + ") OR event_id IN ("
+				+ events + ") ORDER BY id DESC")) {
+			long factId = s.lng("fact_id");
+			if (goneFacts.contains(factId)) {
+				continue;
+			}
+			Optional<Row> row = tx.queryOne("SELECT * FROM fact WHERE id = ?", factId);
+			if (row.isEmpty()) {
+				continue;
+			}
+			Fact f = Fact.from(row.get());
+			String closedAt = s.str("closed_at");
+			boolean endFromThis = f.validEnd() != null && f.validEnd().equals(closedAt) && f.endSource() != null
+					&& !"stated".equals(f.endSource()) && !"resolved".equals(f.endSource());
+			String status = "superseded".equals(f.status()) || "corrected".equals(f.status()) ? "current" : f.status();
+			tx.update("UPDATE fact SET status = ?, superseded_by = NULL WHERE id = ?", status, factId);
+			if (endFromThis) {
+				tx.update("UPDATE fact SET valid_end = NULL, valid_end_precision = NULL, end_source = NULL, ended = 0 "
+						+ "WHERE id = ?", factId);
+			}
+			tx.update("DELETE FROM supersession WHERE id = ?", s.lng("id"));
+			renderer.rerender(tx, factId);
+			n++;
+		}
+		return n;
 	}
 }

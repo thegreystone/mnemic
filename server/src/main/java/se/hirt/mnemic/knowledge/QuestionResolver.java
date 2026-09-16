@@ -41,6 +41,7 @@ import se.hirt.mnemic.proposal.Proposal.PredicateDef;
 import se.hirt.mnemic.protocol.Json;
 import se.hirt.mnemic.protocol.MnemicException;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -63,7 +64,8 @@ public final class QuestionResolver {
 	public record Resolve(String questionId, String choice) {
 	}
 
-	private record Pending(Question question, String choice, Entity chosen, Map<String, Object> result) {
+	private record Pending(Question question, String choice, Entity chosen, Map<String, Object> result,
+			Observation obs) {
 	}
 
 	private final Database db;
@@ -94,6 +96,15 @@ public final class QuestionResolver {
 	 * now names an entity exactly is settled.
 	 */
 	public List<Map<String, Object>> resolve(Observation obs, List<Resolve> resolves) {
+		return resolve(obs, resolves, obs.observedAt());
+	}
+
+	/** Answers given on their own, with no observation carrying them: each question's own observation stands in. */
+	public List<Map<String, Object>> resolve(List<Resolve> resolves, Instant now) {
+		return resolve(null, resolves, now);
+	}
+
+	private List<Map<String, Object>> resolve(Observation carrier, List<Resolve> resolves, Instant now) {
 		var out = new ArrayList<Map<String, Object>>();
 		var pending = new ArrayList<Pending>();
 		var bindings = new LinkedHashMap<String, Entity>();
@@ -102,6 +113,9 @@ public final class QuestionResolver {
 			if (!q.open()) {
 				throw MnemicException.conflict(q.ref() + " is already " + q.status(), Map.of("question", q.ref()));
 			}
+			Observation obs = carrier != null ? carrier : observation(q.observationId()).orElseThrow(
+					() -> MnemicException.invalidArgument(q.ref() + " has no observation to answer against; pass "
+							+ "the answer with a remember that has text."));
 			String choice = r.choice() == null ? "" : r.choice().trim();
 			var result = new LinkedHashMap<String, Object>();
 			result.put("question", q.ref());
@@ -110,10 +124,10 @@ public final class QuestionResolver {
 			case "entity_resolution" -> {
 				Entity chosen = chooseEntity(q, choice);
 				bindings.put(q.subject(), chosen);
-				pending.add(new Pending(q, choice, chosen, result));
+				pending.add(new Pending(q, choice, chosen, result, obs));
 			}
 			case "predicate_resolution" -> result.putAll(resolvePredicate(q, choice, obs));
-			case "conflict" -> result.putAll(resolveConflict(q, choice, obs));
+			case "conflict" -> result.putAll(resolveConflict(q, choice, obs, now));
 			case "containment" -> result.putAll(resolveContainment(q, choice, obs));
 			case "type_mismatch" -> result.putAll(resolveTypeMismatch(q, choice, obs));
 			case "event_effect" -> result.putAll(resolveEventEffect(q, choice));
@@ -126,7 +140,7 @@ public final class QuestionResolver {
 			out.add(result);
 		}
 		for (Pending p : pending) {
-			p.result().putAll(applyHeld(p.question(), p.choice(), p.chosen(), bindings, obs));
+			p.result().putAll(applyHeld(p.question(), p.choice(), p.chosen(), bindings, p.obs()));
 		}
 		List<Map<String, Object>> settled = settleExactSubjects(false);
 		if (!settled.isEmpty()) {
@@ -236,7 +250,7 @@ public final class QuestionResolver {
 		return m;
 	}
 
-	private Map<String, Object> resolveConflict(Question q, String choice, Observation obs) {
+	private Map<String, Object> resolveConflict(Question q, String choice, Observation obs, Instant now) {
 		Map<String, Object> payload = Json.readMap(q.payload());
 		long existingId = Long.parseLong(payload.get("existing").toString().substring(2));
 		long pendingId = Long.parseLong(payload.get("pending").toString().substring(2));
@@ -248,7 +262,7 @@ public final class QuestionResolver {
 			return null;
 		});
 		case "supersede" -> db.write(tx -> {
-			String today = obs.observedAt().toString().substring(0, 10);
+			String today = now.toString().substring(0, 10);
 			ledger.close(tx, factIn(tx, existingId), pendingId, "supersession", "user: replaced", null, obs.id(), today,
 					"day", "superseded");
 			tx.update("UPDATE fact SET status = 'current' WHERE id = ?", pendingId);

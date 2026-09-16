@@ -83,6 +83,21 @@ public final class EntityTypeRegistry {
 				insert(e);
 			}
 		}
+		// Entities typed with a type nobody registered (a store from before 2.3): registered from use now.
+		for (Row r : db.read(tx -> tx.query("SELECT DISTINCT type FROM entity WHERE merged_into IS NULL"))) {
+			String type = r.str("type");
+			if (type != null && !UNKNOWN.equals(type) && !byName.containsKey(key(type))) {
+				registerInferred(type, null);
+			}
+		}
+	}
+
+	/** Reads the table again, after a change made beside the registry. */
+	public synchronized void reload() {
+		byName.clear();
+		bySynonym.clear();
+		typeWords.clear();
+		load();
 	}
 
 	public synchronized List<EntityType> all() {

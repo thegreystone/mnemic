@@ -47,6 +47,45 @@ The engine exposes the read-side services to the tool surface and the tests, and
 produces the one engine per process. The holder starts the model download or load on a daemon thread, so the server
 answers within milliseconds of starting and the semantic channel joins when the model is ready.
 
+## The log and the projection
+
+Two layers, with a contract between them. The **log** is the observations: text stored verbatim and never
+edited, a source, a time, and the reading the assistant attached (the proposal, stored beside the text). Correction
+records are entries in the log too: `correct` on a fact creates an observation of source kind `correction` whose
+reading names the fact it corrects by key (subject, predicate, object, qualifier, scope, mode), the reason, and the
+replacement. The **projection** is everything derived from the log: entities, facts, events, questions. Every fact
+points back at the observations that stated it.
+
+The rule that follows: anything that changes knowledge is a log entry, and the projection can be re-derived from the
+log. Two operations keep it so.
+
+- **Re-reading.** `remember(observation_id, proposal)` on an observation that already has a reading replaces the
+  reading (`Engine.reread`): what the old reading produced is taken back (`FactService.forgetDerived`, which also
+  undoes the closures those facts and events caused: a fact an event closed or a fact superseded is current again,
+  an entity a `died` event ended exists again), the observation keeps its id, text, date, and provenance, and the
+  new reading applies. This is for a reading that was wrong (a mis-filed event, a sentence where the type goes, a
+  wrong object). `correct` is for when the user says the world is otherwise: new information, dated now, with its
+  own record. A correction record itself is never re-read.
+- **Rebuilding.** `consolidate(rebuild: true)` (`Engine.rebuild`) takes every derived row back, newest entry first,
+  then reads every observation again in order: correction records do their work again against the fact their key
+  now names (or, when none matches, keep what the user stated as a fact of the record and are reported as
+  `unmatched`), and answers once given to an observation's questions are given again when the same question comes
+  back. Entities keep their ids; facts and events get new ones. The projection is therefore a cache of the log.
+
+Fact and event ids are handles for a conversation; observation ids last. `forget` is the only operation that removes
+a log entry, and it shares the undoing with re-reading; it also removes the aliases the observation added to entities
+it did not create, and forgets the correction records that corrected its facts, since those restate them. Answers to
+questions are not log entries: they live on the questions and are replayed from there, so `remember(resolve)` alone
+records nothing.
+
+Stores from before readings were kept on correction records (2.2) get them at open: `FactService.backfillCorrectionReadings`
+reads the supersession row the record wrote and the record's own fact, so a rebuild replays those corrections too. A
+2.2 reading that names an undefined predicate with the `x:` prefix replays as the bare name. A rebuild reproduces
+what the readings and corrections say; what `consolidate` had shaped by housekeeping (an end dated by a later
+closing event, folded duplicates) is derived again by the write path's own rules and can differ in a detail such as
+the precision of a sequence end. On a real store of 29 observations and 11 corrections the rebuilt projection
+matched the original fact for fact, with one end date at year rather than day precision.
+
 ## The write path: an observation becomes facts
 
 ```text
