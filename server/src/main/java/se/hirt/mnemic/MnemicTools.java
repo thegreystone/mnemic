@@ -267,6 +267,9 @@ public class MnemicTools {
 			if (t.startsWith("obs-")) {
 				return correctedObservation(parseId(t, "obs-"), replacement, why);
 			}
+			if (t.startsWith("ent-")) {
+				return engine.correctEntity(parseId(t, "ent-"), replacement, why);
+			}
 			if (t.startsWith("pred:")) {
 				return engine.correctPredicate(t.substring(5), replacement, why);
 			}
@@ -369,6 +372,7 @@ public class MnemicTools {
 			out.put("inferred_vocabulary", c.inferredVocabulary());
 			out.put("similar_vocabulary", c.similarVocabulary());
 			out.put("descriptive_events", c.descriptiveEvents());
+			out.put("unused_vocabulary", c.unusedVocabulary());
 			out.put("removed_entities", c.removedEntities());
 			if (out_rebuilt != null) {
 				out.put("rebuilt", out_rebuilt);
@@ -473,15 +477,30 @@ public class MnemicTools {
 
 	// ── reply shapes ────────────────────────────────────────────────────
 
+	/**
+	 * Where a fact stands, in one word: by its dates when the record still holds it (current, ended, future), else what
+	 * the record did to it (superseded, corrected, pending, rejected).
+	 */
+	private String standing(Fact f) {
+		return "current".equals(f.status()) ? f.state(engine.clock().instant()) : f.status();
+	}
+
+	private String standingOf(String ref) {
+		return engine.facts().get(parseId(ref, "f-")).map(this::standing).orElse(null);
+	}
+
 	/** What a proposal stored, and what it asked. */
-	private static void applied(Map<String, Object> out, Applied a) {
+	private void applied(Map<String, Object> out, Applied a) {
 		var stored = new LinkedHashMap<String, Object>();
 		stored.put("entities", a.entities().stream().map(e -> Map.of("ref", e.ref(), "id", e.id(), "name", e.name(),
 				"resolution", e.resolution(), "score", e.score())).toList());
 		stored.put("events",
 				a.events().stream().map(e -> Map.of("ref", e.ref(), "id", e.id(), "type", e.type())).toList());
-		stored.put("facts", a.facts().stream().map(f -> Map.of("id", f.id(), "predicate", f.predicate(), "rendering",
-				f.rendering(), "status", f.status(), "corroborated", f.corroborated())).toList());
+		stored.put(
+				"facts", a
+						.facts().stream().map(f -> Map.of("id", f.id(), "predicate", f.predicate(), "rendering",
+								f.rendering(), "standing", standingOf(f.id()), "corroborated", f.corroborated()))
+						.toList());
 		out.put("stored", stored);
 		if (!a.predicates().isEmpty()) {
 			out.put("predicates", a.predicates().stream()
@@ -494,8 +513,8 @@ public class MnemicTools {
 		out.put("questions", a.questions());
 	}
 
-	private static Map<String, Object> factSummary(Fact f) {
-		return Map.of("id", f.ref(), "status", f.status(), "rendering", f.rendering());
+	private Map<String, Object> factSummary(Fact f) {
+		return Map.of("id", f.ref(), "standing", standing(f), "rendering", f.rendering());
 	}
 
 	private Map<String, Object> entity(Entity e) {
@@ -510,7 +529,7 @@ public class MnemicTools {
 			m.put("id", f.ref());
 			m.put("predicate", f.predicate());
 			m.put("rendering", f.rendering());
-			m.put("status", f.status());
+			m.put("standing", standing(f));
 			m.put("derivation", f.derivationKind());
 			provenance(m, f);
 			m.put("corroborations", f.corroborations());
@@ -563,8 +582,7 @@ public class MnemicTools {
 		m.put("id", f.ref());
 		m.put("predicate", f.predicate());
 		m.put("rendering", f.rendering());
-		m.put("status", f.status());
-		m.put("state", f.state(engine.clock().instant()));
+		m.put("standing", standing(f));
 		m.put("valid_start", f.validStart());
 		m.put("valid_end", f.validEnd());
 		m.put("start_source", f.startSource());
@@ -607,7 +625,7 @@ public class MnemicTools {
 		}
 		m.put("text", o.text());
 		m.put("facts", engine.facts().factsOfObservation(id).stream()
-				.map(f -> Map.of("id", f.ref(), "rendering", f.rendering(), "status", f.status())).toList());
+				.map(f -> Map.of("id", f.ref(), "rendering", f.rendering(), "standing", standing(f))).toList());
 		m.put("events", engine.events().eventsOfObservation(id).stream().map(this::event).toList());
 		return m;
 	}

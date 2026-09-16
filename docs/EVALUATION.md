@@ -372,8 +372,8 @@ recall(query: "where does Bosse live")
 ```
 
 Expect: both of Bosse's open facts (`lives_in`, `parent_of`) are closed by
-the `died` event: `ended: true`, end `2014`, `status` still `current`
-(closed, not replaced) and state `ended`. A plain recall is a MISS, nothing
+the `died` event: `ended: true`, end `2014`, standing `ended` (closed, not
+replaced or corrected). A plain recall is a MISS, nothing
 being current; with `include_history: true` the fact is returned marked
 ended.
 
@@ -2149,8 +2149,87 @@ about; the entity's own name and the owner's configured identity never
 drop; `name` renames and re-renders every fact that mentions the entity;
 `type` retypes.
 
-A fact's `status` is its standing in the record (current, superseded,
-corrected, pending, rejected) and `state` where it stands in time (future,
-current, ended): a fact whose dates have passed keeps status current, and
-a replacement that inherits a closed interval is current in the record and
-ended in time. Both are shown, and they answer different questions.
+### T9. A present-tense miss names the ended facts, and a fact has one standing
+
+```text
+remember(text: "Anna worked at Initrode from 2019 to 2022.", proposal: { facts: [ works_at(Anna, Initrode) 2019 – 2022 ] })
+recall(query: "where does Anna work")
+```
+
+Expect: the verdict is MISS, worded "no current value; 1 ended fact:
+Anna Lindqvist works at Initrode (2019 – 2022) [f-1]; pass include_history
+to have them returned", never "no such fact is known" while an ended fact
+of that subject and predicate exists; with `include_history` the ended
+facts are the match, and `as_of` a date inside the interval matches the
+one then current. In every reply a fact carries one `standing`: current,
+ended, or future by its dates while the record holds it, else superseded,
+corrected, pending, or rejected; the old pair `status` and `state`, which
+disagreed on any fact whose dates had passed, is gone from the surface.
+
+### T10. A closure completes a registered class
+
+```text
+remember(text: "That is the only place I live.", proposal: { closures: [{ subject: self, predicate: lives_in, type: "exhaustive" }] })
+```
+
+Expect: the closure is skipped and the reply warns, naming the unknown
+type and listing the registered ones ("Closure skipped: closure over
+unknown entity type 'exhaustive': a closure completes a class of things,
+one of [country, organization, person, place, ...]; define a new type
+under 'entity_types' first"); nothing is stored for it, as for a fact over
+an unknown predicate. A synonym of a registered type (`nation`) completes
+that type (`among countries`).
+
+### T11. A restriction reads grammatically
+
+```text
+remember(text: "I only live in Switzerland.", proposal: { facts: [{ subject: self, predicate: lives_in, object: e1, only: true }] })
+```
+
+Expect: "Mattias Sandell lives only within Switzerland", never "lives in
+only within": a template whose own preposition leads to the object gives it
+up to the restriction's. `owns` keeps "owns only within Switzerland"; in
+German "wohnt nur innerhalb von Schweiz".
+
+### T12. A miss does not blame the other entity's events on the subject
+
+```text
+remember(text: "Anna joined Initrode in 2024.", proposal: { events: [ joined(Anna, Initrode) 2024 ] })
+recall(query: "does Mattias work at Initrode")
+```
+
+Expect: MISS; Initrode's event is still listed as context, but the verdict
+says "the 1 event on the next line involves what else the question names,
+not Mattias Sandell", not "1 event about Mattias Sandell may explain why".
+Once an event the subject took part in exists ("I left Initrode in 2020"),
+the verdict counts that one: "1 event about Mattias Sandell on the next
+line may explain why".
+
+### T13. Letters alone do not raise a question across types
+
+```text
+remember(text: "Sandvik is a customer.", proposal: { entities: [ Sandvik (organization) ] })
+remember(text: "I know Sandvol.", proposal: { facts: [ knows(self, "Sandvol") ] })
+```
+
+Expect: no entity-resolution question; "Sandvol" is created. It shares no
+name part with "Sandvik" and gave no type, and a trigram score of 0.45
+across types (or with none) is not enough to ask: letters alone must
+agree to 0.60 there. The same letters with the same type still ask
+("Sandvig", organization), and a shared name part asks whatever the type
+("Anna" against Anna Lindqvist).
+
+### T14. Consolidate lists vocabulary nothing uses whose definition was forgotten
+
+```text
+remember(text: "I built a robot called Coff-E.", proposal: { entity_types: [ robot ], event_types: [ built ], entities: [ Coff-E (robot) ], events: [ built(self, Coff-E) 2025 ] })
+forget(id: "obs-1")
+consolidate(dry_run: true)
+```
+
+Expect: `unused_vocabulary` lists `event_type: built` and
+`entity_type: robot`, each with `defined_by: "obs-1 (forgotten)"` and
+`uses: 0`; while the observation stood they were not listed. A real run
+unanchors the definitions and still lists them (`defined_by: null`).
+Seeded and inferred vocabulary never appears here (inferred terms have
+their own list); nothing is removed on its own.

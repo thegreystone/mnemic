@@ -217,12 +217,12 @@ class MnemicToolsTest {
 				Optional.of("it was a leaning, never a decision"));
 		assertFalse(r.isError(), text(r));
 		assertEquals(true, result(r).get("retracted"));
-		assertEquals("corrected", ((Map<?, ?>) result(r).get("original")).get("status"));
+		assertEquals("corrected", ((Map<?, ?>) result(r).get("original")).get("standing"));
 		// Once withdrawn, it cannot be withdrawn or corrected again; inspect shows the reason.
 		assertTrue(tools.correct(factId, Map.of("wrong", true), NONE).isError());
 		ToolResponse f = tools.inspect(factId, Optional.empty(), NONE);
 		assertFalse(f.isError(), text(f));
-		assertEquals("corrected", result(f).get("status"));
+		assertEquals("corrected", result(f).get("standing"));
 		assertTrue(text(f).contains("it was a leaning, never a decision"), text(f));
 	}
 
@@ -247,6 +247,53 @@ class MnemicToolsTest {
 		assertFalse(f.isError(), text(f));
 		assertEquals("works_at", result(f).get("predicate"));
 		assertEquals("Hooli", ((Map<?, ?>) result(f).get("object")).get("name"));
+	}
+
+	@Test
+	void correctTakesAnEntityThroughTheTool() {
+		ToolResponse stored = remember("I live in Kanton Luzern.",
+				Map.of("entities", List.of(Map.of("ref", "e1", "name", "Kanton Luzern", "type", "place")), "facts",
+						List.of(Map.of("subject", "self", "predicate", "lives_in", "object", "e1"))),
+				"tools-entity-1");
+		assertFalse(stored.isError(), text(stored));
+		@SuppressWarnings("unchecked")
+		String ent = (String) ((List<Map<String, Object>>) ((Map<?, ?>) result(stored).get("stored")).get("entities"))
+				.getFirst().get("id");
+		assertTrue(ent.startsWith("ent-"), ent);
+		ToolResponse c = tools.correct(ent, Map.of("aliases", List.of("Kanton Luzern", "LU")),
+				Optional.of("the canton"));
+		assertFalse(c.isError(), text(c));
+		assertEquals(ent, result(c).get("entity"));
+		assertTrue(((Map<?, ?>) result(c).get("after")).get("aliases").toString().contains("LU"), text(c));
+		assertTrue(text(tools.inspect(ent, Optional.empty(), NONE)).contains("LU"));
+		ToolResponse bad = tools.correct(ent, Map.of("remove_aliases", List.of("x")), NONE);
+		assertTrue(bad.isError());
+		assertTrue(error(bad).get("message").toString().contains("aliases"), text(bad));
+	}
+
+	@Test
+	void aFactHasOneStandingByItsDatesOrItsRecord() {
+		ToolResponse stored = remember("I worked at Initrode from 2019 to 2022.",
+				Map.of("entities", List.of(Map.of("ref", "e1", "name", "Initrode", "type", "organization")), "facts",
+						List.of(Map.of("subject", "self", "predicate", "works_at", "object", "e1", "valid_time",
+								Map.of("start", "2019", "end", "2022")))),
+				"tools-standing-1");
+		assertFalse(stored.isError(), text(stored));
+		String id = firstFactId(stored);
+		assertEquals("ended",
+				((Map<?, ?>) ((List<?>) ((Map<?, ?>) result(stored).get("stored")).get("facts")).getFirst())
+						.get("standing"),
+				"a past interval: ended, not current");
+		ToolResponse f = tools.inspect(id, Optional.empty(), NONE);
+		assertEquals("ended", result(f).get("standing"));
+		assertFalse(result(f).containsKey("status") || result(f).containsKey("state"), "one field, not two");
+		// A present-tense question misses, but names the ended fact rather than claiming ignorance.
+		String recalled = text(tools.recall(Optional.of("where does Mattias work"), NONE, Optional.of(400),
+				Optional.empty(), Optional.empty()));
+		assertTrue(recalled.contains(
+				"no current value; 1 ended fact: Mattias Sandell works at Initrode (2019 \u2013 2022) [" + id + "]"),
+				recalled);
+		assertTrue(recalled.contains("include_history"), recalled);
 	}
 
 	@Test

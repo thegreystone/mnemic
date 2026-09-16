@@ -105,9 +105,9 @@ final class ToolDescriptions {
 			+ "for questions about a point in time. Omit 'query' at the start of a session for a briefing: the owner's "
 			+ "best-known facts, recently touched entities, and open questions.";
 
-	static final String INSPECT = "Everything the store knows about one thing, by its id or name. A fact's 'status' is its "
-			+ "standing in the record (current, superseded, corrected, pending, rejected) and 'state' where it stands in time "
-			+ "(future, current, ended): a fact that ended by its dates keeps status current. An entity (ent-12, a name, "
+	static final String INSPECT = "Everything the store knows about one thing, by its id or name. A fact's 'standing' is "
+			+ "one word: current, ended, or future by its dates while the record holds it, else superseded, corrected, "
+			+ "pending, or rejected. An entity (ent-12, a name, "
 			+ "or an alias): its aliases, its facts (current first) with status and provenance, and the events it took "
 			+ "part in; with history: true, every fact that ever touched it in order, what replaced each and why, and "
 			+ "tombstones for forgotten observations, optionally filtered by 'predicate'. A fact (f-12): its columns, the "
@@ -152,6 +152,7 @@ final class ToolDescriptions {
 			+ "(inferred_vocabulary: settle them with the user through correct), predicates close in meaning to another "
 			+ "(similar_vocabulary: merge_into through correct when they are one relation), events whose type is a sentence "
 			+ "(descriptive_events: re-read the observation with remember(observation_id, proposal) and a proper type), "
+			+ "vocabulary nothing uses whose defining observation was forgotten (unused_vocabulary), "
 			+ "and 'review': plans whose date has "
 			+ "passed with no word since ('due': true; restate to confirm, correct to postpone or end), then the open "
 			+ "facts longest without confirmation on predicates that change (jobs, homes, ownership), oldest first, for "

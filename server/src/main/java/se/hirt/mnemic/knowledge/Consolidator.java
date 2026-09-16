@@ -47,8 +47,8 @@ public final class Consolidator {
 	/** What consolidation did or would do. */
 	public record Outcome(List<Map<String, Object>> merges, int reclosed, List<Map<String, Object>> inferredVocabulary,
 			List<Map<String, Object>> similarVocabulary, List<Map<String, Object>> descriptiveEvents,
-			List<Map<String, Object>> resolvedQuestions, List<Map<String, Object>> review,
-			List<Map<String, Object>> duplicates, int removedEntities) {
+			List<Map<String, Object>> unusedVocabulary, List<Map<String, Object>> resolvedQuestions,
+			List<Map<String, Object>> review, List<Map<String, Object>> duplicates, int removedEntities) {
 	}
 
 	private final Database db;
@@ -89,7 +89,7 @@ public final class Consolidator {
 			forgetDefinedBy();
 		}
 		return new Outcome(merges, reclosed, inferredVocabulary(), predicates.closePairs(), descriptiveEvents(),
-				resolved, facts.review(5), duplicates, removed);
+				unusedVocabulary(), resolved, facts.review(5), duplicates, removed);
 	}
 
 	/**
@@ -112,6 +112,52 @@ public final class Consolidator {
 			}
 		}
 		return out;
+	}
+
+	/**
+	 * Vocabulary nothing rests on whose definition is gone: not seeded, not inferred, defined by an observation since
+	 * forgotten (or anchored to none), and used by no fact, event, entity, or child type. Listed for the caller to
+	 * settle; nothing removes it on its own.
+	 */
+	private List<Map<String, Object>> unusedVocabulary() {
+		var out = new ArrayList<Map<String, Object>>();
+		for (var p : predicates.all()) {
+			if (!p.seed() && !p.isInferred() && orphanDefinition(p.definedBy())
+					&& count("SELECT COUNT(*) FROM fact WHERE predicate = ?", p.name()) == 0) {
+				out.add(unused("predicate", p.name(), p.definedBy()));
+			}
+		}
+		for (var t : eventTypes.all()) {
+			if (!t.seed() && !t.inferred() && orphanDefinition(t.definedBy())
+					&& count("SELECT COUNT(*) FROM event WHERE type = ?", t.name()) == 0) {
+				out.add(unused("event_type", t.name(), t.definedBy()));
+			}
+		}
+		for (var t : entityTypes.all()) {
+			if (!t.seed() && !t.inferred() && orphanDefinition(t.definedBy())
+					&& count("SELECT COUNT(*) FROM entity WHERE type = ? AND merged_into IS NULL", t.name()) == 0
+					&& entityTypes.all().stream().noneMatch(x -> t.name().equals(x.parent()))) {
+				out.add(unused("entity_type", t.name(), t.definedBy()));
+			}
+		}
+		return out;
+	}
+
+	private boolean orphanDefinition(Long definedBy) {
+		return definedBy == null
+				|| count("SELECT COUNT(*) FROM observation WHERE id = ? AND forgotten_at IS NOT NULL", definedBy) > 0;
+	}
+
+	private long count(String sql, Object arg) {
+		return db.read(tx -> tx.queryLong(sql, arg));
+	}
+
+	private static Map<String, Object> unused(String kind, String name, Long definedBy) {
+		var m = new LinkedHashMap<String, Object>();
+		m.put(kind, name);
+		m.put("defined_by", definedBy == null ? null : "obs-" + definedBy + " (forgotten)");
+		m.put("uses", 0);
+		return m;
 	}
 
 	/** Vocabulary defined by an observation since forgotten stays, but no longer points at a tombstone. */

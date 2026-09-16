@@ -59,11 +59,11 @@ public record RecallResult(String query, Instant asOf, Structured structured, Li
 	 */
 	public record Structured(String state, String entity, String entityName, String predicate, String qualifier,
 			List<Fact> facts, List<Fact> nearMisses, List<Fact> chain, List<Fact> bounds, Fact decidedBy, String basis,
-			List<String> notes, List<Fact> future) {
+			List<String> notes, List<Fact> future, List<Fact> ended) {
 		public Structured(String state, String entity, String entityName, String predicate, String qualifier,
 				List<Fact> facts, List<Fact> nearMisses, List<Fact> chain) {
 			this(state, entity, entityName, predicate, qualifier, facts, nearMisses, chain, List.of(), null, null,
-					List.of(), List.of());
+					List.of(), List.of(), List.of());
 		}
 
 		public boolean matched() {
@@ -76,7 +76,7 @@ public record RecallResult(String query, Instant asOf, Structured structured, Li
 
 		public Structured withState(String newState) {
 			return new Structured(newState, entity, entityName, predicate, qualifier, facts, nearMisses, chain, bounds,
-					decidedBy, basis, notes, future);
+					decidedBy, basis, notes, future, ended);
 		}
 	}
 

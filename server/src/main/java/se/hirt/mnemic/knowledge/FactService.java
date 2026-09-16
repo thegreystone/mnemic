@@ -945,6 +945,12 @@ public final class FactService {
 			return Optional.empty();
 		}
 		String type = types.canonical(c.type());
+		if (types.get(type).isEmpty()) {
+			throw MnemicException.invalidArgument("closure over unknown entity type '" + c.type()
+					+ "': a closure completes a class of things, one of "
+					+ types.all().stream().map(t -> t.name()).sorted().toList()
+					+ "; define a new type under 'entity_types' first.");
+		}
 		String rendering = renderer.sentence(pred, "closure", subject.name(), type, null, null);
 		String kind = derivationKind(
 				new FactRef(c.subject(), c.predicate(), type, null, null, null, null, List.of(), null, null), a.obs,

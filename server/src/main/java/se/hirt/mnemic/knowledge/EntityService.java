@@ -64,6 +64,8 @@ public final class EntityService {
 	public static final Set<String> SELF = Set.of("self", "i", "me", "my", "myself", "mine", "the user", "user");
 	static final double MERGE = 0.85;
 	static final double AMBIGUOUS = 0.40;
+	/** Across types, or with none given, a match on letters alone (no shared name part) must be this close to ask. */
+	static final double LETTERS_ACROSS_TYPES = 0.60;
 	private static final int MAX_NGRAM = 4;
 
 	private final Database db;
@@ -298,6 +300,11 @@ public final class EntityService {
 				}
 				double gramScore = an.length() >= 4 ? jaccard(grams, trigrams(an)) : 0;
 				double score = Math.max(tokenScore, gramScore);
+				// "coffee" against a project "Coff-E": no name part shared and not the same kind of thing. Letters
+				// alone raise a question across types only when the spellings nearly agree.
+				if (tokenScore == 0 && !type.equals(e.type()) && gramScore < LETTERS_ACROSS_TYPES) {
+					score = 0;
+				}
 				// One name says more than the other: a version ("Raspberry Pi 5" against "Raspberry Pi"), or a place
 				// word that names another level ("Luzern" against "Kanton Luzern"). Asked, never merged.
 				boolean oneSaysMore = (!tokens.equals(at) && (tokens.containsAll(at) || at.containsAll(tokens)))

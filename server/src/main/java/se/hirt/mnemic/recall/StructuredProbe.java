@@ -203,12 +203,28 @@ final class StructuredProbe {
 				notes.add("the question names " + String.join(", ", q.named()) + ", which none of the facts mention");
 			}
 		}
+		// A present-tense miss beside facts that ended: named, so the reader does not take "no current value" for
+		// "nothing known".
+		var ended = new ArrayList<Fact>();
+		if (matched.isEmpty() && decidedBy == null && !includeHistory && asOf == null) {
+			for (Entity e : q.spotted()) {
+				String direction = direction(cue, e, q.text());
+				for (Fact f : facts.probe(e.id(), cue.predicate().name(), null, now, true)) {
+					if (!"ended".equals(f.state(now)) || "pending".equals(f.status())
+							|| ("subject".equals(direction) && f.subjectId() != e.id())
+							|| ("object".equals(direction) && (f.objectId() == null || f.objectId() != e.id()))) {
+						continue;
+					}
+					ended.add(f);
+				}
+			}
+		}
 		String state = decidedBy != null ? "known_false"
 				: matched.isEmpty() ? (future.isEmpty() ? "miss" : "future") : "matched";
 		List<Fact> chain = matched.isEmpty() ? List.of() : chain(matched, asOf, now);
 		return new Structured(state, entity.ref(), entity.name(), cue.predicate().name(), cue.qualifier(),
 				List.copyOf(matched), List.copyOf(near), chain, List.copyOf(bounds), decidedBy, basis,
-				List.copyOf(notes), List.copyOf(future));
+				List.copyOf(notes), List.copyOf(future), List.copyOf(ended));
 	}
 
 	/** An entity without a predicate cue ("who is Bosse"): its facts are the channel. */

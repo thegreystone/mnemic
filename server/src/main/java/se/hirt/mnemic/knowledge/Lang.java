@@ -122,8 +122,9 @@ public enum Lang {
 		}
 		return switch (type) {
 		case "person" -> "people";
-		case "technology" -> "technologies";
-		default -> type.endsWith("s") ? type : type + "s";
+		default -> type.endsWith("s") ? type
+				: type.endsWith("y") && !type.matches(".*[aeiou]y") ? type.substring(0, type.length() - 1) + "ies"
+						: type.endsWith("ch") || type.endsWith("sh") || type.endsWith("x") ? type + "es" : type + "s";
 		};
 	}
 

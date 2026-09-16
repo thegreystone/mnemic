@@ -173,9 +173,10 @@ public final class Engine implements AutoCloseable {
 	public record Consolidation(long pendingProposals, List<Map<String, Object>> backlog,
 			List<Map<String, Object>> openQuestions, List<Map<String, Object>> inferredVocabulary,
 			List<Map<String, Object>> similarVocabulary, List<Map<String, Object>> descriptiveEvents,
-			List<Map<String, Object>> merges, int reclosed, List<Map<String, Object>> proposed,
-			List<Map<String, Object>> resolvedQuestions, List<Map<String, Object>> review, List<String> retired,
-			int embedded, List<Map<String, Object>> duplicates, Rebuilt rebuilt, int removedEntities) {
+			List<Map<String, Object>> unusedVocabulary, List<Map<String, Object>> merges, int reclosed,
+			List<Map<String, Object>> proposed, List<Map<String, Object>> resolvedQuestions,
+			List<Map<String, Object>> review, List<String> retired, int embedded, List<Map<String, Object>> duplicates,
+			Rebuilt rebuilt, int removedEntities) {
 	}
 
 	/** The vector scheme: 2 since a fact about the owner carries a first-person vector too ({@link OwnerAlias}). */
@@ -668,8 +669,8 @@ public final class Engine implements AutoCloseable {
 		}).toList();
 		List<Map<String, Object>> open = knowledge.questions().open(20).stream().map(q -> q.toMap()).toList();
 		return new Consolidation(observations.pendingProposals(), backlog, open, c.inferredVocabulary(),
-				c.similarVocabulary(), c.descriptiveEvents(), c.merges(), c.reclosed(), proposed, c.resolvedQuestions(),
-				c.review(), retired, embedded, c.duplicates(), rebuilt, c.removedEntities());
+				c.similarVocabulary(), c.descriptiveEvents(), c.unusedVocabulary(), c.merges(), c.reclosed(), proposed,
+				c.resolvedQuestions(), c.review(), retired, embedded, c.duplicates(), rebuilt, c.removedEntities());
 	}
 
 	private List<Map<String, Object>> proposeBacklog() {

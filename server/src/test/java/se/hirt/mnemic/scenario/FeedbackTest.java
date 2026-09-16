@@ -28,6 +28,9 @@
  */
 package se.hirt.mnemic.scenario;
 
+import se.hirt.mnemic.proposal.Proposal.FactRef;
+import se.hirt.mnemic.proposal.Proposal.EntityTypeDef;
+import se.hirt.mnemic.knowledge.Lang;
 import org.junit.jupiter.api.Test;
 import se.hirt.mnemic.Engine;
 import se.hirt.mnemic.Engine.RememberOutcome;
@@ -64,6 +67,11 @@ class FeedbackTest {
 
 	private static String questionId(RememberOutcome o) {
 		return (String) o.applied().questions().getFirst().get("id");
+	}
+
+	/** A fact with {@code only: true}: an exclusive restriction. */
+	private static FactRef only(String subject, String predicate, String object) {
+		return new FactRef(subject, predicate, object, null, null, null, null, List.of(), null, null, null, true);
 	}
 
 	private static List<String> current(Engine e) {
@@ -243,6 +251,148 @@ class FeedbackTest {
 			e.correctEntity(e.entities().owner().id(), Map.of("aliases", List.of()), "none");
 			assertTrue(e.entities().aliases(e.entities().owner().id()).contains("Mattias"));
 			assertTrue(e.entities().aliases(e.entities().owner().id()).contains("mattias@example.com"));
+		}
+	}
+
+	@Test
+	@Scenario("T9")
+	void aPresentTenseMissNamesTheEndedFacts() {
+		try (Engine e = TestHomes.engine("t9-ended-miss")) {
+			remember(e, "Anna worked at Initrode from 2019 to 2022, and at Hooli before that.",
+					proposal().entity("e1", "Anna Lindqvist", "person").entity("e2", "Initrode", "organization")
+							.entity("e3", "Hooli", "organization")
+							.fact(fact("e1", "works_at", "e2", null, null, "2019", "2022", null, null, null))
+							.fact(fact("e1", "works_at", "e3", null, null, "2015", "2019", null, null, null)));
+			RecallResult r = recall(e, "where does Anna work");
+			assertEquals("miss", r.structured().state(), r.text());
+			assertEquals(2, r.structured().ended().size(), "both ended jobs are named");
+			assertTrue(r.text().contains("no current value; 2 ended facts:"), r.text());
+			assertTrue(r.text().contains("Initrode") && r.text().contains("Hooli"), r.text());
+			assertFalse(r.text().contains("no such fact is known"), r.text());
+			// With history asked for, they are the answer; as of a date, the one then current is.
+			RecallResult h = e.recall().recall("where does Anna work", null, 800, 10, true);
+			assertEquals("matched", h.structured().state(), h.text());
+			assertEquals(2, h.structured().facts().size());
+			RecallResult then = recall(e, "where does Anna work", java.time.Instant.parse("2020-06-01T00:00:00Z"));
+			assertEquals("matched", then.structured().state());
+			assertEquals("Anna Lindqvist works at Initrode (2019 \u2013 2022)",
+					then.structured().facts().getFirst().rendering());
+			// A predicate with nothing at all says so as before.
+			RecallResult none = recall(e, "where does Anna live");
+			assertTrue(none.text().contains("no such fact is known"), none.text());
+		}
+	}
+
+	@Test
+	@Scenario("T10")
+	void aClosureOverAnUnknownTypeIsSkippedWithTheKnownTypesNamed() {
+		try (Engine e = TestHomes.engine("t10-closure-type")) {
+			remember(e, "I live in Schübelbach.",
+					proposal().entity("e1", "Schübelbach", "place").fact("self", "lives_in", "e1"));
+			RememberOutcome bad = remember(e, "That is the only place I live.",
+					proposal().closure("self", "lives_in", "exhaustive"));
+			assertTrue(bad.applied().facts().isEmpty(), "nothing stored: " + bad.applied().facts());
+			String warning = bad.applied().warnings().getFirst();
+			assertTrue(warning.contains("Closure skipped: closure over unknown entity type 'exhaustive'"), warning);
+			assertTrue(warning.contains("place") && warning.contains("organization"),
+					"the known types are listed: " + warning);
+			assertEquals(1, e.facts().factsOf(e.entities().owner().id()).size());
+			// A synonym of a registered type completes that type.
+			RememberOutcome ok = remember(e, "That is the only nation I live in.",
+					proposal().closure("self", "lives_in", "nation"));
+			assertTrue(ok.applied().facts().getFirst().rendering().contains("among countries"),
+					ok.applied().facts().getFirst().rendering());
+		}
+	}
+
+	@Test
+	@Scenario("T11")
+	void aRestrictionReadsGrammatically() {
+		try (Engine e = TestHomes.engine("t11-only")) {
+			RememberOutcome lives = remember(e, "I only live in Switzerland.",
+					proposal().entity("e1", "Switzerland", "country").fact(only("self", "lives_in", "e1")));
+			assertFalse(lives.applied().facts().isEmpty(), "applied: " + lives.applied());
+			assertEquals("Mattias Sandell lives only within Switzerland",
+					lives.applied().facts().getFirst().rendering());
+			RememberOutcome owns = remember(e, "I only own property in Switzerland.",
+					proposal().entity("e1", "Switzerland", "country").fact(only("self", "owns", "e1")));
+			assertEquals("Mattias Sandell owns only within Switzerland", owns.applied().facts().getFirst().rendering());
+		}
+		try (Engine e = TestHomes.engine(TestHomes.fresh("t11-only-de"), Lang.DE)) {
+			RememberOutcome lives = remember(e, "Ich wohne nur in der Schweiz.",
+					proposal().entity("e1", "Schweiz", "country").fact(only("self", "lives_in", "e1")));
+			assertEquals("Mattias Sandell wohnt nur innerhalb von Schweiz",
+					lives.applied().facts().getFirst().rendering());
+		}
+	}
+
+	@Test
+	@Scenario("T12")
+	void aMissDoesNotBlameTheOtherEntitysEvents() {
+		try (Engine e = TestHomes.engine("t12-miss-events")) {
+			remember(e, "Anna joined Initrode in 2024.", proposal().entity("e1", "Anna Lindqvist", "person")
+					.entity("e2", "Initrode", "organization").event("ev1", "joined", "2024", "e1", "e2"));
+			RecallResult r = recall(e, "does Mattias work at Initrode");
+			assertEquals("miss", r.structured().state(), r.text());
+			assertEquals(1, r.events().size(), "Initrode's event is still shown, as context");
+			assertFalse(r.text().contains("about Mattias Sandell on the next line may explain why"), r.text());
+			assertTrue(r.text().contains("involves what else the question names, not Mattias Sandell"), r.text());
+			// An event the subject took part in may explain the miss, and is said to.
+			remember(e, "I left Initrode in 2020.",
+					proposal().entity("e1", "Initrode", "organization").event("ev1", "left", "2020", "self", "e1"));
+			RecallResult again = recall(e, "does Mattias work at Initrode");
+			assertTrue(again.text().contains("1 event about Mattias Sandell on the next line may explain why"),
+					again.text());
+		}
+	}
+
+	@Test
+	@Scenario("T13")
+	void lettersAloneDoNotRaiseAQuestionAcrossTypes() {
+		try (Engine e = TestHomes.engine("t13-fuzzy-types")) {
+			remember(e, "Sandvik is a customer.",
+					proposal().entity("e1", "Sandvik", "organization").fact("self", "knows", "e1"));
+			// No type given and no name part shared: "Sandvol" is new, not a question about Sandvik.
+			RememberOutcome untyped = remember(e, "I know Sandvol.", proposal().fact("self", "knows", "Sandvol"));
+			assertTrue(untyped.applied().questions().stream().noneMatch(q -> "entity_resolution".equals(q.get("kind"))),
+					untyped.applied().questions().toString());
+			assertTrue(e.entities().byRef("Sandvol").isPresent());
+			// The same letters with the same type still ask, as before.
+			RememberOutcome typed = remember(e, "Sandvig is a supplier.",
+					proposal().entity("e1", "Sandvig", "organization").fact("self", "knows", "e1"));
+			assertEquals("entity_resolution", typed.applied().questions().getFirst().get("kind"),
+					typed.applied().questions().toString());
+			// A shared name part asks whatever the type: "Anna" against Anna Lindqvist.
+			remember(e, "Anna Lindqvist is a friend.",
+					proposal().entity("e1", "Anna Lindqvist", "person").fact("self", "knows", "e1"));
+			RememberOutcome anna = remember(e, "I know Anna.", proposal().fact("self", "knows", "Anna"));
+			assertEquals("entity_resolution", anna.applied().questions().getFirst().get("kind"),
+					anna.applied().questions().toString());
+		}
+	}
+
+	@Test
+	@Scenario("T14")
+	void consolidateListsVocabularyNothingUsesWhoseDefinitionWasForgotten() {
+		try (Engine e = TestHomes.engine("t14-unused-vocabulary")) {
+			RememberOutcome def = remember(e, "I built a robot called Coff-E.",
+					proposal()
+							.entityType(new EntityTypeDef("robot", "A machine that acts on its own.", "thing",
+									List.of(), List.of()))
+							.eventType(new EventTypeDef("built", "Someone finished making something.", List.of(),
+									List.of(), List.of(), null, List.of("built", "made"), null))
+							.entity("e1", "Coff-E", "robot").event("ev1", "built", "2025", "self", "e1"));
+			assertTrue(e.consolidate(true).unusedVocabulary().isEmpty(), "in use: not listed");
+			e.forget(def.observation().observationId());
+			List<Map<String, Object>> dry = e.consolidate(true).unusedVocabulary();
+			assertEquals(List.of("built", "robot"), dry.stream()
+					.map(m -> (String) (m.containsKey("event_type") ? m.get("event_type") : m.get("entity_type")))
+					.sorted().toList(), dry.toString());
+			assertEquals("obs-" + def.observation().observationId() + " (forgotten)", dry.getFirst().get("defined_by"));
+			assertEquals(0, dry.getFirst().get("uses"));
+			List<Map<String, Object>> wet = e.consolidate(false).unusedVocabulary();
+			assertEquals(2, wet.size(), "still listed once the definition is unanchored: " + wet);
+			assertTrue(wet.stream().noneMatch(m -> m.containsKey("predicate")), "seeded vocabulary never: " + wet);
 		}
 	}
 

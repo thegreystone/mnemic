@@ -524,9 +524,9 @@ staleness is a separate annotation driven by the predicate's volatility.
     "entities": [ { "ref": "e2", "id": "ent-41", "name": "Hooli", "resolution": "alias", "score": 1.0 } ],
     "events":   [ { "ref": "ev1", "id": "evt-302", "type": "joined" } ],
     "facts": [
-      { "id": "f-1190", "predicate": "works_at", "status": "current", "corroborated": false,
+      { "id": "f-1190", "predicate": "works_at", "standing": "current", "corroborated": false,
         "rendering": "Mattias Sandell works at Hooli (since 2018)" },
-      { "id": "f-1191", "predicate": "holds_role", "status": "current", "corroborated": false,
+      { "id": "f-1191", "predicate": "holds_role", "standing": "current", "corroborated": false,
         "rendering": "Mattias Sandell holds the role Director of Engineering at Hooli (since 2018)" }
     ]
   },
@@ -544,7 +544,8 @@ staleness is a separate annotation driven by the predicate's volatility.
 `proposal_source` is `assistant`, `server:<model id>` (hybrid mode), or
 `none`. An entity's `resolution` is `owner`, `alias` (exact name or alias
 match), `fuzzy`, `merged`, `created`, or `bound` (already resolved earlier in
-the same call). A fact's `status` is `current` or `pending`; `corroborated`
+the same call). A fact's `standing` is `current`, `ended`, or `future` by its dates, else `pending` (or, later,
+`superseded`, `corrected`, `rejected`); `corroborated`
 means the fact was already on record and gained a corroboration. `predicates`
 lists what each proposed definition resolved to (`registered`, `similar`,
 `ambiguous`, `exact`, `alias`, or `inferred` for a name registered from use); `definitions` names every
@@ -560,8 +561,8 @@ and events the old reading produced and were taken back, and `reopened_facts`, t
 closed by them and are current again. Re-read when the reading was wrong; `correct` when the user says the world
 is otherwise. Fact and event ids are handles for a conversation; observation ids last. `resolve` alone, with neither
 `text` nor `observation_id`, answers questions without recording an observation. `correct` takes an entity too
-(`ent-12` with `name`, `type`, or `aliases`, the list to keep). A fact's `status` is its standing in the record and
-`state` its standing in time; a fact whose dates have passed keeps status `current`. A fact stated beside the event that
+(`ent-12` with `name`, `type`, or `aliases`, the list to keep). A fact is shown with one `standing`: current, ended, or future by its dates while the record holds it, else
+superseded, corrected, pending, or rejected. A present-tense recall that misses beside ended facts names them. A fact stated beside the event that
 opens it takes that event as its explanation even without `derived_from`. Ids are `obs-N`, `ent-N`, `evt-N`, `f-N`, `q-N`.
 
 **Questions.** `questions` carries every check the caller must settle, each as
@@ -607,8 +608,9 @@ excerpt each; `propose` gives them their reading), `open_questions`,
 `inferred_vocabulary` (terms registered from use and not yet described),
 `similar_vocabulary` (predicates registered from use that lie close in meaning
 to another), `descriptive_events` (events whose type is a sentence, with the
-observation to re-read), `removed_entities` (entities a forgotten observation created that nothing refers to any
-more), and
+observation to re-read), `unused_vocabulary` (predicates, event types, and entity types that nothing uses and whose
+defining observation was forgotten), `removed_entities` (entities a forgotten observation created that nothing refers
+to any more), and
 `review`: plans whose date has passed with no word since (`due: true`), then
 the open facts longest without confirmation on predicates that age, oldest
 first, skipping anything confirmed within two weeks or within a third of its

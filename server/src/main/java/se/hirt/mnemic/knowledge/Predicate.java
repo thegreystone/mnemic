@@ -194,10 +194,17 @@ public record Predicate(String name, String description, List<String> domain, Li
 		return null;
 	}
 
-	/** An exclusive restriction: "{subject} owns only within {object}". */
+	/**
+	 * An exclusive restriction: "{subject} owns only within {object}". A template whose own preposition leads to the
+	 * object gives it up to the restriction's: "lives in {object}" reads "lives only within Switzerland".
+	 */
 	public String renderOnly(Lang lang, String subject, String bound, String scope, String qualifier) {
-		return render(subject, lang.onlyWithin(bound), scope, qualifier);
+		String template = OBJECT_PREPOSITION.matcher(render).replaceFirst(" $1{object}");
+		return render(template, subject, lang.onlyWithin(bound), scope, qualifier);
 	}
+
+	private static final java.util.regex.Pattern OBJECT_PREPOSITION = java.util.regex.Pattern.compile(
+			"\\s+(?:in|at|to|of|for|with|on|from|by|into|within|bei|an|auf|für|mit|von|zu|aus|nach)\\s+(\\[\\[\\s*)?\\{object}");
 
 	/** A completeness marker: "what {subject} owns among places is completely recorded". */
 	public String renderClosure(Lang lang, String subject, String type) {
@@ -213,7 +220,11 @@ public record Predicate(String name, String description, List<String> domain, Li
 
 	/** Renders one fact; temporal suffixes are appended by the caller. */
 	public String render(String subject, String object, String scope, String qualifier) {
-		String out = render;
+		return render(render, subject, object, scope, qualifier);
+	}
+
+	private static String render(String template, String subject, String object, String scope, String qualifier) {
+		String out = template;
 		var sb = new StringBuilder();
 		int i = 0;
 		while (i < out.length()) {
