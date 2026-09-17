@@ -119,7 +119,7 @@ class DeploymentTest {
 		try (Engine e = engine(home)) {
 			assertEquals("I moved to Switzerland in 2014.", e.observations().get(id).orElseThrow().text());
 			assertEquals(1, recall(e, "Switzerland").hits().size());
-			assertEquals(23, e.database().schemaVersion());
+			assertEquals(28, e.database().schemaVersion());
 		}
 	}
 }

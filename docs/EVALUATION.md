@@ -122,14 +122,21 @@ remember(text: "Yes, the same Anna.",
 Expect: the held fact is applied against `ent-AnnaLindqvist` and is
 `current`; `Anna` becomes one of her aliases; question closed.
 
-### B3. Same name, different type, stays separate
+### B3. Same name, different type, is asked once
 
 ```text
-remember(text: "I'm reading Java Concurrency in Practice.")
-remember(text: "Java is the language Mnemic is written in.")
+remember(text: "Java is the language Mnemic is written in.", proposal: { entities: [ Java (technology) ] ... })
+remember(text: "Java the island is beautiful.", proposal: { entities: [ Java (place) ], facts: [ prefers(self, Java) ] })
 ```
 
-Expect: two entities: a book and a technology. No merge.
+Expect: an `entity_resolution` question with the technology as its first
+candidate at score 1.0 and `new` beside it: a caller cannot know what type
+a thing was first registered under, so an exact name of another kind is
+never a silent second entity and never a silent match. Answered `new`, two
+entities; typed, each later mention resolves to its own kind without a
+word. An untyped mention that fits both asks too, and the answer settles
+every later untyped mention (resolution `answered`): the question is asked
+once.
 
 ### B4. Type mismatch overrides string similarity
 
@@ -138,7 +145,9 @@ remember(text: "Viggo started school today.")
 remember(text: "We evaluated Viggo, a load-testing tool.")
 ```
 
-Expect: two entities (person, technology). No merge, no question.
+Expect: never merged on the strength of the letters: asked, with the
+person first; `new` makes the tool a second entity, and a third Viggo typed
+person is the person without a question.
 
 ### B5. First person resolves to the owner
 
@@ -519,8 +528,6 @@ the reinterpretation.
 
 ### E1. Independent sources raise confidence more than repetition
 
-Not yet implemented (2026-09-12); no test.
-
 ```text
 remember(text: "Anna leads the platform team.", source_kind: "user")
 remember(text: "Anna leads the platform team.", source_kind: "user")
@@ -540,7 +547,6 @@ Expect: one fact; confidence c₂ > c₁.
 
 ### E2. Low-reliability source yields low-confidence fact
 
-Not yet implemented (2026-09-12); no test. Neither a source reliability nor
 a `min_confidence` on `recall` exists today; the scenario needs both.
 
 ```text
@@ -877,11 +883,47 @@ observations behind the future-dated facts of the entities in the
 question (or the owner's) at the structured channel's weight; without the
 cue ("which vehicle did I build") the robot wins on its word, as before.
 
+### F19. The kind a question asks for narrows the answer, or the verdict says it cannot
+
+```text
+remember(text: "I own a Yamaha FZ6-S.", proposal: { entities: [ Yamaha FZ6-S (vehicle) ], facts: [ owns(self, Yamaha FZ6-S) ] })
+remember(text: "I own a Toyota Sienna.", proposal: { entities: [ Toyota Sienna (thing) ], facts: [ owns(self, Toyota Sienna) ] })
+remember(text: "I own the Sonnefeld apartment.", proposal: { entities: [ Sonnefeld apartment (place) ], facts: [ owns(self, Sonnefeld apartment) ] })
+recall(query: "what motorcycles does Mattias own")
+recall(query: "what vehicles does Mattias own")
+recall(query: "which things does Mattias own")
+```
+
+Expect: the words between "what" or "which" and the verb that are no
+entity, no word of the cue predicate's vocabulary, and no filler are the
+kind asked for. A kind on record (a type's name, synonym, or type word,
+singular or plural) narrows: "vehicles" matches the Yamaha and lists the
+other two as near-misses with a note; "things" matches the Toyota, and
+the Yamaha, whose kind `vehicle` nobody has placed, is a near-miss the
+note says "may be one". A kind the store never heard of ("motorcycles")
+neither narrows nor denies: the facts stay the answer and the verdict
+says the word names no kind on record and none of the facts is classified
+so, instead of passing the cars off as motorcycles. A question with no
+kind ("what does Mattias own"), a kind that is the predicate's own word
+("which company does Mattias work at"), and a predicate with a literal
+object are unchanged.
+
+### F20. A pending conflict is said in the verdict
+
+```text
+remember(text: "I work at Hooli.", ...)
+remember(text: "I work at Initrode.", ...)   → conflict question, the new fact pending
+recall(query: "where does Mattias work")
+```
+
+Expect: the verdict matches the current fact alone and carries a note
+"pending on works_at, a conflict awaiting an answer: … [f-N]", so a caller
+knows the answer is contested rather than settled.
+
 ## G. Consolidation
 
 ### G1. Spec version upgrade re-derives
 
-Not yet implemented (2026-09-12); no test. `spec_version` is accepted and
 stored on the observation and fact rows, but nothing re-derives on a bump
 and there is no `derived_under` field.
 
@@ -982,8 +1024,6 @@ the fact is the owner's; the owner entity's aliases include the handle.
 identities, never the author's real ones.
 
 ### H3. Binary directory is never touched
-
-Not yet implemented (2026-09-12); no test.
 
 Run any scenario with the binary directory read-only.
 Expect: no writes attempted outside the data home.
@@ -1225,15 +1265,16 @@ supplied through `correct` or a later definition.
 
 ## K. Derived predicates
 
-Not yet implemented (2026-09-12); none of K1–K10 has a test. The
-derivation fields these scenarios describe (`defined_as`, `derivation.rule`
-and `derivation.base`, `via`, `corroborated_by`, the `invalidated` status)
-do not exist in the current proposal schema, whose `derivation` has only a
-`kind` (`explicit`, `extracted`, `inferred`).
+A predicate may be defined by rules over other predicates (`defined_as`),
+and the facts the rules reach are materialised as facts of their own,
+`derivation: derived`, resting on the base facts they were walked over
+(`derived_by` in `inspect`), invalidated when a base fact changes, and
+rebuilt with the projection. A stated fact on a derived predicate stays
+stated and is `corroborated` when a chain reaches the same pair, or
+`unresolved` when none does. The seed kinship vocabulary (K11–K15) is
+built this way on `parent_of`, `spouse_of`, `partner_of`, and `sibling_of`.
 
 ### K1. Rule derives a fact and it is recallable
-
-Not yet implemented (2026-09-12); no test.
 
 ```text
 remember(text: "My father is Konrad.")
@@ -1248,8 +1289,6 @@ the two base facts.
 
 ### K2. Derived fact is invalidated when a base fact changes
 
-Not yet implemented (2026-09-12); no test.
-
 Continuing from K1:
 
 ```text
@@ -1262,8 +1301,6 @@ Expect: the Astrid-derived fact is gone (status `invalidated`, not
 Signe exists; `history` shows the invalidation linked to the correction.
 
 ### K3. Asserted derived relation with unknown side is stored unresolved
-
-Not yet implemented (2026-09-12); no test.
 
 ```text
 remember(text: "Signe is my grandmother.")
@@ -1281,8 +1318,6 @@ Expect: the asserted fact returned, marked `asserted`, `derivation: unresolved`.
 
 ### K4. Partial constraint is kept
 
-Not yet implemented (2026-09-12); no test.
-
 ```text
 remember(text: "Signe is my paternal grandmother.")
 ```
@@ -1290,8 +1325,6 @@ remember(text: "Signe is my paternal grandmother.")
 Expect: as K3 plus `via: parent_of[father]`.
 
 ### K5. Unification corroborates without replacing
-
-Not yet implemented (2026-09-12); no test.
 
 Continuing from K4:
 
@@ -1308,8 +1341,6 @@ provenance paths, not two facts.
 
 ### K6. Complete contradicting chain raises a conflict
 
-Not yet implemented (2026-09-12); no test.
-
 ```text
 remember(text: "My father is Konrad and my mother is Gunilla.")
 remember(text: "Konrad's mother is Astrid. Gunilla's mother is Anna.")
@@ -1323,8 +1354,6 @@ facts. The asserted fact is stored regardless.
 
 ### K7. Incomplete chain does not raise a conflict
 
-Not yet implemented (2026-09-12); no test.
-
 ```text
 remember(text: "My father is Konrad.")
 remember(text: "Signe is my grandmother.")
@@ -1335,8 +1364,6 @@ Expect: no question — the maternal side is unknown, so Signe may still fit.
 The asserted fact stays `unresolved`.
 
 ### K8. Rule with valid-time intersection
-
-Not yet implemented (2026-09-12); no test.
 
 ```text
 remember(text: "I worked at Initrode from 2010 to 2018.")
@@ -1350,19 +1377,16 @@ valid time, derived fact `colleague_of(Mattias, Anna)` valid `[2015, 2018)`,
 
 ### K9. Unbounded recursion is refused
 
-Not yet implemented (2026-09-12); no test.
-
 ```text
 remember(text: "…", proposal: { predicates: [ { name: "ancestor_of",
          defined_as: [ { path: ["parent_of+"] } ] } ] })
 ```
 
 Expect: predicate rejected with an error naming the unbounded repetition;
-`parent_of{1,4}` in its place is accepted. Observation stored regardless.
+`parent_of{1,4}` in its place is accepted. A proposal that defines nothing but
+the refused predicate is refused with it and leaves no observation (K34).
 
 ### K10. Rule type-check failure
-
-Not yet implemented (2026-09-12); no test.
 
 ```text
 remember(text: "…", proposal: { predicates: [ { name: "grand_employer_of",
@@ -1371,6 +1395,336 @@ remember(text: "…", proposal: { predicates: [ { name: "grand_employer_of",
 
 Expect: rejected — range of `works_at` is organization, domain of
 `parent_of` is person.
+
+### K11. Grandparents are derived with their side and gender
+
+```text
+remember(text: "My father is Konrad and my mother is Gunilla.", proposal: { facts: [ parent_of(Konrad, self, father), parent_of(Gunilla, self, mother) ] })
+remember(text: "Konrad's parents are Astrid and Nils. Gunilla's mother is Anna.", proposal: { facts: [ parent_of(Astrid, Konrad, mother), parent_of(Nils, Konrad, father), parent_of(Anna, Gunilla, mother) ] })
+recall(query: "who is Mattias's grandmother")
+```
+
+Expect: three derived `grandparent_of` facts: "Astrid is Mattias's paternal
+grandmother", "Nils is Mattias's paternal grandfather", "Anna is Mattias's
+maternal grandmother". The side comes from the middle person's role toward
+the grandchild, the gender from the role the grandparent holds elsewhere (a
+mother is female); with no role on record the qualifier is "paternal
+grandparent". The one-word question matches the composed qualifier: both
+grandmothers are returned. Nothing was stated beyond parents.
+
+### K12. Siblings are derived from a shared parent, and a stated sibling takes over
+
+```text
+remember(text: "Konrad and Gunilla are Oskar's parents.", proposal: { facts: [ parent_of(Konrad, Oskar, father), parent_of(Gunilla, Oskar, mother) ] })
+remember(text: "Oskar is my brother.", proposal: { facts: [ sibling_of(Oskar, self, brother) ] })
+```
+
+Expect: after the first observation a derived `sibling_of` between Mattias
+and Oskar ("Mattias Sandell is Oskar Nyberg's sibling": no role of Mattias's
+is on record, so no gender is read into it). After the second, the stated
+fact is the row: the derived one is invalidated and the stated one is
+`corroborated` by the two parent facts. A half-sibling stated over one
+shared parent is corroborated the same way; the store does not decide
+between full and half siblings from the parents it happens to know.
+
+### K13. Aunts, uncles, and cousins
+
+```text
+remember(text: "Britt is Konrad's sister. Her son is Linus.", proposal: { facts: [ sibling_of(Britt, Konrad, sister), parent_of(Britt, Linus, mother) ] })
+recall(query: "who is Mattias's aunt")
+recall(query: "who are Mattias's cousins")
+```
+
+Expect: "Britt is Mattias Sandell's aunt" (a sister is female) and "Linus is
+Mattias Sandell's cousin", stored once for the symmetric predicate. A
+sibling is never a cousin, and nobody is their own: the cousin rule walks
+child-of, sibling, parent and excludes pairs that are siblings. Both
+questions match.
+
+### K14. In-laws follow the marriage in time
+
+```text
+remember(text: "I married Marit in 2010.", proposal: { facts: [ spouse_of(Marit, self, wife) since 2010 ] })
+remember(text: "Marit's parents are Sven and Ingrid; her brother is Erik.", proposal: { facts: [ parent_of(Sven, Marit, father), parent_of(Ingrid, Marit, mother), sibling_of(Erik, Marit, brother) ] })
+remember(text: "Marit and I divorced in 2020.", proposal: { events: [ divorced(self, Marit) 2020 ] })
+```
+
+Expect: "Sven is Mattias Sandell's father-in-law (since 2010)", "Ingrid is
+Mattias Sandell's mother-in-law (since 2010)", "Erik is Mattias Sandell's
+sibling-in-law (since 2010)" (Erik's role is known only from a sibling
+qualifier, which never decides a gender, K25): the valid time is the
+intersection of the
+base facts, so the marriage's start is theirs. The divorce ends the
+marriage, and at the next derivation the in-law facts are rewritten to end
+in 2020 (standing `ended`), with no statement about them ever made.
+
+### K15. A step-parent is the spouse of a parent who is not a parent
+
+```text
+remember(text: "Konrad married Lena in 2015.", proposal: { facts: [ spouse_of(Lena, Konrad, wife) since 2015 ] })
+remember(text: "Lena is my stepmother.", proposal: { facts: [ step_parent_of(Lena, self, stepmother) ] })
+```
+
+Expect: "Lena is Mattias Sandell's stepmother (since 2015)" derived from
+the marriage and the parent fact, with `not: parent_of` keeping Gunilla,
+Konrad's other spouse and Mattias's mother, out of it. The stated
+step-parent fact is then corroborated by the same chain and stands as the
+row.
+
+### K16. Full and half siblings are told apart only when both sides are known
+
+```text
+remember(text: "Konrad and Gunilla are Oskar's parents.", ...)
+remember(text: "Gunilla and Sven are Tage's parents.", ...)
+remember(text: "Gunilla is Ville's mother.", ...)
+```
+
+Expect, with the owner's gender given as male: "Mattias is Oskar's brother"
+(two shared parents), "Mattias is Tage's half-brother" (one shared parent,
+two known on each side), "Mattias is Ville's sibling" (one shared parent,
+Ville's other unknown: the store does not decide). Once Ville's father is
+known and is not Konrad, "half-brother". The seed rules are three tiers:
+`min_paths: 2` for siblings, `max_paths: 1` with `min_degree: 2` for half
+siblings, and a plain fallback with no gendered word.
+
+### K17. A role reaches its own predicate before a free qualifier in use
+
+```text
+remember(text: "Lars was my stepfather.", proposal: { facts: [ related_to(self, Lars, "stepfather") ] })
+recall(query: "who is Mattias's stepfather")
+```
+
+Expect: the structured probe goes to `step_parent_of`, whose vocabulary
+names the role, not to `related_to` because a stored qualifier happens to
+match: at equal length a predicate's own term outranks a free qualifier in
+use. `consolidate` lists the stated fact under `misfiled_relations` with
+the predicate it belongs to and, since no derived fact covers it, the move
+to make: `correct(f-N, {predicate: "step_parent_of"})`.
+
+### K18. A stated relation a derivation covers is listed and retired
+
+```text
+remember(text: "Britt is Konrad's sister.", ...)
+remember(text: "Britt is my aunt.", proposal: { facts: [ related_to(self, Britt, "aunt") ] })
+consolidate(dry_run: true)
+correct(target: "f-N", replacement: { redundant: true }, reason: "the chain covers it")
+```
+
+Expect: `misfiled_relations` names the stated fact, `aunt_uncle_of`, and the
+derived fact that covers it, with the hint `{redundant: true}`. The
+retirement marks the stated fact `superseded` by the derived one, with
+"redundant: covered by derived f-M" on its history: it was true and still
+is, and the record now derives it. It is not withdrawn as never true. The
+retirement is a correction record and is replayed on rebuild.
+
+### K19. A derived fact cites every observation behind it
+
+Expect: a derived grandparent fact lists both observations, the one that
+gave the parent and the one that gave the grandparent, as its sources;
+forgetting either takes the derived fact away.
+
+### K20. A stated gender names the role
+
+```text
+remember(text: "Britt is Konrad's sibling.", proposal: { entities: [{ ref: e1, name: "Britt", type: person, gender: "female" }], facts: [ sibling_of(Britt, Konrad) ] })
+correct(target: "f-N", replacement: { object: "male" })
+```
+
+Expect: the `gender` shorthand on the entity entry is stored as a fact under
+the seed predicate `gender` ("Britt Nyberg is female"), with the
+observation as its provenance, exactly as `facts: [ gender(Britt, female) ]`
+would be. With no role of Britt's on record, it makes her Mattias's aunt;
+corrected to male, the derived fact reads uncle; withdrawn, "aunt or uncle".
+The rules read a stated gender ahead of what other facts imply. While
+none is stated and nothing implies it, `consolidate` lists the person under
+`attribute_unknown` (attribute `gender`) with how many derived relations
+rendered neutrally.
+
+### K21. A death does not end a lasting relation
+
+```text
+remember(text: "Lena died in 2020.", proposal: { events: [ died(Lena) 2020 ] })
+```
+
+Expect: Lena's marriage to Konrad ends with her, but "Lena is Mattias's
+stepmother (since 2015)" stays current: a relation whose predicate does not
+change with time (volatility low) outlives a base fact a death ended. A
+divorce ends it ("2016 – 2019"). A relation that does change with time
+(`coworker_of`, medium) ends when its base does, death or not.
+
+### K22. A fact moves to another predicate, and unknown keys are refused
+
+```text
+correct(target: "f-N", replacement: { predicate: "partner_of" }, reason: "its own predicate now")
+```
+
+Expect: a corrected copy under `partner_of` with the qualifier and interval
+carried over, the original marked corrected. An unknown key
+(`{relation: ...}`) is refused naming the correctable ones; an unknown
+predicate is refused by name. `misfiled_relations` offers this move for a
+`related_to[partner]` no derived fact covers.
+
+### K23. A seed rule a store carries in an older form is refreshed at start
+
+Expect: a seed predicate whose stored rules differ from the seed's takes the
+seed's at the next start, whatever the order the stored form was written
+in, unless the user changed them through `correct` (a `defined_as` entry
+on the predicate's change log), in which case theirs stay. A `rebuild`
+reports the questions the replay left open (`open_questions_before`,
+`open_questions_after`, `questions`).
+
+### K24. A correction that changes nothing is never recorded, and an old one replays as nothing
+
+```text
+correct(target: "f-N", replacement: { qualifier: "partner" })   -- the value on record
+```
+
+Expect: refused ("The correction changes nothing about f-N"), and no
+correction record is left in the log, so nothing waits to be replayed under
+later semantics; a correction naming an unknown predicate leaves none
+either. A record an older release kept for such a correction is recognised
+on rebuild by stating what stands and is reported under `no_op`, neither
+replayed nor counted unmatched, and produces no duplicate fact.
+
+### K25. A role on the wrong side of a sibling fact does not decide a gender
+
+```text
+remember(text: "David is Marit's brother.", proposal: { facts: [ sibling_of(David, Marit, "half-sister") ] })
+```
+
+Expect: the mislabelled role says nothing of David: he is Mattias's
+`sibling-in-law`, never `sister-in-law`. Gender is read from a stated
+`gender` fact, else from what the subject's other stated facts imply where
+their predicates declare it (`implies` on `parent_of`, `step_parent_of`,
+`spouse_of`, `partner_of`, and the gendered kinship terms); `sibling_of`
+declares nothing by the seed, and derived rows are never read, so a guess
+cannot spread. A stated parent role ("David is Lisa's father") then makes
+him a `brother-in-law`.
+
+### K26. A gender predicate registered from use is taken over by the seed
+
+Expect: a store where a caller stated a person's gender before the seed
+predicate existed, so that `gender` was registered from use with a bare
+definition ("{subject} gender {object}", domain and range `*`), has it
+taken over by the seed at the next start: the definition is the seed's, the
+facts stay and are re-rendered ("Britt Nyberg is male"), the rules read
+them from the first derivation, and nothing is left under
+`inferred_vocabulary`.
+
+### K27. A caller-defined attribute chooses the qualifier
+
+```text
+remember(proposal: { predicates: [ handedness (person → literal), trains_with (symmetric), sparring_partner_of { defined_as: [{ path: [trains_with], qualifier: "sparring partner", by: { attribute: "handedness", values: { left: "southpaw sparring partner", right: "orthodox sparring partner" } } }] } ] })
+remember(text: "Anna is left-handed and trains with Bo.", ...)
+```
+
+Expect: "Anna is Bo's southpaw sparring partner". The attribute is a
+predicate the caller registered in the same proposal; nothing in the engine
+knows it. Corrected to right, the derivation reads orthodox; withdrawn, the
+plain "sparring partner", and `attribute_unknown` lists Anna under
+`handedness`. `attributes: {handedness: right}` on an entity entry states
+the fact as the `gender` shorthand does.
+
+### K28. A predicate declares what its terms imply
+
+```text
+remember(proposal: { predicates: [ godparent_of { qualifiers: [godmother, godfather], implies: { godmother: { gender: female }, godfather: { gender: male } } } ] })
+remember(text: "Britt is Linus's godmother.", ...)
+```
+
+Expect: Britt, Konrad's sibling with no role stated, was Mattias's "aunt or
+uncle"; the godmother fact makes her his aunt through the implication the
+caller declared. `correct(pred:godparent_of, {implies: {}})` takes it away
+and the derivation follows; terms and values are lowercased; an `implies`
+naming an unregistered attribute predicate is refused, and a definition
+carrying one is skipped with the reason, the observation kept.
+
+### K29. A stated value outranks implications, and disagreement yields nothing
+
+Expect: a mother is female by implication; a second role that says husband
+makes the implications disagree, and the record reads nothing (neutral);
+a stated `gender` fact settles it whatever the roles say, and "woman" is
+read as female through the predicate's own `implies`. A stated value the
+rule does not name ("nonbinary") gives the plain qualifier and is not a gap:
+`attribute_unknown` lists only entities with no value at all. A rule
+choosing by an unregistered attribute is refused when defined.
+
+### K30. Sibling terms imply nothing until a store says so
+
+```text
+correct(target: "pred:sibling_of", replacement: { implies: { brother: { gender: male }, sister: { gender: female } } })
+```
+
+Expect: a stated "Oskar is my brother" leaves Oskar an "aunt or uncle" to
+Mattias's child under the seed, which declares nothing for sibling terms;
+after the correction he is an uncle, and the reply's `derived` counts the
+update. Only current facts imply: retired as redundant behind the derived
+sibling, the stated brother says nothing more. The seed's own implications
+survive a restart where the store did not change them, the way its rules do.
+
+### K31. Only entities with neutral derived relations are listed as gaps
+
+Expect: someone merely known through `knows` derives nothing and is never
+listed; Britt and Mattias, each with a derived relation carrying the plain
+qualifier, are, under `gender`, with the count of such relations; stated,
+the gaps close and the relations re-render.
+
+### K32. An implied value stands as a derived fact, and steps aside for a statement
+
+Expect: Britt, a mother by a stated fact, has "Britt Nyberg is female" as a
+derived fact under `gender` (`derived_by` kind `implied`, resting on the
+mother fact and citing its observation), so the question "what is Britt's
+gender" is answered and `inspect` shows it. It is not a fact of the
+observation. A statement "Britt is male" takes over with no conflict
+question, the implied row invalidated; withdrawn, the implication returns.
+Implications that disagree leave no fact behind.
+
+### K33. An exclusion may be written against the direction
+
+Expect: `not: ["^parent_of"]` excludes pairs where a parent fact runs from
+the object to the subject, as a hop written `^parent_of` walks; an unknown
+predicate in `not` is refused by its bare name.
+
+### K34. A proposal that only defines refused vocabulary leaves no observation
+
+Expect: a proposal with nothing but definitions, none of them accepted, is
+refused with the reasons and no observation is kept; the same definition
+beside a fact leaves the observation standing, the definition skipped with
+its warning.
+
+### K35. A question naming the object side reaches the object-side predicate
+
+Expect: with `nibling_of` registered from the client side with "nephews" in
+its lexicon, "who are Mattias's nephews" is answered from `nibling_of`,
+whose own vocabulary has the word, not from `aunt_uncle_of`, which knows it
+only as an inverse: at equal length a predicate's own term outranks another
+predicate's inverse term, and both outrank a free qualifier in use.
+
+### K36. A neutral recorded qualifier answers a gendered question, and says so
+
+Expect: with Britt an "aunt or uncle" for want of a gender, "who is
+Mattias's aunt" matches the neutral fact and the verdict notes that it "is
+recorded as 'aunt or uncle', which covers 'aunt' without settling it"; the
+same from the object side, so both directions are lenient in the same way.
+Once the gender is on record the answer is plain, and "uncle" is a miss.
+A gap under `attribute_unknown` carries `stated_roles`: each stated role of
+the entity with whether its predicate declares an implication for it, so a
+missing value is read rather than guessed.
+
+### K37. A proposal may add implications and rules to an existing predicate
+
+```text
+remember(text: "Sibling roles say who is who.", proposal: { predicates: [{ name: "sibling_of", implies: { brother: { gender: male }, sister: { gender: female } } }] })
+```
+
+Expect: taken, reported under `definitions` as `updated` with what was
+applied, logged on the predicate as a change "defined in obs-N", and the
+derivations follow at once. A definition of an existing predicate that
+states more than `implies` and `defined_as` has the rest left alone with a
+warning pointing at `correct(pred:x, {...})`; one that states nothing the
+proposal may add gets the warning alone. Silence here once cost a caller a
+round of debugging: the store showed no implication where the caller was
+sure it had sent one.
 
 ---
 
@@ -1617,6 +1971,49 @@ Mattias lead OpenJDK Kestrel" is `matched`; a product outside the closed class
 ("does Mattias lead Sentinel") is a MISS; "does Anna lead Kubernetes" is
 `matched`, her facts being outside Mattias's closure. Repeating the closure
 corroborates it rather than storing a second one.
+
+### Q14. A caller-defined containment predicate carries bounds and questions
+
+```text
+remember(proposal: { entity_types: [ company (parent organization, disjoint: true), department (parent organization) ], predicates: [ unit_of (department → organization, containment: true) ] })
+remember(text: "Platform is a department of Hooli.", proposal: { facts: [ unit_of(Platform, Hooli) ] })
+remember(text: "I only lead things within Hooli.", proposal: { facts: [ leads(self, Hooli) only ] })
+recall(query: "does Mattias lead Initrode")
+```
+
+Expect: the restriction is accepted with a company as its bound, because a
+containment predicate takes organizations; "I lead Platform" raises no
+question, Platform lying within Hooli along `unit_of`; the question about
+Initrode is KNOWN FALSE by restriction, two companies never overlapping;
+"I also lead Data Team", a department nobody has placed, raises a
+containment question whose yes stores `Data Team unit_of Hooli`, and the
+"not known" note on the recall goes with it. Nothing in the engine names
+`located_in`, `place`, or `country`: the seeds carry those as properties.
+
+### Q15. Containment facts apply first, whatever predicate nests them
+
+Expect: a proposal that states a job at a department before the department's
+nesting has the nesting applied first, so the restriction can be checked and
+nothing is asked.
+
+### Q16. Containment and disjointness are correctable and checked
+
+```text
+correct(target: "pred:inside_of", replacement: { containment: true })
+correct(target: "type:campus", replacement: { disjoint: true })
+```
+
+Expect: a predicate registered from use walks as a containment chain once
+declared so, logged as a change; a kind declared disjoint decides
+containment from then on (two campuses are DISJOINT); a restriction whose
+bound is nothing things can lie within (a person) is refused naming what is
+needed.
+
+### Q17. The seeds keep their places and countries
+
+Expect: `located_in` and `part_of` are containment predicates, `country` is
+a disjoint kind, `place` is not, and a place nests in a country through
+`located_in`: what the code once knew by name, the seed vocabulary now says.
 
 ---
 
@@ -2286,3 +2683,88 @@ Expect: the `lives_in` fact is ended (`ended: true`, standing `ended`) with
 no end date, its `end_source` `entity_ended`; the entity's `existed_end`
 stays unset. Nothing is closed "at now". A later date for the death fills
 the end in through the event.
+
+### T19. A kind nobody has placed does not make a second entity
+
+```text
+remember(text: "I ordered a Polestar 4 Long Range Dual Motor Prime.", proposal: { entities: [ Polestar 4 Long Range Dual Motor Prime (thing, alias Polestar 4) ], facts: [ owns(self, Polestar 4) ] })
+remember(text: "The Polestar 4 is my only vehicle.", proposal: { entities: [ Polestar 4 Long Range Dual Motor Prime (vehicle) ], facts: [ prefers(self, Polestar 4) ] })
+```
+
+Expect: one car. `vehicle` is a kind nobody has placed (registered from
+use with no parent, or not registered at all), and such a kind separates no
+identities: the exact name resolves to the thing on record, with a warning
+that says so and how to make them two if they are (define the type with
+its parent, or answer its kind). The word registers from use and a
+`type_kind` question asks what a vehicle is a kind of; answered "thing",
+the next mention resolves without a word and the more specific kind wins.
+A proposal that created a second car here once, silently, cost a caller a
+round of cleaning up.
+
+### T20. A homonym of another kind is said, listed, and foldable; an entity nothing names can be forgotten
+
+```text
+remember(text: "I work at Mercury.", proposal: { entities: [ Mercury (organization) ], facts: [ works_at(self, Mercury) ] })
+remember(text: "I live in Mercury.", proposal: { entities: [ Mercury (place) ], facts: [ lives_in(self, Mercury) ] })
+consolidate(dry_run: true)
+correct(target: "ent-<town>", replacement: { merge_into: "ent-<company>" })
+forget(observation_id: "ent-<lone>")
+```
+
+Expect: two kinds that cannot be one thing stay two entities (B3), and the
+reply warns that the place was created beside the organization of the same
+name, with the correction that folds them. `consolidate` lists the pair
+under `name_collisions` (shared name, both ids and types, `if_one`) and
+merges nothing on its own. `merge_into` moves the facts, events, and
+aliases onto the survivor, logs the merge, and the old id forwards to the
+survivor; into itself or the owner away is refused. `forget(ent-N)` removes
+an entity no fact of any standing, no event, and no merge names; one that
+facts name is refused with them listed and the fold suggested; the owner is
+never removed.
+
+### T21. Aliases are listed once and replaced as documented
+
+```text
+correct(target: "ent-12", replacement: { name: "Anna Lindqvist-Berg" })
+correct(target: "ent-12", replacement: { aliases: ["Anna L-B"] })
+```
+
+Expect: a name stored in its word form as well (a hyphen, an address, a
+handle) is listed once, in the reply and in `inspect`; `aliases` is the
+list to keep, so the maiden name goes and the entity's own name stays.
+
+### T22. Exact matches are the first candidates, whatever their kind; the predicate says what an untyped name is
+
+```text
+remember(text: "The Tacx trainer needs a firmware update.", proposal: { entities: [ Tacx trainer (product) ] })   # on record as equipment
+remember(text: "I live in Zürich.", proposal: { facts: [ lives_in(self, Zürich) ] })   # Zurich Insurance on record
+```
+
+Expect: the equipment named exactly so is the first candidate at 1.0,
+ahead of any fuzzy match, with `new` beside it; answered with its id, the
+same mention never asks again (`answered`). An untyped name takes the kind
+the predicate expects of it (the object of `lives_in` is a place): the
+insurer of the same letters is no candidate, and the town is created as a
+place. A kind nobody has placed ("city") gets the same shaping and keeps
+the caller's word; a placed kind the caller gave is the caller's to give,
+so an organization named like another still asks.
+
+### T23. A shorter name refers to the whole family
+
+```text
+recall(query: "where is my raspberry pi")        # Raspberry Pi 4 and Raspberry Pi 5 on record
+recall(query: "how many raspberry pi 5 do I own")
+remember(text: "My Raspberry Pi needs a new SD card.", proposal: { entities: [ Raspberry Pi (thing) ] })
+```
+
+Expect: at recall, a name that is an alias with its model numbers removed
+spots every member of the family, and the verdict lists each member's
+facts for the reader to sort out; the number spots one. At write time the
+family name fits both, so it is asked, never merged (T3). A number or a
+stopword alone is not a family.
+
+### T24. An undated event is in no year
+
+Expect: with `as_of`, only events dated on or before it are returned; an
+event with no date is neither before nor after, so it stays out, and comes
+back without `as_of`.

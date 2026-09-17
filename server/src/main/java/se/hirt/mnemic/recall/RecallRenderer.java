@@ -224,7 +224,7 @@ final class RecallRenderer {
 						: ", which is not evidence of no (yes/no question: the bounds below do not decide it)");
 			}
 			if (!s.nearMisses().isEmpty()) {
-				sb.append("; near-miss (same predicate, different qualifier): ");
+				sb.append("; near-miss (same predicate, not what was asked): ");
 				sb.append(String.join("; ", s.nearMisses().stream().map(Fact::rendering).toList()));
 			}
 			if (!events.isEmpty()) {

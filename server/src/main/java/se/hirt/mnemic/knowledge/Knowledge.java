@@ -43,7 +43,7 @@ import java.util.function.Supplier;
 public record Knowledge(EntityService entities, EntityTypeRegistry entityTypes, PredicateRegistry predicates,
 		EventTypeRegistry eventTypes, EventService events, QuestionService questions, FactQueries facts,
 		FactService factService, QuestionResolver resolver, Consolidator consolidator, FactRenderer renderer,
-		Containment containment) {
+		Containment containment, Deriver deriver) {
 
 	/** {@code embedding}: the model that compares vocabulary by meaning, or a supplier of null while none is loaded. */
 	public static Knowledge open(
@@ -52,20 +52,21 @@ public record Knowledge(EntityService entities, EntityTypeRegistry entityTypes, 
 		var entityTypes = new EntityTypeRegistry(db);
 		var predicates = new PredicateRegistry(db, lang, entityTypes, embedding);
 		var eventTypes = new EventTypeRegistry(db);
-		var entities = new EntityService(db, entityTypes, ownerName, ownerIdentity);
+		var entities = new EntityService(db, entityTypes, predicates, ownerName, ownerIdentity);
 		var questions = new QuestionService(db);
 		var renderer = new FactRenderer(db, predicates);
 		var ledger = new FactLedger(renderer, predicates);
 		var events = new EventService(db, eventTypes, ledger, lang);
 		var facts = new FactQueries(db, predicates, clock);
 		var asks = new FactQuestions(questions, entities, facts);
+		var deriver = new Deriver(db, predicates, renderer);
 		var factService = new FactService(db, entities, predicates, eventTypes, events, questions, facts, asks,
-				renderer, ledger, entityTypes);
+				renderer, ledger, entityTypes, deriver);
 		var resolver = new QuestionResolver(db, entities, predicates, eventTypes, entityTypes, questions, factService,
 				ledger);
 		var consolidator = new Consolidator(db, entities, predicates, eventTypes, entityTypes, events, facts, resolver,
-				ledger, renderer);
+				ledger, renderer, questions, deriver);
 		return new Knowledge(entities, entityTypes, predicates, eventTypes, events, questions, facts, factService,
-				resolver, consolidator, renderer, new Containment(db));
+				resolver, consolidator, renderer, new Containment(db, predicates, entityTypes), deriver);
 	}
 }

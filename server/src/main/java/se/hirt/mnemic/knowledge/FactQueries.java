@@ -82,9 +82,18 @@ public final class FactQueries {
 				.map(Fact::from).toList());
 	}
 
+	/** Facts held pending under a predicate for an entity: conflicts awaiting an answer. */
+	public List<Fact> pending(long entityId, String predicate) {
+		return db.read(tx -> tx.query("""
+				SELECT * FROM fact WHERE status = 'pending' AND predicate = ? AND (subject_id = ? OR object_id = ?)
+				ORDER BY id""", predicate, entityId, entityId).stream().map(Fact::from).toList());
+	}
+
 	public List<Fact> factsOfObservation(long observationId) {
-		return db.read(tx -> tx.query("SELECT * FROM fact WHERE observation_id = ? ORDER BY id", observationId).stream()
-				.map(Fact::from).toList());
+		return db.read(tx -> tx
+				.query("SELECT * FROM fact WHERE observation_id = ? AND derivation_kind <> 'derived' ORDER BY id",
+						observationId)
+				.stream().map(Fact::from).toList());
 	}
 
 	/**
@@ -208,8 +217,9 @@ public final class FactQueries {
 
 	/** Current open asserted facts of the subject under the predicate whose object is x or lies within x. */
 	public List<Fact> assertedTouching(long subjectId, String predicate, long x) {
-		return db.read(tx -> assertedOpen(tx, subjectId, predicate).stream().filter(
-				f -> f.objectId() != null && (f.objectId() == x || Containment.ancestors(tx, f.objectId()).contains(x)))
+		return db.read(tx -> assertedOpen(tx, subjectId, predicate).stream()
+				.filter(f -> f.objectId() != null && (f.objectId() == x
+						|| Containment.ancestors(tx, f.objectId(), predicates.containmentPredicates()).contains(x)))
 				.toList());
 	}
 
@@ -250,8 +260,16 @@ public final class FactQueries {
 		return new History(entries, tombstones);
 	}
 
+	/** The current facts stated or corrected into the record; derived ones are counted apart. */
 	public long count() {
-		return db.read(tx -> tx.queryLong("SELECT COUNT(*) FROM fact WHERE status = 'current'"));
+		return db.read(tx -> tx
+				.queryLong("SELECT COUNT(*) FROM fact WHERE status = 'current' AND derivation_kind <> 'derived'"));
+	}
+
+	/** The current facts the rules derived (family K). */
+	public long derivedCount() {
+		return db.read(tx -> tx
+				.queryLong("SELECT COUNT(*) FROM fact WHERE status = 'current' AND derivation_kind = 'derived'"));
 	}
 
 	/** The kind of source the fact's home observation came from. */

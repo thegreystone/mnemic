@@ -113,9 +113,12 @@ public final class QuestionResolver {
 			if (!q.open()) {
 				throw MnemicException.conflict(q.ref() + " is already " + q.status(), Map.of("question", q.ref()));
 			}
-			Observation obs = carrier != null ? carrier : observation(q.observationId()).orElseThrow(
-					() -> MnemicException.invalidArgument(q.ref() + " has no observation to answer against; pass "
-							+ "the answer with a remember that has text."));
+			// A question housekeeping raised (a derivation) has no observation of its own and needs none.
+			Observation obs = carrier != null ? carrier
+					: q.observationId() == null ? null
+							: observation(q.observationId()).orElseThrow(() -> MnemicException.invalidArgument(q.ref()
+									+ " has no observation to answer against; pass the answer with a remember that has "
+									+ "text."));
 			String choice = r.choice() == null ? "" : r.choice().trim();
 			var result = new LinkedHashMap<String, Object>();
 			result.put("question", q.ref());
@@ -132,6 +135,7 @@ public final class QuestionResolver {
 			case "type_mismatch" -> result.putAll(resolveTypeMismatch(q, choice, obs));
 			case "event_effect" -> result.putAll(resolveEventEffect(q, choice));
 			case "type_kind" -> result.putAll(resolveTypeKind(q, choice, obs));
+			case "derivation" -> result.putAll(resolveDerivation(q, choice, obs));
 			default -> {
 				questions.dismiss(q.id(), choice);
 				result.put("status", "dismissed");
@@ -155,8 +159,12 @@ public final class QuestionResolver {
 		if ("new".equalsIgnoreCase(choice)) {
 			String type = held.entities().stream().filter(e -> Names.norm(e.name()).equals(Names.norm(q.subject())))
 					.map(EntityRef::type).findFirst().orElse(null);
-			// Created once: a second answer naming the same new subject in the same call reuses it.
-			return entities.byRef(q.subject()).filter(e -> e.id() != entities.owner().id())
+			// Created once: a second answer naming the same new subject in the same call reuses it. An entity the
+			// question offered and the answer passed over is not it, whatever its name.
+			return entities.byRef(q.subject())
+					.filter(e -> e.id() != entities.owner().id()
+							&& q.candidates().stream().noneMatch(c -> e.ref().equals(c.get("id")))
+							&& entityTypes.compatible(e.type(), entityTypes.canonical(type)))
 					.orElseGet(() -> entities.create(q.subject(), type, List.of(), q.observationId()));
 		}
 		boolean listed = q.candidates().stream().anyMatch(c -> choice.equals(c.get("id")));
@@ -292,6 +300,31 @@ public final class QuestionResolver {
 		return m;
 	}
 
+	/**
+	 * A stated fact on a derived predicate against the record's complete chains (K6): {@code keep} lets it stand,
+	 * {@code wrong} rejects it, the way a rejected pending fact is.
+	 */
+	private Map<String, Object> resolveDerivation(Question q, String choice, Observation obs) {
+		long factId = q.factId();
+		var m = new LinkedHashMap<String, Object>();
+		switch (choice.toLowerCase(Locale.ROOT)) {
+		case "keep" -> m.put("fact", "f-" + factId);
+		case "wrong" -> db.write(tx -> {
+			tx.update("UPDATE fact SET status = 'rejected' WHERE id = ?", factId);
+			FactLedger.supersession(tx, factId, null, "invalidation",
+					"user: wrong; the record's own chains say otherwise", null, obs == null ? null : obs.id(), null);
+			m.put("fact", "f-" + factId);
+			m.put("rejected", true);
+			return null;
+		});
+		default -> throw MnemicException
+				.invalidArgument("'" + choice + "' is not an answer to " + q.ref() + "; use keep or wrong.");
+		}
+		questions.answer(q.id(), choice);
+		m.put("status", "answered");
+		return m;
+	}
+
 	private Map<String, Object> resolveContainment(Question q, String choice, Observation obs) {
 		Map<String, Object> payload = Json.readMap(q.payload());
 		long top = Long.parseLong(payload.get("entity").toString().substring(4));
@@ -299,8 +332,9 @@ public final class QuestionResolver {
 		var m = new LinkedHashMap<String, Object>();
 		switch (choice.toLowerCase(Locale.ROOT)) {
 		case "yes" -> {
-			var ref = new FactRef(entities.nameOf(top), "located_in", entities.nameOf(bound), null, null, null, null,
-					List.of(), new Proposal.Derivation("explicit"), null);
+			var ref = new FactRef(entities.nameOf(top), q.predicate() == null ? "located_in" : q.predicate(),
+					entities.nameOf(bound), null, null, null, null, List.of(), new Proposal.Derivation("explicit"),
+					null);
 			Applied a = facts.apply(obs,
 					new Proposal(Proposal.CURRENT_SPEC_VERSION, List.of(), List.of(), List.of(ref), List.of()));
 			m.put("facts", a.facts().stream().map(FactOut::id).toList());

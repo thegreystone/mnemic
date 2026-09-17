@@ -32,9 +32,12 @@ import org.junit.jupiter.api.Test;
 import se.hirt.mnemic.Engine;
 import se.hirt.mnemic.Scenario;
 import se.hirt.mnemic.knowledge.Entity;
+import se.hirt.mnemic.knowledge.QuestionResolver.Resolve;
+import se.hirt.mnemic.Engine.RememberOutcome;
 import se.hirt.mnemic.recall.RecallResult;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static se.hirt.mnemic.TestHomes.*;
@@ -70,18 +73,40 @@ class EntityResolutionTest {
 
 	@Test
 	@Scenario("B3")
-	void sameNameDifferentTypeStaysSeparate() {
+	void sameNameDifferentTypeIsAskedOnce() {
 		try (Engine e = engine("b3")) {
 			remember(e, "I'm reading Java Concurrency in Practice.",
 					proposal().entity("e1", "Java Concurrency in Practice", "book").fact("self", "prefers", "e1"));
 			remember(e, "Java is the language Mnemic is written in.", proposal().entity("e1", "Mnemic", "project")
 					.entity("e2", "Java", "technology").fact("e1", "uses", "e2"));
-			remember(e, "Java the island is beautiful.",
-					proposal().entity("e1", "Java", "place").fact("self", "prefers", "e1"));
 			Entity tech = e.entities().byRef("Java").orElseThrow();
-			long javas = e.entities().spot("Java").size();
-			assertEquals(2, javas, "technology and place both named Java, kept apart");
+			// The same name under another kind: the caller cannot know what type it was first stored under, so the
+			// exact match is the first candidate and the question is asked.
+			RememberOutcome island = remember(e, "Java the island is beautiful.",
+					proposal().entity("e1", "Java", "place").fact("self", "prefers", "e1"));
+			Map<String, Object> q = island.applied().questions().getFirst();
+			assertEquals("entity_resolution", q.get("kind"), q.toString());
+			@SuppressWarnings("unchecked")
+			List<Map<String, Object>> candidates = (List<Map<String, Object>>) q.get("candidates");
+			assertEquals(tech.ref(), candidates.getFirst().get("id"), "the exact match comes first: " + q);
+			assertEquals(1.0, candidates.getFirst().get("score"));
+			e.answer(List.of(new Resolve(q.get("id").toString(), "new")));
+			assertEquals(2, e.entities().spot("Java").size(), "technology and place both named Java, kept apart");
 			assertNotEquals(tech.id(), e.entities().byRef("Java Concurrency in Practice").orElseThrow().id());
+			// Typed, each later mention resolves to its own kind without a word.
+			RememberOutcome again = remember(e, "Java the island again.",
+					proposal().entity("e1", "Java", "place").fact("self", "prefers", "e1"));
+			assertTrue(again.applied().questions().isEmpty(), again.applied().questions().toString());
+			assertEquals("place", e.entities().byRef(again.applied().entities().getFirst().id()).orElseThrow().type());
+			// Untyped, the name fits both: asked, and the answer settles every later untyped mention.
+			RememberOutcome bare = remember(e, "Java again.", proposal().fact("self", "prefers", "Java"));
+			Map<String, Object> q2 = bare.applied().questions().getFirst();
+			assertEquals("entity_resolution", q2.get("kind"), q2.toString());
+			e.answer(List.of(new Resolve(q2.get("id").toString(), tech.ref())));
+			RememberOutcome settled = remember(e, "Java once more.", proposal().fact("self", "uses", "Java"));
+			assertTrue(settled.applied().questions().isEmpty(), "asked once: " + settled.applied().questions());
+			assertEquals(tech.id(),
+					e.facts().factsOfObservation(settled.observation().observationId()).getFirst().objectId());
 		}
 	}
 
@@ -93,10 +118,20 @@ class EntityResolutionTest {
 					proposal().entity("e1", "Viggo", "person").fact("self", "knows", "e1"));
 			var o = remember(e, "We evaluated Viggo, a load-testing tool.",
 					proposal().entity("e1", "Viggo", "technology").fact("self", "uses", "e1"));
-			assertTrue(o.applied().questions().isEmpty(), "no question: types differ, so no merge and no doubt");
+			// Not merged on the strength of the letters: asked, with the person first.
+			Map<String, Object> q = o.applied().questions().getFirst();
+			assertEquals("entity_resolution", q.get("kind"), q.toString());
+			assertTrue(q.get("message").toString().contains("Viggo (person)"), q.toString());
+			e.answer(List.of(new Resolve(q.get("id").toString(), "new")));
 			List<Entity> viggos = e.entities().spot("Viggo");
 			assertEquals(2, viggos.size(), viggos.toString());
-			assertEquals("created", o.applied().entities().getFirst().resolution());
+			assertTrue(viggos.stream().anyMatch(x -> "technology".equals(x.type())), viggos.toString());
+			// Letters alone, across types, never merge: a third Viggo typed person is the person.
+			RememberOutcome person = remember(e, "Viggo again.",
+					proposal().entity("e1", "Viggo", "person").fact("self", "knows", "e1"));
+			assertTrue(person.applied().questions().isEmpty(), person.applied().questions().toString());
+			assertEquals("person",
+					e.entities().byRef(person.applied().entities().getFirst().id()).orElseThrow().type());
 		}
 	}
 
@@ -125,8 +160,12 @@ class EntityResolutionTest {
 	@Test
 	void unknownTypeAdoptsTheTypeItLaterLearns() {
 		try (Engine e = engine("type-promote")) {
+			// Nobody typed Anna; the predicate did: the object of knows is a person.
 			remember(e, "Anna is great.", proposal().fact("self", "knows", "Anna"));
-			assertEquals("unknown", e.entities().byRef("Anna").orElseThrow().type());
+			assertEquals("person", e.entities().byRef("Anna").orElseThrow().type());
+			// A predicate that takes anything types nothing.
+			remember(e, "Bosse is great.", proposal().fact("self", "prefers", "Bosse"));
+			assertEquals("unknown", e.entities().byRef("Bosse").orElseThrow().type());
 			remember(e, "Anna Lindqvist is a person I know.",
 					proposal().entity("e1", "Anna", "person").fact("self", "knows", "e1"));
 			assertEquals("person", e.entities().byRef("Anna").orElseThrow().type());

@@ -169,6 +169,11 @@ public final class TestHomes {
 			return this;
 		}
 
+		public P entity(EntityRef er) {
+			entities.add(er);
+			return this;
+		}
+
 		public P event(String ref, String type, String start, String ... participants) {
 			events.add(new EventRef(ref, type, List.of(participants),
 					start == null ? null : new ValidTime(start, null, null)));

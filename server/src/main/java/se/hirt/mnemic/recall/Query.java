@@ -31,6 +31,7 @@ package se.hirt.mnemic.recall;
 import se.hirt.mnemic.knowledge.Entity;
 import se.hirt.mnemic.knowledge.EntityService;
 import se.hirt.mnemic.knowledge.EntityTypeRegistry;
+import se.hirt.mnemic.knowledge.Lang;
 import se.hirt.mnemic.knowledge.Names;
 import se.hirt.mnemic.knowledge.PredicateRegistry;
 import se.hirt.mnemic.knowledge.PredicateRegistry.Cue;
@@ -41,6 +42,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -60,10 +62,13 @@ import java.util.regex.Pattern;
  *            capitalised words that are not an entity: the specific things the question is about
  * @param fts
  *            the FTS5 match expression over the terms
+ * @param kinds
+ *            the kind of thing a question asks for, between its question word and its verb ("what motorcycles does
+ *            Mattias own"): words that are no entity, cue, or filler
  */
 public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<String> ownerTokens, List<String> terms,
 		Set<String> entityTokens, List<String> beyondEntities, boolean polar, boolean past, boolean forward,
-		Set<String> cueTokens, List<String> residual, List<String> named, String fts) {
+		Set<String> cueTokens, List<String> residual, List<String> named, String fts, List<String> kinds) {
 
 	private static final Set<String> POLAR = Set.of("does", "do", "did", "is", "are", "was", "were", "has", "have",
 			"had", "can", "could", "will", "would", "should");
@@ -75,6 +80,14 @@ public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<Strin
 	static final Set<String> POLAR_FILLER = Set.of("any", "anything", "anyone", "anywhere", "still", "yet", "ever",
 			"really", "actually", "currently", "now", "already", "also", "some", "something", "someone", "there",
 			"here", "just", "even", "own");
+	/** "what kind of car", "what else", "which other things": words about the asking, not the kind. */
+	static final Set<String> KIND_FILLER = Set.of("kind", "kinds", "sort", "sorts", "type", "types", "else", "other",
+			"others", "more", "many", "much", "exactly", "precisely", "all", "different", "various", "new", "old",
+			"current", "former", "previous", "past", "recent", "latest", "main", "specific", "particular");
+	/** "what motorcycles does Mattias own": the kind asked for lies between the question word and the verb. */
+	private static final Pattern KIND_PHRASE = Pattern.compile(
+			"^\\s*(?:what|which)\\s+(.+?)\\s+(?:does|do|did|is|are|was|were|has|have|had|will|would|can|could)\\b",
+			Pattern.CASE_INSENSITIVE);
 
 	public static Query analyse(
 		String text, EntityService entities, PredicateRegistry predicates, EntityTypeRegistry types) {
@@ -100,7 +113,38 @@ public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<Strin
 				: List.of();
 		return new Query(text, spotted, cues, ownerTokens, terms, entityTokens, beyondEntities, polar, isPast(text),
 				isForward(text), cueTokens, residual, namedThings(text, entityTokens, types),
-				ftsQuery(text, ownerTokens));
+				ftsQuery(text, ownerTokens), kindsAskedFor(text, entityTokens, cueTokens, cues));
+	}
+
+	/**
+	 * The kind of thing a question asks for: the words between "what" or "which" and the verb that are no entity, no
+	 * word of the cue predicate's vocabulary, and no filler. "What motorcycles does Mattias own" asks for motorcycles;
+	 * "what does Mattias own" asks for nothing in particular.
+	 */
+	static List<String> kindsAskedFor(String query, Set<String> entityTokens, Set<String> cueTokens, List<Cue> cues) {
+		Matcher m = KIND_PHRASE.matcher(query == null ? "" : query);
+		if (!m.find()) {
+			return List.of();
+		}
+		var vocabulary = new HashSet<String>();
+		for (Cue c : cues) {
+			for (String term : c.predicate().lexicon()) {
+				vocabulary.addAll(Names.tokens(term));
+			}
+			for (String q : c.predicate().qualifiers()) {
+				vocabulary.addAll(Names.tokens(q));
+			}
+		}
+		var out = new ArrayList<String>();
+		for (String t : Names.tokens(m.group(1))) {
+			if (t.length() < 2 || entityTokens.contains(t) || cueTokens.contains(t) || Names.STOPWORDS.contains(t)
+					|| POLAR_FILLER.contains(t) || KIND_FILLER.contains(t) || out.contains(t)
+					|| Lang.singulars(t).stream().anyMatch(vocabulary::contains)) {
+				continue;
+			}
+			out.add(t);
+		}
+		return out;
 	}
 
 	/** The spotted entities other than the owner. */

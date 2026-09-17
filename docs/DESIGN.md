@@ -134,13 +134,14 @@ Events are *occurrences*: they happen once, at a point or over a bounded interva
 participants ("Mattias joins Hooli", "the team decides to use SQLite"). Facts are *states*: they hold over an interval
 in valid time and have a subject and predicate ("Mattias works at Hooli", "Mnemic uses SQLite").
 
-The canonical inputs are Observations (what was presented to Mnemic, in transaction time) and the proposals that
+The canonical inputs are Observations (what was presented to Mnemic, in transaction time) and the readings that
 came with them, from which Events (what happened, in valid time) and Facts are stored. Every observation keeps its
-proposal verbatim so that facts could be re-derived; as of 2026-09-12 what is rebuilt automatically is narrower: fact
-renderings are regenerated after every migration and when the store's language or a predicate's template changes,
-and event effects (opening, closing, superseding facts) are applied when the event is stored or found later by
-`consolidate`. A Fact may also be directly asserted by an Observation with no known originating Event ("I work at
-Hooli"); such Facts record that they are asserted rather than event-derived.
+reading verbatim so that the projection can be rebuilt from it (`consolidate(rebuild: true)`), and fact renderings
+are regenerated after every migration and when the store's language or a predicate's template changes. A Fact may
+be directly asserted by an Observation with no known originating Event ("I work at Hooli"); such Facts record that
+they are asserted rather than event-derived. A Fact may also be derived by a rule over other facts ("Astrid is
+Mattias's paternal grandmother" from two parent facts); such Facts record the rule and the facts they rest on, and
+follow them (EXTRACTION.md, Derived predicates).
 
 The most important temporal property of an Event is when it happened, not when Mnemic learned of it. Both are retained.
 

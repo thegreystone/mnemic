@@ -75,9 +75,13 @@ public final class EntityService {
 	/** {@code ownerIdentity}: configured aliases, e-mail addresses, and handles, seeded as aliases of the owner. */
 	private final Set<String> ownerIdentityNorms;
 
-	public EntityService(Database db, EntityTypeRegistry types, String ownerName, List<String> ownerIdentity) {
+	private final PredicateRegistry predicates;
+
+	public EntityService(Database db, EntityTypeRegistry types, PredicateRegistry predicates, String ownerName,
+			List<String> ownerIdentity) {
 		this.db = db;
 		this.types = types;
+		this.predicates = predicates;
 		this.owner = ensureOwner(ownerName, ownerIdentity);
 		this.ownerIdentityNorms = ownerIdentity.stream().map(Names::norm).collect(Collectors.toSet());
 	}
@@ -120,6 +124,18 @@ public final class EntityService {
 	 */
 	public Resolved resolve(
 		String name, String type, List<String> aliases, Long observationId, Set<Long> distinctFrom) {
+		return resolve(name, type, aliases, observationId, distinctFrom, Set.of());
+	}
+
+	/**
+	 * As above, with the kinds the proposal's facts expect of the entity ({@code expected}: the domains and ranges of
+	 * the predicates that use it; empty when anything goes). They stand in for a type nobody gave, so a town that is
+	 * the object of {@code lives_in} is a place, is not confused with an insurer of the same letters, and is created as
+	 * a place.
+	 */
+	public Resolved resolve(
+		String name, String type, List<String> aliases, Long observationId, Set<Long> distinctFrom,
+		Set<String> expected) {
 		if (name == null || name.isBlank()) {
 			throw MnemicException.invalidArgument(
 					"An entity needs a 'name'. Example: {\"name\": \"Anna Lindqvist\", \"type\": \"person\"}");
@@ -128,29 +144,62 @@ public final class EntityService {
 		if (SELF.contains(norm)) {
 			return new Resolved(owner, "owner", 1.0, List.of());
 		}
-		String t = types.canonical(type);
+		String given = types.canonical(type);
+		// The expectation stands in for a type nobody gave, and shapes the candidates for a kind nobody has placed;
+		// a placed type the caller gave is the caller's to give.
+		Set<String> want = EntityTypeRegistry.UNKNOWN.equals(given) || types.unplaced(given) ? expected : Set.of();
+		String t = EntityTypeRegistry.UNKNOWN.equals(given) && want.size() == 1 ? want.iterator().next() : given;
 		return db.write(tx -> {
-			Optional<Entity> byName = byAlias(tx, norm, t);
-			Entity match = byName.orElse(null);
+			// The same name on record, of a kind this mention could not be: the caller cannot know what type a
+			// thing was first registered under, so the exact matches are the first candidates, and the question is
+			// asked once; an answer naming one of them settles every later mention.
+			List<Entity> exact = exactMatches(tx, norm, aliases).stream().filter(e -> !distinctFrom.contains(e.id()))
+					.toList();
+			// Exact names are matched under the type the caller gave, or none: the expectation shapes what is
+			// fuzzy and what is new, never whether the one Hooli on record is Hooli.
+			List<Entity> fits = exact.stream().filter(e -> types.compatible(e.type(), given)).toList();
+			List<Entity> among = fits.isEmpty() ? exact : fits;
+			Entity match = null;
 			String how = "alias";
-			for (String a : aliases) {
-				if (a == null || a.isBlank()) {
-					continue;
+			if (!among.isEmpty() && (fits.isEmpty() || !oneKind(fits))) {
+				Optional<Entity> settled = answeredAmong(tx, norm, among);
+				if (settled.isEmpty()) {
+					var candidates = new ArrayList<Candidate>();
+					for (Entity o : among) {
+						candidates.add(new Candidate(o, 1.0));
+					}
+					for (Candidate c : fuzzy(tx, name, norm, t, distinctFrom, want)) {
+						if (candidates.stream().noneMatch(x -> x.entity().id() == c.entity().id())) {
+							candidates.add(c);
+						}
+					}
+					return new Resolved(null, "ambiguous", 1.0, candidates);
 				}
-				Optional<Entity> byA = byAlias(tx, Names.norm(a), t);
-				if (byA.isEmpty()) {
-					continue;
-				}
-				if (match == null) {
-					match = byA.get();
-				} else if (byA.get().id() != match.id()) {
-					// The name names one entity and an alias another: later evidence says they are the same (G2).
-					merge(tx, byA.get(), match, observationId, "alias '" + a + "' of '" + name + "' matched both");
-					how = "merged";
+				match = settled.get();
+				how = "answered";
+			}
+			if (match == null) {
+				Optional<Entity> byName = byAlias(tx, norm, given);
+				match = byName.orElse(null);
+				for (String a : aliases) {
+					if (a == null || a.isBlank()) {
+						continue;
+					}
+					Optional<Entity> byA = byAlias(tx, Names.norm(a), given);
+					if (byA.isEmpty()) {
+						continue;
+					}
+					if (match == null) {
+						match = byA.get();
+					} else if (byA.get().id() != match.id()) {
+						// The name names one entity and an alias another: later evidence says they are the same (G2).
+						merge(tx, byA.get(), match, observationId, "alias '" + a + "' of '" + name + "' matched both");
+						how = "merged";
+					}
 				}
 			}
 			if (match == null) {
-				List<Candidate> fuzzy = fuzzy(tx, name, norm, t, distinctFrom);
+				List<Candidate> fuzzy = fuzzy(tx, name, norm, t, distinctFrom, want);
 				if (!fuzzy.isEmpty() && fuzzy.getFirst().score() >= MERGE) {
 					match = fuzzy.getFirst().entity();
 					how = "fuzzy";
@@ -174,6 +223,62 @@ public final class EntityService {
 			}
 			return new Resolved(create(tx, name, t, aliases, observationId), "created", 1.0, List.of());
 		});
+	}
+
+	/** Live entities whose name or an alias is the name or one of the aliases exactly, by id. */
+	private static List<Entity> exactMatches(Tx tx, String norm, List<String> aliases) {
+		var norms = new LinkedHashSet<String>();
+		norms.add(norm);
+		for (String a : aliases) {
+			if (a != null && !a.isBlank()) {
+				norms.add(Names.norm(a));
+			}
+		}
+		String in = String.join(",", norms.stream().map(n -> "'" + n.replace("'", "''") + "'").toList());
+		return tx.query(
+				"SELECT DISTINCT e.* FROM entity_alias a JOIN entity e ON e.id = a.entity_id WHERE a.alias_norm IN ("
+						+ in + ") AND e.merged_into IS NULL ORDER BY e.id")
+				.stream().map(Entity::from).toList();
+	}
+
+	/** Whether every entity could be the same kind of thing as every other. */
+	private boolean oneKind(List<Entity> es) {
+		for (int i = 0; i < es.size(); i++) {
+			for (int j = i + 1; j < es.size(); j++) {
+				if (!types.compatible(es.get(i).type(), es.get(j).type())) {
+					return false;
+				}
+			}
+		}
+		return true;
+	}
+
+	/** The entity an earlier answer to the same question named, if it is one of {@code among}: asked once. */
+	private static Optional<Entity> answeredAmong(Tx tx, String norm, List<Entity> among) {
+		for (Row r : tx.query("SELECT subject, answer FROM question WHERE kind = 'entity_resolution' "
+				+ "AND status = 'answered' AND answer LIKE 'ent-%' ORDER BY id DESC")) {
+			if (!norm.equals(Names.norm(r.str("subject")))) {
+				continue;
+			}
+			long id;
+			try {
+				id = Long.parseLong(r.str("answer").substring(4));
+			} catch (NumberFormatException e) {
+				continue;
+			}
+			Entity chosen = tx.queryOne("SELECT * FROM entity WHERE id = ?", id).map(Entity::from).orElse(null);
+			while (chosen != null && chosen.mergedInto() != null) {
+				chosen = get(tx, chosen.mergedInto());
+			}
+			if (chosen != null) {
+				long survivor = chosen.id();
+				Optional<Entity> hit = among.stream().filter(e -> e.id() == survivor).findFirst();
+				if (hit.isPresent()) {
+					return hit;
+				}
+			}
+		}
+		return Optional.empty();
 	}
 
 	/**
@@ -253,7 +358,7 @@ public final class EntityService {
 		Entity typeless = null;
 		for (Row r : rows) {
 			Entity e = Entity.from(r);
-			if ("unknown".equals(type) || types.sameKind(e.type(), type)) {
+			if (types.compatible(e.type(), type)) {
 				return Optional.of(e);
 			}
 			if ("unknown".equals(e.type())) {
@@ -268,7 +373,8 @@ public final class EntityService {
 	 * against a full name scores 0.5) and the character-trigram Jaccard. The entropy gate refuses names shorter than
 	 * three letters or made only of stopwords, so "AL" or "it" never fuzzy-match anything.
 	 */
-	private List<Candidate> fuzzy(Tx tx, String name, String norm, String type, Set<Long> distinctFrom) {
+	private List<Candidate> fuzzy(
+		Tx tx, String name, String norm, String type, Set<Long> distinctFrom, Set<String> expected) {
 		List<String> tokens = types.identityTokens(name, type).stream().filter(EntityService::identity).toList();
 		if (norm.length() < 3 || tokens.isEmpty()) {
 			return List.of();
@@ -281,7 +387,13 @@ public final class EntityService {
 			if (distinctFrom.contains(e.id())) {
 				continue; // declared distinct by the same proposal
 			}
-			if (!"unknown".equals(type) && !"unknown".equals(e.type()) && !types.sameKind(e.type(), type)) {
+			if (!types.compatible(e.type(), type)) {
+				continue;
+			}
+			// The facts say what kind of thing this is (the object of lives_in is a place): a candidate of a
+			// placed kind that is none of them is not offered.
+			if (!expected.isEmpty() && !EntityTypeRegistry.UNKNOWN.equals(e.type()) && !types.unplaced(e.type())
+					&& expected.stream().noneMatch(k -> types.isA(e.type(), k))) {
 				continue;
 			}
 			double best = 0;
@@ -310,7 +422,8 @@ public final class EntityService {
 				boolean oneSaysMore = (!tokens.equals(at) && (tokens.containsAll(at) || at.containsAll(tokens)))
 						|| !numbers(name).equals(numbers(alias));
 				boolean placeWordDiffers = tokens.equals(at) && !words.equals(Names.contentTokens(alias))
-						&& (types.isA(type, "place") || types.isA(e.type(), "place"));
+						&& (predicates.canContain(types.lineage(type))
+								|| predicates.canContain(types.lineage(e.type())));
 				if (oneSaysMore || placeWordDiffers) {
 					score = Math.min(score, MERGE - 0.01);
 				}
@@ -369,9 +482,103 @@ public final class EntityService {
 		}
 	}
 
+	/** Each alias once: an address or a handle is stored in its word form as well, under the same alias. */
 	private static List<String> aliasesOf(Tx tx, long entityId) {
-		return tx.query("SELECT alias FROM entity_alias WHERE entity_id = ? ORDER BY id", entityId).stream()
-				.map(r -> r.str("alias")).toList();
+		return tx.query("SELECT alias FROM entity_alias WHERE entity_id = ? GROUP BY alias ORDER BY MIN(id)", entityId)
+				.stream().map(r -> r.str("alias")).toList();
+	}
+
+	/** Two live entities of kinds that cannot be one thing, sharing the name {@code alias}. */
+	public record Collision(Entity a, Entity b, String alias) {
+	}
+
+	/**
+	 * Live entities other than {@code id} that share one of its names and are of a kind it is not: the same name given
+	 * to two things (the same car typed as a placed kind and as another), which resolution keeps apart.
+	 */
+	public List<Entity> homonymsOf(long id) {
+		return db.read(tx -> {
+			Entity e = get(tx, id);
+			var out = new LinkedHashMap<Long, Entity>();
+			for (Row r : tx.query("""
+					SELECT o.* FROM entity_alias a JOIN entity_alias b ON a.alias_norm = b.alias_norm
+					JOIN entity o ON o.id = b.entity_id
+					WHERE a.entity_id = ? AND b.entity_id <> ? AND o.merged_into IS NULL ORDER BY o.id""", id, id)) {
+				Entity o = Entity.from(r);
+				if (!types.compatible(o.type(), e.type())) {
+					out.putIfAbsent(o.id(), o);
+				}
+			}
+			return List.copyOf(out.values());
+		});
+	}
+
+	/** Pairs of live entities sharing a name that consolidate does not merge itself: listed, for the caller. */
+	public List<Collision> nameCollisions() {
+		return db.read(tx -> {
+			var out = new ArrayList<Collision>();
+			for (Row r : tx.query("""
+					SELECT a.entity_id AS x, b.entity_id AS y, MIN(a.alias) AS alias FROM entity_alias a
+					JOIN entity_alias b ON a.alias_norm = b.alias_norm AND a.entity_id < b.entity_id
+					JOIN entity ex ON ex.id = a.entity_id JOIN entity ey ON ey.id = b.entity_id
+					WHERE ex.merged_into IS NULL AND ey.merged_into IS NULL
+					AND ex.type <> ey.type AND ex.type <> 'unknown' AND ey.type <> 'unknown'
+					GROUP BY a.entity_id, b.entity_id ORDER BY a.entity_id, b.entity_id""")) {
+				out.add(new Collision(get(tx, r.lng("x")), get(tx, r.lng("y")), r.str("alias")));
+			}
+			return out;
+		});
+	}
+
+	/**
+	 * Removes an entity nothing names: no fact of any standing, no event, no merge refers to it. One that facts name is
+	 * refused with them listed; the owner is never removed. The id is gone for good.
+	 */
+	public Map<String, Object> remove(long id) {
+		return db.write(tx -> {
+			Entity e = get(tx, id);
+			if (e.mergedInto() != null) {
+				throw MnemicException.invalidArgument(e.ref() + " was merged into ent-" + e.mergedInto()
+						+ " and is only a forwarding id now; there is nothing to remove.");
+			}
+			if (e.id() == owner.id()) {
+				throw MnemicException.invalidArgument(e.ref() + " is the owner and is never removed.");
+			}
+			List<String> facts = tx
+					.query("SELECT id FROM fact WHERE subject_id = ? OR object_id = ? OR scope_id = ? " + "ORDER BY id",
+							e.id(), e.id(), e.id())
+					.stream().map(r -> "f-" + r.lng("id")).toList();
+			long events = tx.queryLong("SELECT COUNT(*) FROM event_participant WHERE entity_id = ?", e.id());
+			long mergedIn = tx.queryLong("SELECT COUNT(*) FROM entity WHERE merged_into = ?", e.id());
+			if (!facts.isEmpty() || events > 0 || mergedIn > 0) {
+				var named = new ArrayList<String>();
+				if (!facts.isEmpty()) {
+					named.add(facts.size() + (facts.size() == 1 ? " fact (" : " facts (")
+							+ String.join(", ", facts.size() > 8 ? facts.subList(0, 8) : facts)
+							+ (facts.size() > 8 ? ", ..." : "") + ")");
+				}
+				if (events > 0) {
+					named.add(events + (events == 1 ? " event" : " events"));
+				}
+				if (mergedIn > 0) {
+					named.add(mergedIn + (mergedIn == 1 ? " entity merged into it" : " entities merged into it"));
+				}
+				throw MnemicException.invalidArgument(e.ref() + " '" + e.name() + "' is named by "
+						+ String.join(", ", named) + ". Forget the observations behind them, or, if it duplicates "
+						+ "another entity, fold it into that one with correct(" + e.ref()
+						+ ", {\"merge_into\": \"ent-N\"}).");
+			}
+			List<String> aliases = aliasesOf(tx, e.id());
+			tx.update("DELETE FROM entity_alias WHERE entity_id = ?", e.id());
+			tx.update("DELETE FROM entity WHERE id = ?", e.id());
+			var m = new LinkedHashMap<String, Object>();
+			m.put("entity", e.ref());
+			m.put("name", e.name());
+			m.put("type", e.type());
+			m.put("aliases", aliases);
+			m.put("removed", true);
+			return m;
+		});
 	}
 
 	// ── merges ───────────────────────────────────────────────────────────
@@ -523,6 +730,9 @@ public final class EntityService {
 						hits = List.of(); // ambiguous first name: no guess
 					}
 				}
+				if (hits.isEmpty() && gram.length() >= 3) {
+					hits = family(gram, tokens.subList(i, i + n));
+				}
 				if (!hits.isEmpty()) {
 					for (Entity e : hits) {
 						found.putIfAbsent(e.id(), e);
@@ -532,6 +742,40 @@ public final class EntityService {
 			}
 		}
 		return new ArrayList<>(found.values());
+	}
+
+	/** A version or model number: "5", "4b", "v2", "mk3". */
+	private static final java.util.regex.Pattern MODEL_NUMBER = java.util.regex.Pattern
+			.compile("\\d+[a-z]?|v\\d+|mk\\d+");
+
+	/** The family a name belongs to: its words with the model numbers removed ("Raspberry Pi 5" → "raspberry pi"). */
+	public static String familyKey(String name) {
+		return String.join(" ", Names.tokens(name).stream().filter(w -> !MODEL_NUMBER.matcher(w).matches()).toList());
+	}
+
+	/**
+	 * The family a shorter name refers to: every entity whose alias, with its model numbers removed, is the words
+	 * given. "raspberry pi" spots Raspberry Pi 4 and Raspberry Pi 5 alike, and the reader sorts them out; "raspberry pi
+	 * 5" is exact and spots one. Nothing is spotted for a name that is itself a plain word.
+	 */
+	private List<Entity> family(String gram, List<String> words) {
+		if (words.stream().allMatch(w -> Names.STOPWORDS.contains(w) || MODEL_NUMBER.matcher(w).matches())) {
+			return List.of();
+		}
+		String first = words.getFirst().replace("%", "").replace("_", "");
+		var out = new LinkedHashMap<Long, Entity>();
+		for (Row r : db.read(tx -> tx.query("""
+				SELECT e.*, a.alias_norm AS alias_norm FROM entity_alias a JOIN entity e ON e.id = a.entity_id
+				WHERE a.alias_norm LIKE '%' || ? || '%' AND a.alias_norm <> ? AND e.merged_into IS NULL
+				ORDER BY e.id""", first, gram))) {
+			List<String> at = Names.tokens(r.str("alias_norm")).stream().filter(w -> !MODEL_NUMBER.matcher(w).matches())
+					.toList();
+			if (at.equals(words) && !at.equals(Names.tokens(r.str("alias_norm")))) {
+				Entity e = Entity.from(r);
+				out.putIfAbsent(e.id(), e);
+			}
+		}
+		return new ArrayList<>(out.values());
 	}
 
 	private static boolean anyUsed(boolean[] used, int i, int n) {

@@ -59,13 +59,13 @@ import java.util.Set;
 public final class EntityTypeRegistry {
 
 	public record EntityType(String name, String description, String parent, List<String> synonyms,
-			List<String> typeWords, Long definedBy, boolean seed, boolean inferred) {
+			List<String> typeWords, Long definedBy, boolean seed, boolean inferred, boolean disjoint) {
 	}
 
 	/** A definition that states nothing beyond the name. */
 	static boolean bare(EntityTypeDef d) {
 		return d.description() == null && (d.parent() == null || d.parent().isBlank()) && d.synonyms().isEmpty()
-				&& d.typeWords().isEmpty();
+				&& d.typeWords().isEmpty() && d.disjoint() == null;
 	}
 
 	public static final String UNKNOWN = "unknown";
@@ -149,6 +149,49 @@ public final class EntityTypeRegistry {
 		return a.equals(b) || lineage(a).getLast().equals(lineage(b).getLast());
 	}
 
+	/**
+	 * A kind nobody has placed: registered from use with no parent and no description, or not registered at all. It
+	 * separates no identities until the user says what it is a kind of, or a kind of its own.
+	 */
+	public synchronized boolean unplaced(String type) {
+		if (type == null || type.isBlank() || UNKNOWN.equals(type)) {
+			return false;
+		}
+		EntityType e = byName.get(key(type));
+		return e == null || (e.inferred() && e.parent() == null);
+	}
+
+	/**
+	 * Whether a thing of type {@code a} may be the one proposed as {@code b}: the same kind, no kind given, or a kind
+	 * nobody has placed (a "vehicle" registered from use is not known to differ from a thing, so the car typed once as
+	 * either is one car).
+	 */
+	public boolean compatible(String a, String b) {
+		return UNKNOWN.equals(a) || UNKNOWN.equals(b) || sameKind(a, b) || unplaced(a) || unplaced(b);
+	}
+
+	/**
+	 * The registered type a word of a question names ("vehicles", "companies", "objects"): by name, synonym, or type
+	 * word, singular or plural.
+	 */
+	public synchronized Optional<String> kindNamedBy(String word) {
+		for (String w : Lang.singulars(word)) {
+			String k = key(w);
+			if (byName.containsKey(k)) {
+				return Optional.of(k);
+			}
+			if (bySynonym.containsKey(k)) {
+				return Optional.of(bySynonym.get(k));
+			}
+			for (EntityType t : byName.values()) {
+				if (t.typeWords().contains(k)) {
+					return Optional.of(t.name());
+				}
+			}
+		}
+		return Optional.empty();
+	}
+
 	/** A word that says what kind of thing something is (Inc, Kanton, Team) rather than which one, for any type. */
 	public synchronized boolean isTypeWord(String token) {
 		return typeWords.contains(token);
@@ -175,7 +218,7 @@ public final class EntityTypeRegistry {
 		if (byName.containsKey(n)) {
 			return byName.get(n);
 		}
-		var e = new EntityType(n, null, null, List.of(), List.of(), observationId, false, true);
+		var e = new EntityType(n, null, null, List.of(), List.of(), observationId, false, true, false);
 		insert(e);
 		return e;
 	}
@@ -205,6 +248,9 @@ public final class EntityTypeRegistry {
 			if (!def.typeWords().isEmpty()) {
 				replacement.put("type_words", def.typeWords());
 			}
+			if (def.disjoint() != null) {
+				replacement.put("disjoint", def.disjoint());
+			}
 			return update(name, replacement, "defined after registration from use");
 		}
 		String parent = def.parent() == null || def.parent().isBlank() ? null : canonical(def.parent());
@@ -213,7 +259,7 @@ public final class EntityTypeRegistry {
 					+ "'; register the parent first or leave it out.");
 		}
 		var e = new EntityType(name, def.description(), parent, lower(def.synonyms()), lower(def.typeWords()),
-				observationId, false, false);
+				observationId, false, false, Boolean.TRUE.equals(def.disjoint()));
 		insert(e);
 		adopt(e);
 		return e;
@@ -235,6 +281,7 @@ public final class EntityTypeRegistry {
 		String parent = e.parent();
 		List<String> synonyms = e.synonyms();
 		List<String> words = e.typeWords();
+		boolean disjoint = e.disjoint();
 		var changes = new ArrayList<String[]>();
 		for (Map.Entry<String, Object> c : replacement.entrySet()) {
 			String old;
@@ -260,18 +307,23 @@ public final class EntityTypeRegistry {
 				old = Vocabulary.json(words);
 				words = lower(Vocabulary.strings(c.getValue()));
 			}
+			case "disjoint" -> {
+				old = String.valueOf(disjoint);
+				disjoint = Boolean.parseBoolean(String.valueOf(c.getValue()));
+			}
 			default -> throw MnemicException.invalidArgument("Unknown entity type property '" + c.getKey()
-					+ "'; correctable: description, parent, synonyms, type_words.");
+					+ "'; correctable: description, parent, synonyms, type_words, disjoint.");
 			}
 			changes.add(new String[] {c.getKey(), old, value});
 		}
-		var updated = new EntityType(e.name(), description, parent, synonyms, words, e.definedBy(), e.seed(), false);
+		var updated = new EntityType(e.name(), description, parent, synonyms, words, e.definedBy(), e.seed(), false,
+				disjoint);
 		db.write(tx -> {
 			tx.update(
-					"UPDATE entity_type SET description = ?, parent = ?, synonyms = ?, type_words = ?, inferred = 0 "
-							+ "WHERE name = ?",
+					"UPDATE entity_type SET description = ?, parent = ?, synonyms = ?, type_words = ?, disjoint = ?, "
+							+ "inferred = 0 WHERE name = ?",
 					updated.description(), updated.parent(), Vocabulary.json(updated.synonyms()),
-					Vocabulary.json(updated.typeWords()), updated.name());
+					Vocabulary.json(updated.typeWords()), updated.disjoint() ? 1 : 0, updated.name());
 			Vocabulary.logChanges(tx, "entity_type", updated.name(), changes, reason);
 			return null;
 		});
@@ -304,7 +356,7 @@ public final class EntityTypeRegistry {
 						List.of("kanton", "canton", "county", "province", "region", "state", "district", "lake",
 								"mount", "mountain", "river", "island", "city", "town", "village", "municipality",
 								"kommun", "gemeinde", "stadt", "bezirk", "landkreis", "lan", "sjo", "berg", "see")),
-				seed("country", "A country; two different countries never overlap.", "place", List.of("nation"),
+				disjointSeed("country", "A country; two different countries never overlap.", "place", List.of("nation"),
 						List.of()),
 				seed("project", "A project or initiative.", null, List.of(),
 						List.of("project", "projekt", "initiative", "program", "programme")),
@@ -322,7 +374,24 @@ public final class EntityTypeRegistry {
 
 	private static EntityType seed(
 		String name, String description, String parent, List<String> synonyms, List<String> typeWords) {
-		return new EntityType(name, description, parent, synonyms, typeWords, null, true, false);
+		return new EntityType(name, description, parent, synonyms, typeWords, null, true, false, false);
+	}
+
+	/** A seed kind whose members never overlap one another. */
+	private static EntityType disjointSeed(
+		String name, String description, String parent, List<String> synonyms, List<String> typeWords) {
+		return new EntityType(name, description, parent, synonyms, typeWords, null, true, false, true);
+	}
+
+	/** Whether two different things of the type (or of a kind it nests within) never overlap. */
+	public synchronized boolean isDisjoint(String type) {
+		for (String t : lineage(canonical(type))) {
+			EntityType e = byName.get(t);
+			if (e != null && e.disjoint()) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	// ── persistence ──────────────────────────────────────────────────────
@@ -331,16 +400,16 @@ public final class EntityTypeRegistry {
 		for (Row r : db.read(tx -> tx.query("SELECT * FROM entity_type ORDER BY seed DESC, name"))) {
 			index(new EntityType(r.str("name"), r.str("description"), r.str("parent"),
 					Vocabulary.list(r.str("synonyms")), Vocabulary.list(r.str("type_words")), r.lngOrNull("defined_by"),
-					r.lng("seed") == 1, r.lng("inferred") == 1));
+					r.lng("seed") == 1, r.lng("inferred") == 1, r.lng("disjoint") == 1));
 		}
 	}
 
 	private void insert(EntityType e) {
 		db.write(tx -> tx.insert("""
 				INSERT INTO entity_type(name, description, parent, synonyms, type_words, defined_by, seed, inferred,
-				                        created_at) VALUES (?,?,?,?,?,?,?,?,?)""", e.name(), e.description(),
-				e.parent(), Vocabulary.json(e.synonyms()), Vocabulary.json(e.typeWords()), e.definedBy(),
-				e.seed() ? 1 : 0, e.inferred() ? 1 : 0, Instant.now().toString()));
+				                        created_at, disjoint) VALUES (?,?,?,?,?,?,?,?,?,?)""", e.name(),
+				e.description(), e.parent(), Vocabulary.json(e.synonyms()), Vocabulary.json(e.typeWords()),
+				e.definedBy(), e.seed() ? 1 : 0, e.inferred() ? 1 : 0, Instant.now().toString(), e.disjoint() ? 1 : 0));
 		index(e);
 	}
 

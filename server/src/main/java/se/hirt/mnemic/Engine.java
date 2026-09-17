@@ -32,12 +32,17 @@ import se.hirt.mnemic.embed.Embedder;
 import se.hirt.mnemic.embed.EmbedderHolder;
 import se.hirt.mnemic.embed.Embedding;
 import se.hirt.mnemic.embed.VectorStore;
+import se.hirt.mnemic.knowledge.Containment;
+import se.hirt.mnemic.knowledge.Deriver;
+import se.hirt.mnemic.knowledge.Rule;
+import se.hirt.mnemic.knowledge.Entity;
 import se.hirt.mnemic.knowledge.EntityService;
 import se.hirt.mnemic.knowledge.EntityTypeRegistry;
 import se.hirt.mnemic.knowledge.EventService;
 import se.hirt.mnemic.knowledge.EventTypeRegistry;
 import se.hirt.mnemic.knowledge.FactQueries;
 import se.hirt.mnemic.knowledge.FactQueries.History;
+import se.hirt.mnemic.knowledge.FactService;
 import se.hirt.mnemic.knowledge.FactService.Applied;
 import se.hirt.mnemic.knowledge.FactService.Corrected;
 import se.hirt.mnemic.knowledge.Question;
@@ -74,6 +79,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.Objects;
 import java.util.function.Supplier;
 
@@ -166,14 +172,20 @@ public final class Engine implements AutoCloseable {
 	 * questions did, and who proposed: {@code assistant}, {@code server:<model id>}, or {@code none}.
 	 */
 	public record RememberOutcome(Remembered observation, Applied applied, List<Map<String, Object>> resolved,
-			String proposalSource) {
+			String proposalSource, Deriver.Outcome derived) {
+		public RememberOutcome(Remembered observation, Applied applied, List<Map<String, Object>> resolved,
+				String proposalSource) {
+			this(observation, applied, resolved, proposalSource, null);
+		}
 	}
 
 	/** What {@code consolidate} found and did (EXTRACTION.md, Layer 3). */
 	public record Consolidation(long pendingProposals, List<Map<String, Object>> backlog,
 			List<Map<String, Object>> openQuestions, List<Map<String, Object>> inferredVocabulary,
 			List<Map<String, Object>> similarVocabulary, List<Map<String, Object>> descriptiveEvents,
-			List<Map<String, Object>> unusedVocabulary, List<Map<String, Object>> merges, int reclosed,
+			List<Map<String, Object>> unusedVocabulary, List<Map<String, Object>> unresolvedDerivations,
+			List<Map<String, Object>> misfiledRelations, List<Map<String, Object>> attributeUnknown,
+			List<Map<String, Object>> merges, List<Map<String, Object>> nameCollisions, int reclosed,
 			List<Map<String, Object>> proposed, List<Map<String, Object>> resolvedQuestions,
 			List<Map<String, Object>> review, List<String> retired, int embedded, List<Map<String, Object>> duplicates,
 			Rebuilt rebuilt, int removedEntities) {
@@ -218,6 +230,12 @@ public final class Engine implements AutoCloseable {
 			vectors.dropKind(VectorStore.FACT); // the backfill makes them again from the renderings
 			db.setMeta("vector_scheme", VECTOR_SCHEME);
 		}
+		// A seed that took over a predicate registered from use: its facts read the seed's way from now on.
+		for (String adopted : knowledge.predicates().adoptedAtStart()) {
+			knowledge.renderer().rerender(adopted);
+		}
+		// A store from before the rules, or one whose rules changed, gets its derived facts now (family K).
+		knowledge.deriver().derive();
 	}
 
 	// ── remember ────────────────────────────────────────────────────────
@@ -251,13 +269,19 @@ public final class Engine implements AutoCloseable {
 				: knowledge.resolver().resolve(obs, resolves);
 		if (proposal != null) {
 			Applied applied = knowledge.factService().apply(obs, proposal);
+			if (definesOnly(proposal) && applied.definitions().isEmpty() && !applied.warnings().isEmpty()) {
+				// Nothing but vocabulary was offered and none of it was taken: no observation to keep.
+				forget(obs.id(), true);
+				throw MnemicException.invalidArgument("The proposal defines vocabulary only, and none of it was "
+						+ "accepted: " + String.join(" ", applied.warnings()));
+			}
 			embed(obs, applied);
-			return new RememberOutcome(r, applied, resolved, "assistant");
+			return new RememberOutcome(r, applied, resolved, "assistant", derive());
 		}
 		embed(obs, Applied.NOTHING);
 		ModelProposer proposer = options.proposer();
 		if (answerOnly || proposer == null || proposer.mode() != ModelProposer.Mode.SYNC) {
-			return new RememberOutcome(r, Applied.NOTHING, resolved, "none");
+			return new RememberOutcome(r, Applied.NOTHING, resolved, "none", resolved.isEmpty() ? null : derive());
 		}
 		ModelProposer.Result made = proposer.propose(obs.text(), obs.observedAt());
 		if (!made.ok()) {
@@ -265,7 +289,7 @@ public final class Engine implements AutoCloseable {
 		}
 		Applied applied = applyServerProposal(obs, made.proposal());
 		embed(obs, applied);
-		return new RememberOutcome(r, applied, resolved, "server:" + proposer.id());
+		return new RememberOutcome(r, applied, resolved, "server:" + proposer.id(), derive());
 	}
 
 	/** A reading given to an observation: what it produced, and what the reading it replaced had produced. */
@@ -299,6 +323,7 @@ public final class Engine implements AutoCloseable {
 		Observation stored = observations.get(obs.id()).orElseThrow();
 		Applied applied = knowledge.factService().apply(stored, proposal);
 		embed(stored, applied);
+		derive();
 		return new Reading(applied, removed, replaced);
 	}
 
@@ -308,8 +333,8 @@ public final class Engine implements AutoCloseable {
 	}
 
 	/** What a rebuild did: the log entries re-derived, and what could not be done again. */
-	public record Rebuilt(int observations, int corrections, int answers, List<String> unmatched, long factsBefore,
-			long factsAfter) {
+	public record Rebuilt(int observations, int corrections, int answers, List<String> unmatched, List<String> noOps,
+			long factsBefore, long factsAfter, long openQuestionsBefore, List<String> questions) {
 	}
 
 	/**
@@ -320,6 +345,7 @@ public final class Engine implements AutoCloseable {
 	 */
 	public Rebuilt rebuild() {
 		long before = knowledge.facts().count();
+		long openBefore = knowledge.questions().openCount();
 		List<Observation> log = observations.all().stream()
 				.filter(o -> !o.retired() && o.proposalJson() != null && !"{}".equals(o.proposalJson())).toList();
 		// The answers on record, kept before the questions go with the projection.
@@ -337,12 +363,13 @@ public final class Engine implements AutoCloseable {
 		int corrections = 0;
 		int answers = 0;
 		var unmatched = new ArrayList<String>();
+		var noOps = new ArrayList<String>();
 		for (Observation o : log) {
 			if ("correction".equals(o.source().kind())) {
-				if (knowledge.factService().replayCorrection(o)) {
-					corrections++;
-				} else {
-					unmatched.add(o.ref());
+				switch (knowledge.factService().replayCorrection(o)) {
+				case "replayed" -> corrections++;
+				case "no_op" -> noOps.add(o.ref());
+				default -> unmatched.add(o.ref());
 				}
 				continue;
 			}
@@ -352,7 +379,12 @@ public final class Engine implements AutoCloseable {
 			n++;
 		}
 		embedMissing(500);
-		return new Rebuilt(n, corrections, answers, unmatched, before, knowledge.facts().count());
+		derive();
+		// Questions the replay asked and no earlier answer settled: a change of state the reply names, so a
+		// maintenance run does not leave surprises to be counted.
+		List<String> open = knowledge.questions().open(500).stream().map(Question::ref).toList();
+		return new Rebuilt(n, corrections, answers, unmatched, noOps, before, knowledge.facts().count(), openBefore,
+				open);
 	}
 
 	/** Answers once given to this observation's questions, given again to the questions its re-reading raised. */
@@ -437,30 +469,61 @@ public final class Engine implements AutoCloseable {
 			// An entity created by an earlier forgotten observation may have lost its last reference just now.
 			knowledge.entities().removeOrphansOfForgotten();
 		}
+		derive();
 		return forgotten;
 	}
 
+	/** Removes an entity nothing names (EVALUATION.md T20): a duplicate the resolver left, once nothing cites it. */
+	public Map<String, Object> forgetEntity(long entityId) {
+		return knowledge.entities().remove(entityId);
+	}
+
 	/**
-	 * Corrects an entity: its name, its type, or the aliases it keeps ({@code aliases} is the list to keep; the
-	 * entity's own name and the owner's identity always stay). The user says what a thing is called; a wrong fuzzy
-	 * match earlier is undone by dropping the alias it left.
+	 * Corrects an entity: its name, its type, the aliases it keeps ({@code aliases} is the list to keep; the entity's
+	 * own name and the owner's identity always stay), or {@code merge_into}, which folds it into the entity named
+	 * (facts, events, and aliases move; the id keeps resolving to the survivor). The user says what a thing is called;
+	 * a wrong fuzzy match earlier is undone by dropping the alias it left.
 	 */
 	public Map<String, Object> correctEntity(long entityId, Map<String, Object> replacement, String reason) {
 		requireReplacement(replacement, "{\"aliases\": [\"Hooli\", \"Hooli Inc\"]} or {\"name\": \"Hooli AG\"} or "
-				+ "{\"type\": \"organization\"}");
+				+ "{\"type\": \"organization\"} or {\"merge_into\": \"ent-7\"}");
 		var before = knowledge.entities().get(entityId)
 				.orElseThrow(() -> MnemicException.notFound("No entity ent-" + entityId));
-		List<String> aliasesBefore = knowledge.entities().aliases(entityId);
-		var after = knowledge.entities().correct(entityId, replacement);
+		List<String> aliasesBefore = knowledge.entities().aliases(before.id());
+		var rest = new LinkedHashMap<String, Object>(replacement);
+		Object mergeInto = rest.remove("merge_into");
+		Map<String, Object> merge = null;
+		long id = before.id();
+		if (mergeInto != null) {
+			Entity into = knowledge.entities().byRef(String.valueOf(mergeInto)).orElseThrow(() -> MnemicException
+					.notFound("No entity '" + mergeInto + "' to merge " + before.ref() + " into."));
+			if (into.id() == before.id()) {
+				throw MnemicException.invalidArgument(before.ref() + " cannot be merged into itself.");
+			}
+			if (before.id() == knowledge.entities().owner().id()) {
+				throw MnemicException.invalidArgument(
+						"The owner is never merged away; merge the other entity into " + before.ref() + " instead.");
+			}
+			merge = knowledge.entities().merge(before.id(), into.id(), null,
+					"correct: " + (reason == null || reason.isBlank() ? "the same thing twice" : reason));
+			id = into.id();
+		}
+		var after = rest.isEmpty() ? knowledge.entities().get(id).orElseThrow()
+				: knowledge.entities().correct(id, rest);
 		int rerendered = 0;
-		if (!after.name().equals(before.name())) {
-			rerendered = knowledge.renderer().rerenderMentioning(entityId);
+		if (!after.name().equals(before.name()) && merge == null) {
+			rerendered = knowledge.renderer().rerenderMentioning(id);
+		}
+		if (merge != null) {
+			derive();
 		}
 		var out = new LinkedHashMap<String, Object>();
 		out.put("entity", after.ref());
-		out.put("before", Map.of("name", before.name(), "type", before.type(), "aliases", aliasesBefore));
-		out.put("after",
-				Map.of("name", after.name(), "type", after.type(), "aliases", knowledge.entities().aliases(entityId)));
+		out.put("before", entityState(before, aliasesBefore));
+		out.put("after", entityState(after, knowledge.entities().aliases(id)));
+		if (merge != null) {
+			out.put("merged", merge);
+		}
 		out.put("rerendered_facts", rerendered);
 		out.put("reason", reason);
 		return out;
@@ -470,6 +533,7 @@ public final class Engine implements AutoCloseable {
 	public List<Map<String, Object>> answer(List<Resolve> resolves) {
 		List<Map<String, Object>> resolved = knowledge.resolver().resolve(resolves, options.clock().instant());
 		embedMissing(50);
+		derive();
 		return resolved;
 	}
 
@@ -480,13 +544,34 @@ public final class Engine implements AutoCloseable {
 	 * replacement is derived from it, the original is marked {@code corrected} and linked. A replacement of
 	 * {@code {"wrong": true}} retracts the fact instead (D7).
 	 */
+	private static final Set<String> FACT_PROPERTIES = Set.of("subject", "predicate", "object", "qualifier", "scope",
+			"valid_time", "ended", "caller_confidence", "wrong", "redundant");
+
 	public Corrected correct(long factId, Map<String, Object> replacement, String reason) {
 		String about = knowledge.facts().get(factId).map(f -> f.rendering()).orElse("f-" + factId);
 		String why = reason == null || reason.isBlank() ? "" : ": " + reason;
+		if (replacement != null) {
+			for (String key : replacement.keySet()) {
+				if (!FACT_PROPERTIES.contains(key)) {
+					throw MnemicException.invalidArgument("Unknown fact property '" + key + "'; correctable: subject, "
+							+ "predicate, object, qualifier, scope, valid_time, ended, caller_confidence; or "
+							+ "{\"wrong\": true} to withdraw, {\"redundant\": true} to retire a fact a derivation "
+							+ "covers.");
+				}
+			}
+		}
+		if (replacement != null && Boolean.TRUE.equals(replacement.get("redundant"))) {
+			Observation record = correctionRecord("Retirement of " + about + why, factId);
+			Corrected retired = recorded(record, () -> knowledge.factService().retire(factId, reason, record));
+			embedMissing(50);
+			derive();
+			return retired;
+		}
 		if (replacement != null && Boolean.TRUE.equals(replacement.get("wrong"))) {
 			Observation record = correctionRecord("Retraction of " + about + why, factId);
-			Corrected retracted = knowledge.factService().retract(factId, reason, record);
+			Corrected retracted = recorded(record, () -> knowledge.factService().retract(factId, reason, record));
 			embedMissing(50);
+			derive();
 			return retracted;
 		}
 		if (replacement == null || replacement.isEmpty()) {
@@ -494,15 +579,35 @@ public final class Engine implements AutoCloseable {
 					+ "\"Schübelbach\"} or {\"valid_time\": {\"start\": \"2014\"}} or {\"ended\": true}.");
 		}
 		Observation record = correctionRecord("Correction of " + about + why + " → " + Json.write(replacement), factId);
-		Corrected corrected = knowledge.factService().correct(factId, replacement, reason, record);
+		Corrected corrected = recorded(record,
+				() -> knowledge.factService().correct(factId, replacement, reason, record));
 		embedMissing(50);
+		derive();
 		return corrected;
+	}
+
+	/**
+	 * A correction stands in the log only when it did something: one refused (nothing changed, no such predicate) takes
+	 * its record with it, so a rebuild never replays what was never valid.
+	 */
+	private Corrected recorded(Observation record, Supplier<Corrected> correction) {
+		try {
+			return correction.get();
+		} catch (MnemicException e) {
+			forget(record.id(), true);
+			throw e;
+		}
 	}
 
 	/**
 	 * A correction record carries its change in itself: nothing to propose from its text, so it never joins the
 	 * backlog.
 	 */
+	private static boolean definesOnly(Proposal p) {
+		return p.facts().isEmpty() && p.events().isEmpty() && p.entities().isEmpty() && p.closures().isEmpty()
+				&& !(p.predicates().isEmpty() && p.eventTypes().isEmpty() && p.entityTypes().isEmpty());
+	}
+
 	private Observation correctionRecord(String text, long factId) {
 		Remembered r = observations.remember(text, new Source("correction", "f-" + factId, null, null, null),
 				options.clock().instant(), "{}", null, null);
@@ -536,6 +641,15 @@ public final class Engine implements AutoCloseable {
 		out.put("rechecked_conflicts",
 				!before.functional() && after.functional() ? knowledge.factService().recheckFunctional(name) : 0);
 		out.put("changes", knowledge.predicates().changes(name));
+		if (replacement.containsKey("defined_as")) {
+			out.put("defined_as", knowledge.predicates().rulesOf(name).stream().map(Rule::toMap).toList());
+		}
+		if (replacement.containsKey("implies")) {
+			out.put("implies", knowledge.predicates().impliesOf(name));
+		}
+		if (replacement.containsKey("defined_as") || replacement.containsKey("implies")) {
+			out.put("derived", derive().toMap());
+		}
 		return out;
 	}
 
@@ -658,6 +772,9 @@ public final class Engine implements AutoCloseable {
 		}
 		int embedded = dryRun ? 0 : embedMissing(500);
 		var c = knowledge.consolidator().consolidate(dryRun);
+		if (!dryRun) {
+			derive();
+		}
 		List<Map<String, Object>> proposed = dryRun ? List.of() : proposeBacklog();
 		List<Map<String, Object>> backlog = observations.backlog(20).stream().map(o -> {
 			var m = new LinkedHashMap<String, Object>();
@@ -669,7 +786,8 @@ public final class Engine implements AutoCloseable {
 		}).toList();
 		List<Map<String, Object>> open = knowledge.questions().open(20).stream().map(q -> q.toMap()).toList();
 		return new Consolidation(observations.pendingProposals(), backlog, open, c.inferredVocabulary(),
-				c.similarVocabulary(), c.descriptiveEvents(), c.unusedVocabulary(), c.merges(), c.reclosed(), proposed,
+				c.similarVocabulary(), c.descriptiveEvents(), c.unusedVocabulary(), c.unresolvedDerivations(),
+				c.misfiledRelations(), c.attributeUnknown(), c.merges(), c.nameCollisions(), c.reclosed(), proposed,
 				c.resolvedQuestions(), c.review(), retired, embedded, c.duplicates(), rebuilt, c.removedEntities());
 	}
 
@@ -811,12 +929,39 @@ public final class Engine implements AutoCloseable {
 		return knowledge.eventTypes();
 	}
 
+	/** Where things lie, along the containment predicates. */
+	public Containment containment() {
+		return knowledge.containment();
+	}
+
 	public EntityTypeRegistry entityTypes() {
 		return knowledge.entityTypes();
 	}
 
 	public EntityService entities() {
 		return knowledge.entities();
+	}
+
+	private static Map<String, Object> entityState(Entity e, List<String> aliases) {
+		var m = new LinkedHashMap<String, Object>();
+		m.put("name", e.name());
+		m.put("type", e.type());
+		m.put("aliases", aliases);
+		return m;
+	}
+
+	/** Brings the derived facts in line with the current facts and rules (family K). */
+	public Deriver.Outcome derive() {
+		return knowledge.deriver().derive();
+	}
+
+	public Deriver deriver() {
+		return knowledge.deriver();
+	}
+
+	/** The fact layer's write side: readings, corrections, and what a proposal did. */
+	public FactService factService() {
+		return knowledge.factService();
 	}
 
 	public FactQueries facts() {
