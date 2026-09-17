@@ -28,6 +28,12 @@ something you said supports it, and an honest "not known" is never dressed up as
 one, when a new relation looks like an existing one, or when it cannot tell whether one place lies inside
 another, it puts a question to your assistant, holds the fact, and waits for your answer.
 
+**It works out what follows.** Tell it who your parents are, who they married, and who their siblings are, and it
+knows your grandparents, your aunts and uncles, your cousins, your in-laws, and your step-parents without being
+told, with the right side and gender where the record gives them away, and the marriage's dates on the in-laws. A
+relation you state anyway stands as you said it, backed by the chain when the chain agrees, questioned when the
+record's own chains are complete and say otherwise. Correct a parent and everything that rested on it follows.
+
 **It tells you how sure it is.** A thing you said firmly, a thing you said you *think*, a fact read from a
 document, and a fact you have repeated several times all carry different confidence, and the assistant sees
 it. Facts that change with time, such as jobs and homes, show when they were last confirmed and how long ago

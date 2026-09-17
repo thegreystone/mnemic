@@ -99,7 +99,7 @@ public final class EventService {
 		return db.read(tx -> events(tx, tx.query("""
 				SELECT e.* FROM event_fts x JOIN event e ON e.id = x.rowid
 				WHERE event_fts MATCH ? ORDER BY bm25(event_fts), e.id DESC LIMIT ?""", match, limit * 2))).stream()
-				.filter(ev -> day == null || ev.validStart() == null || ev.validStart().compareTo(day) <= 0)
+				.filter(ev -> day == null || (ev.validStart() != null && ev.validStart().compareTo(day) <= 0))
 				.limit(limit).toList();
 	}
 

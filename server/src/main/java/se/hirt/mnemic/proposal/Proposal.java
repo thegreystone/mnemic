@@ -147,17 +147,18 @@ Integer specVersion, List<EntityRef> entities, List<EventRef> events, List<FactR
 	private static final Map<String, Set<String>> KNOWN = Map.of("",
 			Set.of("spec_version", "entities", "events", "facts", "predicates", "closures", "event_types",
 					"entity_types"),
-			"entities", Set.of("ref", "name", "type", "aliases"), "events",
+			"entities", Set.of("ref", "name", "type", "aliases", "gender", "attributes"), "events",
 			Set.of("ref", "type", "participants", "valid_time"), "facts",
 			Set.of("subject", "predicate", "object", "qualifier", "scope", "valid_time", "ended", "derived_from",
 					"derivation", "caller_confidence", "negated", "only"),
 			"predicates",
 			Set.of("name", "description", "domain", "range", "functional", "functional_scope", "symmetric", "inverse",
-					"volatility", "lexicon", "render", "qualifiers", "aliases", "renders"),
+					"volatility", "lexicon", "render", "qualifiers", "aliases", "renders", "defined_as", "implies",
+					"containment"),
 			"closures", Set.of("subject", "predicate", "type"), "valid_time", Set.of("start", "end", "precision"),
 			"derivation", Set.of("kind"), "event_types",
 			Set.of("name", "description", "opens", "closes", "supersedes", "ends_entity", "lexicon", "render"),
-			"entity_types", Set.of("name", "description", "parent", "synonyms", "type_words"));
+			"entity_types", Set.of("name", "description", "parent", "synonyms", "type_words", "disjoint"));
 
 	/**
 	 * Keys the spec does not define are ignored by the reader; every ignored key is named, with the keys that exist
@@ -327,9 +328,23 @@ Integer specVersion, List<EntityRef> entities, List<EventRef> events, List<FactR
 	}
 
 	@JsonIgnoreProperties(ignoreUnknown = true)
-	public record EntityRef(String ref, String name, String type, List<String> aliases) {
+	/**
+	 * {@code gender} and {@code attributes} ({@code {"gender": "male", "handedness": "left"}}) are shorthand: each
+	 * becomes a fact of the observation under the predicate named, with the value as its literal object.
+	 */
+	public record EntityRef(String ref, String name, String type, List<String> aliases, String gender,
+			Map<String, Object> attributes) {
 		public EntityRef {
 			aliases = aliases == null ? List.of() : aliases;
+			attributes = attributes == null ? Map.of() : attributes;
+		}
+
+		public EntityRef(String ref, String name, String type, List<String> aliases) {
+			this(ref, name, type, aliases, null, null);
+		}
+
+		public EntityRef(String ref, String name, String type, List<String> aliases, String gender) {
+			this(ref, name, type, aliases, gender, null);
 		}
 	}
 
@@ -404,9 +419,15 @@ Integer specVersion, List<EntityRef> entities, List<EventRef> events, List<FactR
 	 * one, and the kind it nests within (a canton is a place).
 	 */
 	@JsonIgnoreProperties(ignoreUnknown = true)
+	/** {@code disjoint}: two different things of this type never overlap (countries), which decides containment. */
 	public record EntityTypeDef(String name, String description, String parent, List<String> synonyms,
 			@JsonProperty("type_words")
-			List<String> typeWords) {
+			List<String> typeWords, Boolean disjoint) {
+		public EntityTypeDef(String name, String description, String parent, List<String> synonyms,
+				List<String> typeWords) {
+			this(name, description, parent, synonyms, typeWords, null);
+		}
+
 		public EntityTypeDef {
 			synonyms = synonyms == null ? List.of() : synonyms;
 			typeWords = typeWords == null ? List.of() : typeWords;
@@ -418,12 +439,37 @@ Integer specVersion, List<EntityRef> entities, List<EventRef> events, List<FactR
 	public record PredicateDef(String name, String description, String domain, String range, Boolean functional,
 			@JsonProperty("functional_scope")
 			String functionalScope, Boolean symmetric, String inverse, String volatility, List<String> lexicon,
-			String render, List<String> qualifiers, List<String> aliases, Map<String, Object> renders) {
+			String render, List<String> qualifiers, List<String> aliases, Map<String, Object> renders,
+			@JsonProperty("defined_as")
+			Object definedAs, Map<String, Object> implies, Boolean containment) {
 		public PredicateDef(String name, String description, String domain, String range, Boolean functional,
 				String functionalScope, Boolean symmetric, String inverse, String volatility, List<String> lexicon,
 				String render, List<String> qualifiers, List<String> aliases) {
 			this(name, description, domain, range, functional, functionalScope, symmetric, inverse, volatility, lexicon,
-					render, qualifiers, aliases, null);
+					render, qualifiers, aliases, null, null, null, null);
+		}
+
+		public PredicateDef(String name, String description, String domain, String range, Boolean functional,
+				String functionalScope, Boolean symmetric, String inverse, String volatility, List<String> lexicon,
+				String render, List<String> qualifiers, List<String> aliases, Map<String, Object> renders,
+				Object definedAs) {
+			this(name, description, domain, range, functional, functionalScope, symmetric, inverse, volatility, lexicon,
+					render, qualifiers, aliases, renders, definedAs, null, null);
+		}
+
+		public PredicateDef(String name, String description, String domain, String range, Boolean functional,
+				String functionalScope, Boolean symmetric, String inverse, String volatility, List<String> lexicon,
+				String render, List<String> qualifiers, List<String> aliases, Map<String, Object> renders,
+				Object definedAs, Map<String, Object> implies) {
+			this(name, description, domain, range, functional, functionalScope, symmetric, inverse, volatility, lexicon,
+					render, qualifiers, aliases, renders, definedAs, implies, null);
+		}
+
+		public PredicateDef(String name, String description, String domain, String range, Boolean functional,
+				String functionalScope, Boolean symmetric, String inverse, String volatility, List<String> lexicon,
+				String render, List<String> qualifiers, List<String> aliases, Map<String, Object> renders) {
+			this(name, description, domain, range, functional, functionalScope, symmetric, inverse, volatility, lexicon,
+					render, qualifiers, aliases, renders, null);
 		}
 
 		/**

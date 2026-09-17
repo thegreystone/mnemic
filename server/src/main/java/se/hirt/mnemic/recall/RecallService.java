@@ -157,7 +157,7 @@ public final class RecallService {
 		this.clock = clock;
 		this.vectors = vectors;
 		this.holder = holder;
-		this.probe = new StructuredProbe(entities, facts, containment, types);
+		this.probe = new StructuredProbe(entities, facts, containment, types, predicates);
 		this.renderer = new RecallRenderer(predicates, facts, holder);
 	}
 
@@ -332,9 +332,10 @@ public final class RecallService {
 		}
 	}
 
+	/** With {@code as_of}, only events dated on or before it: an undated event is in no year (EVALUATION.md T24). */
 	private static boolean within(Event ev, Instant asOf) {
-		return asOf == null || ev.validStart() == null
-				|| ev.validStart().compareTo(RecallRenderer.DAY.format(asOf)) <= 0;
+		return asOf == null
+				|| (ev.validStart() != null && ev.validStart().compareTo(RecallRenderer.DAY.format(asOf)) <= 0);
 	}
 
 	/**

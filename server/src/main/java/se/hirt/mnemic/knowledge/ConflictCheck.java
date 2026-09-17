@@ -60,8 +60,10 @@ final class ConflictCheck {
 
 	private final EventTypeRegistry eventTypes;
 	private final EntityTypeRegistry types;
+	private final PredicateRegistry predicates;
 
-	ConflictCheck(EventTypeRegistry eventTypes, EntityTypeRegistry types) {
+	ConflictCheck(EventTypeRegistry eventTypes, EntityTypeRegistry types, PredicateRegistry predicates) {
+		this.predicates = predicates;
 		this.eventTypes = eventTypes;
 		this.types = types;
 	}
@@ -114,8 +116,9 @@ final class ConflictCheck {
 				} else if (op.object() != null) {
 					for (Fact bound : boundsIn(tx, op.subject().id(), op.predicate().name())) {
 						if ("only".equals(bound.mode()) && bound.objectId() != null
-								&& types.isA(op.object().type(), "place")) {
-							Verdict c = Containment.of(tx, op.object().id(), bound.objectId());
+								&& predicates.canContain(types.lineage(op.object().type()))) {
+							Verdict c = Containment.of(tx, op.object().id(), bound.objectId(),
+									predicates.containmentPredicates(), types);
 							if (c.relation() == Relation.DISJOINT) {
 								conflictWith = bound;
 								why = "\"" + bound.rendering() + "\" is on record and " + op.object().name()
@@ -150,10 +153,12 @@ final class ConflictCheck {
 			case "only" -> {
 				if (op.object() != null) {
 					for (Fact other : FactQueries.assertedOpen(tx, op.subject().id(), op.predicate().name())) {
-						if (other.objectId() == null || !types.isA(Containment.typeOf(tx, other.objectId()), "place")) {
+						if (other.objectId() == null
+								|| !predicates.canContain(types.lineage(Containment.typeOf(tx, other.objectId())))) {
 							continue; // a domain or a printer cannot be located: outside the class
 						}
-						Verdict c = Containment.of(tx, other.objectId(), op.object().id());
+						Verdict c = Containment.of(tx, other.objectId(), op.object().id(),
+								predicates.containmentPredicates(), types);
 						if (c.relation() == Relation.DISJOINT) {
 							conflictWith = other;
 							why = "\"" + other.rendering() + "\" is on record and lies outside " + op.object().name()
@@ -186,7 +191,7 @@ final class ConflictCheck {
 	private static Optional<Fact> sameKey(Tx tx, Operands op, String mode) {
 		return tx.queryOne(
 				"""
-						SELECT * FROM fact WHERE subject_id = ? AND predicate = ? AND status = 'current' AND ended = 0
+						SELECT * FROM fact WHERE subject_id = ? AND predicate = ? AND status = 'current' AND derivation_kind <> 'derived' AND ended = 0
 						AND valid_end IS NULL AND COALESCE(object_id, -1) = ? AND COALESCE(lower(object_text), '') = ?
 						AND (? = 1 OR COALESCE(qualifier, '') = ?) AND COALESCE(scope_id, -1) = ? AND mode = ? ORDER BY id LIMIT 1""",
 				op.subject().id(), op.predicate().name(), op.objectId(), op.objectTextKey(),
@@ -196,10 +201,12 @@ final class ConflictCheck {
 
 	/** The current open restrictions and closures on the subject's predicate. */
 	private static List<Fact> boundsIn(Tx tx, long subjectId, String predicate) {
-		return tx.query("""
-				SELECT * FROM fact WHERE subject_id = ? AND predicate = ? AND status = 'current' AND ended = 0
-				AND valid_end IS NULL AND mode IN ('only', 'closure') ORDER BY id""", subjectId, predicate).stream()
-				.map(Fact::from).toList();
+		return tx
+				.query("""
+						SELECT * FROM fact WHERE subject_id = ? AND predicate = ? AND status = 'current' AND derivation_kind <> 'derived' AND ended = 0
+						AND valid_end IS NULL AND mode IN ('only', 'closure') ORDER BY id""",
+						subjectId, predicate)
+				.stream().map(Fact::from).toList();
 	}
 
 	/** The other current asserted values of a functional predicate, per scope when the predicate is scoped. */
@@ -213,7 +220,7 @@ final class ConflictCheck {
 		return tx
 				.query("""
 						SELECT * FROM fact WHERE subject_id = ? AND predicate = ? AND status = 'current' AND valid_end IS NULL
-						AND mode = 'asserted' AND NOT (COALESCE(object_id, -1) = ? AND COALESCE(lower(object_text), '') = ?)"""
+						AND derivation_kind <> 'derived' AND mode = 'asserted' AND NOT (COALESCE(object_id, -1) = ? AND COALESCE(lower(object_text), '') = ?)"""
 						+ (scoped ? " AND COALESCE(scope_id, -1) = ?" : "") + " ORDER BY id", args.toArray())
 				.stream().map(Fact::from).toList();
 	}

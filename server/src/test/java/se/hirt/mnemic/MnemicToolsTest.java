@@ -104,7 +104,7 @@ class MnemicToolsTest {
 		ToolResponse status = tools.status();
 		assertFalse(status.isError(), text(status));
 		Map<String, Object> result = result(status);
-		assertEquals(23, ((Number) result.get("schema_version")).intValue());
+		assertEquals(28, ((Number) result.get("schema_version")).intValue());
 		assertTrue(result.containsKey("pending_proposals"));
 		assertTrue(result.get("model_providers").toString().contains("openai-compatible"), result.toString());
 		// Every recall channel reports whether it answers; the test profile keeps the semantic one off and says so.
@@ -272,6 +272,59 @@ class MnemicToolsTest {
 	}
 
 	@Test
+	void correctMovesAFactRetiresARedundantOneAndRefusesUnknownKeysThroughTheTool() {
+		ToolResponse stored = remember("Katja was my partner until 2019.",
+				Map.of("entities", List.of(Map.of("ref", "e1", "name", "Katja Berg", "type", "person")), "facts",
+						List.of(Map.of("subject", "self", "predicate", "related_to", "object", "e1", "qualifier",
+								"partner", "valid_time", Map.of("end", "2019")))),
+				"tools-move-1");
+		assertFalse(stored.isError(), text(stored));
+		String id = firstFactId(stored);
+		ToolResponse unknown = tools.correct(id, Map.of("relation", "partner_of"), Optional.of("typo"));
+		assertTrue(unknown.isError(), text(unknown));
+		assertTrue(error(unknown).get("message").toString().contains("Unknown fact property 'relation'"),
+				text(unknown));
+		ToolResponse moved = tools.correct(id, Map.of("predicate", "partner_of"), Optional.of("its own predicate"));
+		assertFalse(moved.isError(), text(moved));
+		Map<?, ?> replacement = (Map<?, ?>) result(moved).get("replacement");
+		assertEquals("partner_of", replacement.get("predicate"), text(moved));
+		assertTrue(replacement.get("rendering").toString().contains("partner (until 2019)"), text(moved));
+		assertEquals("corrected", ((Map<?, ?>) result(moved).get("original")).get("standing"));
+		// A stated relation a derivation covers is retired as redundant: superseded by the derived fact.
+		ToolResponse family = remember("My father is Konrad. Britt is Konrad's sister. Britt is my aunt.", Map.of(
+				"entities",
+				List.of(Map.of("ref", "e1", "name", "Konrad Nyberg", "type", "person"),
+						Map.of("ref", "e2", "name", "Britt Nyberg", "type", "person")),
+				"facts",
+				List.of(Map.of("subject", "e1", "predicate", "parent_of", "object", "self", "qualifier", "father"),
+						Map.of("subject", "e2", "predicate", "sibling_of", "object", "e1", "qualifier", "sister"),
+						Map.of("subject", "self", "predicate", "related_to", "object", "e2", "qualifier", "aunt"))),
+				"tools-move-2");
+		assertFalse(family.isError(), text(family));
+		@SuppressWarnings("unchecked")
+		List<Map<String, Object>> facts = (List<Map<String, Object>>) ((Map<?, ?>) result(family).get("stored"))
+				.get("facts");
+		String aunt = facts.stream().filter(f -> "related_to".equals(f.get("predicate"))).findFirst().orElseThrow()
+				.get("id").toString();
+		ToolResponse listed = tools.consolidate(Optional.of(true), Optional.empty(), Optional.empty());
+		assertTrue(text(listed).contains("\"misfiled_relations\"") && text(listed).contains(aunt), text(listed));
+		ToolResponse retired = tools.correct(aunt, Map.of("redundant", true), Optional.of("the chain covers it"));
+		assertFalse(retired.isError(), text(retired));
+		assertEquals("superseded", ((Map<?, ?>) result(retired).get("original")).get("standing"), text(retired));
+		assertEquals(true, result(retired).get("retired"), "one word for the operation: " + text(retired));
+		assertEquals("aunt_uncle_of", ((Map<?, ?>) result(retired).get("covered_by")).get("predicate"), text(retired));
+		assertEquals(((Map<?, ?>) result(retired).get("covered_by")).get("id"), result(retired).get("superseded_by"));
+		// A correction that changes nothing is refused, and leaves no record behind to replay.
+		long observations = ((Number) result(tools.status()).get("observations")).longValue();
+		String movedId = (String) replacement.get("id");
+		ToolResponse noop = tools.correct(movedId, Map.of("qualifier", "partner"), Optional.of("as it is"));
+		assertTrue(noop.isError(), text(noop));
+		assertTrue(error(noop).get("message").toString().contains("changes nothing"), text(noop));
+		assertEquals(observations, ((Number) result(tools.status()).get("observations")).longValue(),
+				"no correction record for a refused correction");
+	}
+
+	@Test
 	void aFactHasOneStandingByItsDatesOrItsRecord() {
 		ToolResponse stored = remember("I worked at Initrode from 2019 to 2022.",
 				Map.of("entities", List.of(Map.of("ref", "e1", "name", "Initrode", "type", "organization")), "facts",
@@ -365,5 +418,114 @@ class MnemicToolsTest {
 	@SuppressWarnings("unchecked")
 	private static Map<String, Object> error(ToolResponse r) {
 		return (Map<String, Object>) Json.readMap(text(r)).get("error");
+	}
+
+	@Test
+	void impliedAttributesFlowThroughTheTool() {
+		// A derived predicate from the client side, with an attribute-driven qualifier and implications.
+		ToolResponse defined = remember("Nieces and nephews.", Map.of("predicates", List.of(Map.of("name", "nibling_of",
+				"description", "Subject is a child of a sibling of object.", "domain", "person", "range", "person",
+				"lexicon", List.of("nephew", "nephews", "niece", "nieces", "nibling"), "render",
+				"{subject} is {object}'s {qualifier|nibling}", "qualifiers", List.of("nephew", "niece"), "defined_as",
+				List.of(Map.of("path", List.of("^parent_of", "sibling_of"), "qualifier", "nibling", "by",
+						Map.of("attribute", "gender", "values", Map.of("male", "nephew", "female", "niece")))),
+				"implies", Map.of("nephew", Map.of("gender", "male"), "niece", Map.of("gender", "female"))))),
+				"tools-nibling-1");
+		assertFalse(defined.isError(), text(defined));
+		assertTrue(text(defined).contains("\"definitions\""), text(defined));
+		ToolResponse optIn = tools.correct("pred:sibling_of",
+				Map.of("implies", Map.of("sister", Map.of("gender", "female"), "brother", Map.of("gender", "male"))),
+				Optional.of("we trust them"));
+		assertFalse(optIn.isError(), text(optIn));
+		ToolResponse family = remember(
+				"Nibtest Parent is Nibtest Kid's father. Nibtest Aunt is Nibtest Parent's sister.",
+				Map.of("entities",
+						List.of(Map.of("ref", "e1", "name", "Nibtest Parent", "type", "person"),
+								Map.of("ref", "e2", "name", "Nibtest Kid", "type",
+										"person"),
+								Map.of("ref", "e3", "name", "Nibtest Aunt", "type", "person")),
+						"facts",
+						List.of(Map.of("subject", "e1", "predicate", "parent_of", "object", "e2", "qualifier",
+								"father"),
+								Map.of("subject", "e3", "predicate", "sibling_of", "object", "e1", "qualifier",
+										"sister"))),
+				"tools-nibling-2");
+		assertFalse(family.isError(), text(family));
+		String aunt = text(tools.inspect("Nibtest Aunt", Optional.empty(), NONE));
+		assertTrue(aunt.contains("Nibtest Aunt is Nibtest Kid's aunt\""), "the sister role implies female: " + aunt);
+		String kid = text(tools.inspect("Nibtest Kid", Optional.empty(), NONE));
+		assertTrue(kid.contains("Nibtest Kid is Nibtest Aunt's nibling"), "no gender for the kid yet: " + kid);
+		ToolResponse nephew = remember("Nibtest Kid is Nibtest Aunt's nephew.", Map.of("entities",
+				List.of(Map.of("ref", "e1", "name", "Nibtest Kid", "type", "person"),
+						Map.of("ref", "e2", "name", "Nibtest Aunt", "type", "person")),
+				"facts",
+				List.of(Map.of("subject", "e1", "predicate", "nibling_of", "object", "e2", "qualifier", "nephew"))),
+				"tools-nibling-3");
+		assertFalse(nephew.isError(), text(nephew));
+		String gaps = text(tools.consolidate(Optional.of(true), Optional.empty(), Optional.empty()));
+		assertTrue(gaps.contains("\"attribute_unknown\":[]"), "both have a gender by implication: " + gaps);
+		// The implied values stand as facts: asked about, and shown with what implies them.
+		String asked = text(tools.recall(Optional.of("what is Nibtest Kid's gender"), NONE, Optional.of(400),
+				Optional.empty(), Optional.empty()));
+		assertTrue(asked.contains("Nibtest Kid is male"), asked);
+		assertTrue(text(tools.inspect("Nibtest Aunt", Optional.empty(), NONE)).contains("Nibtest Aunt is female"),
+				text(tools.inspect("Nibtest Aunt", Optional.empty(), NONE)));
+	}
+
+	@Test
+	void aDuplicateEntityIsListedFoldedOrForgottenThroughTheTools() {
+		ToolResponse first = remember("I work at Grankulla.",
+				Map.of("entities", List.of(Map.of("ref", "e1", "name", "Grankulla", "type", "organization")), "facts",
+						List.of(Map.of("subject", "self", "predicate", "works_at", "object", "e1"))),
+				"tools-dup-1");
+		assertFalse(first.isError(), text(first));
+		ToolResponse second = remember("I live in Grankulla.",
+				Map.of("entities", List.of(Map.of("ref", "e1", "name", "Grankulla", "type", "place")), "facts",
+						List.of(Map.of("subject", "self", "predicate", "lives_in", "object", "e1"))),
+				"tools-dup-2");
+		assertFalse(second.isError(), text(second));
+		@SuppressWarnings("unchecked")
+		String company = ((List<Map<String, Object>>) ((Map<?, ?>) result(first).get("stored")).get("entities"))
+				.getFirst().get("id").toString();
+		// The same name under another kind is asked, the exact match first; "new" makes it another thing.
+		@SuppressWarnings("unchecked")
+		Map<String, Object> q = ((List<Map<String, Object>>) result(second).get("questions")).getFirst();
+		assertEquals("entity_resolution", q.get("kind"), text(second));
+		assertTrue(q.get("message").toString().contains("Grankulla (organization)"), text(second));
+		ToolResponse answered = tools.remember(NONE, NONE, NONE, NONE, Optional.empty(), NONE, NONE, null,
+				Optional.empty(), Optional.of("tools-dup-2-answer"),
+				List.of(Map.of("question_id", q.get("id").toString(), "choice", "new")));
+		assertFalse(answered.isError(), text(answered));
+		String listed = text(tools.consolidate(Optional.of(true), Optional.empty(), Optional.empty()));
+		assertTrue(listed.contains("\"name_collisions\"") && listed.contains("\"shared\":\"Grankulla\""), listed);
+		@SuppressWarnings("unchecked")
+		Map<String, Object> collision = ((List<Map<String, Object>>) result(
+				tools.consolidate(Optional.of(true), Optional.empty(), Optional.empty())).get("name_collisions"))
+				.stream().filter(c -> "Grankulla".equals(c.get("shared"))).findFirst().orElseThrow();
+		String town = company.equals(collision.get("entity")) ? collision.get("and").toString()
+				: collision.get("entity").toString();
+		// An entity facts name is not forgotten; the refusal names them and the fold.
+		ToolResponse refused = tools.forget(town, Optional.empty());
+		assertTrue(refused.isError(), text(refused));
+		assertTrue(error(refused).get("message").toString().contains("merge_into"), text(refused));
+		// The fold, through correct.
+		ToolResponse folded = tools.correct(town, Map.of("merge_into", company), Optional.of("one place"));
+		assertFalse(folded.isError(), text(folded));
+		assertEquals(company, result(folded).get("entity"), text(folded));
+		assertTrue(result(folded).containsKey("merged"), text(folded));
+		// An entity left alone by a re-seed (its observation forgotten, entities kept) is forgotten by id.
+		ToolResponse third = remember("I own a Segway Navimow.",
+				Map.of("entities", List.of(Map.of("ref", "e1", "name", "Segway Navimow", "type", "thing")), "facts",
+						List.of(Map.of("subject", "self", "predicate", "owns", "object", "e1"))),
+				"tools-dup-3");
+		assertFalse(third.isError(), text(third));
+		@SuppressWarnings("unchecked")
+		String lone = ((List<Map<String, Object>>) ((Map<?, ?>) result(third).get("stored")).get("entities")).getFirst()
+				.get("id").toString();
+		assertFalse(tools.forget(result(third).get("observation_id").toString(), Optional.of(true)).isError());
+		ToolResponse gone = tools.forget(lone, Optional.empty());
+		assertFalse(gone.isError(), text(gone));
+		assertEquals(true, result(gone).get("removed"), text(gone));
+		assertTrue(tools.inspect(lone, Optional.empty(), NONE).isError(), "gone for good");
 	}
 }

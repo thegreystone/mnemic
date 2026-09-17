@@ -30,6 +30,7 @@ package se.hirt.mnemic.scenario;
 
 import org.junit.jupiter.api.Test;
 import se.hirt.mnemic.Engine;
+import se.hirt.mnemic.Engine.RememberOutcome;
 import se.hirt.mnemic.Scenario;
 import se.hirt.mnemic.knowledge.Entity;
 import se.hirt.mnemic.knowledge.Fact;
@@ -123,7 +124,12 @@ class RecallFeedbackTest {
 			assertTrue(r.text().contains("Marit Nyberg is Oskar Nyberg's mother"), r.text());
 			assertFalse(r.text().contains("is Nora Nyberg's mother"),
 					"the siblings' facts are not anchors: " + r.text());
-			assertEquals(1, r.hits().stream().mapToInt(h -> h.facts().size()).sum(), r.text());
+			assertEquals(1, r.hits().stream().flatMap(h -> h.facts().stream())
+					.filter(f -> !"derived".equals(f.derivationKind())).count(), r.text());
+			assertTrue(
+					r.hits().stream().flatMap(h -> h.facts().stream()).filter(f -> "derived".equals(f.derivationKind()))
+							.allMatch(f -> f.rendering().contains("Oskar Nyberg")),
+					"derived siblings of Oskar: " + r.text());
 		}
 	}
 
@@ -491,5 +497,83 @@ class RecallFeedbackTest {
 			RecallResult plain = recall(e, "which vehicle did I build");
 			assertEquals(robot, plain.hits().getFirst().observation().id(), plain.text());
 		}
+	}
+
+	@Test
+	@Scenario("F19")
+	void theKindAQuestionAsksForNarrowsTheAnswerOrSaysItCannot() {
+		try (Engine e = engine("f19-kinds")) {
+			remember(e, "I own a Yamaha FZ6-S.",
+					proposal().entity("e1", "Yamaha FZ6-S", "vehicle").fact("self", "owns", "e1"));
+			remember(e, "I own a Toyota Sienna.",
+					proposal().entity("e1", "Toyota Sienna", "thing").fact("self", "owns", "e1"));
+			remember(e, "I own the Sonnefeld apartment.",
+					proposal().entity("e1", "Sonnefeld apartment", "place").fact("self", "owns", "e1"));
+			remember(e, "I work at Hooli as CTO.",
+					proposal().entity("e1", "Hooli", "organization").fact("self", "works_at", "e1")
+							.fact(fact("self", "holds_role", "CTO", null, "e1", null, null, null, null, null)));
+			// A kind the store never heard of cannot narrow or deny: the verdict says so beside the facts.
+			RecallResult bikes = recall(e, "what motorcycles does Mattias own");
+			assertEquals("matched", bikes.structured().state(), bikes.text());
+			assertEquals(3, bikes.structured().facts().size(), bikes.text());
+			assertTrue(
+					bikes.text()
+							.contains("'motorcycles' names no kind of thing on record; the 3 facts under owns "
+									+ "for Mattias Sandell are everything recorded, none of them classified so"),
+					bikes.text());
+			// A kind on record narrows: a vehicle registered from use, the thing, the place.
+			RecallResult vehicles = recall(e, "what vehicles does Mattias own");
+			assertEquals("matched", vehicles.structured().state(), vehicles.text());
+			assertEquals(List.of("Yamaha FZ6-S"), objects(vehicles.structured().facts()), vehicles.text());
+			assertEquals(2, vehicles.structured().nearMisses().size(), vehicles.text());
+			assertTrue(vehicles.text().contains("2 facts under owns for Mattias Sandell of other kinds than vehicle"),
+					vehicles.text());
+			// What the store cannot classify (a kind nobody has placed) is a near-miss that says so, not an answer.
+			RecallResult things = recall(e, "which things does Mattias own");
+			assertEquals(List.of("Toyota Sienna"), objects(things.structured().facts()), things.text());
+			assertTrue(things.text().contains("may be one: Yamaha FZ6-S (vehicle, a kind nobody has placed)"),
+					things.text());
+			RecallResult places = recall(e, "what places does Mattias own");
+			assertEquals(List.of("Sonnefeld apartment"), objects(places.structured().facts()), places.text());
+			assertTrue(places.text().contains("may be one: Yamaha FZ6-S"), places.text());
+			// No kind asked for, a kind that is the predicate's own word, a literal object: unchanged.
+			assertEquals(3, recall(e, "what does Mattias own").structured().facts().size());
+			RecallResult company = recall(e, "which company does Mattias work at");
+			assertEquals("matched", company.structured().state(), company.text());
+			assertEquals(List.of("Mattias Sandell works at Hooli"),
+					company.structured().facts().stream().map(Fact::rendering).toList(), company.text());
+			RecallResult role = recall(e, "what title does Mattias have at Hooli");
+			assertTrue(role.structured().matched(), role.text());
+			// Nothing of the asked kind: a miss that says so, with the rest as near-misses.
+			remember(e, "Companies.", proposal().entity("e1", "Initrode", "organization")
+					.fact(fact("self", "knows", "e1", null, null, null, null, null, null, null)));
+			RecallResult none = recall(e, "what organizations does Mattias own");
+			assertEquals("miss", none.structured().state(), none.text());
+			assertTrue(none.text().contains("nothing under owns for Mattias Sandell is recorded as a organization"),
+					none.text());
+			assertEquals(3, none.structured().nearMisses().size(), none.text());
+		}
+	}
+
+	@Test
+	@Scenario("F20")
+	void aPendingConflictIsSaidInTheVerdict() {
+		try (Engine e = engine("f20-pending")) {
+			remember(e, "I work at Hooli.",
+					proposal().entity("e1", "Hooli", "organization").fact("self", "works_at", "e1"));
+			RememberOutcome o = remember(e, "I work at Initrode.",
+					proposal().entity("e1", "Initrode", "organization").fact("self", "works_at", "e1"));
+			assertEquals("conflict", o.applied().questions().getFirst().get("kind"), o.applied().toString());
+			RecallResult r = recall(e, "where does Mattias work");
+			assertTrue(r.structured().matched(), r.text());
+			assertEquals(1, r.structured().facts().size(), "the pending fact is not the answer: " + r.text());
+			assertTrue(r.text().contains(
+					"pending on works_at, a conflict awaiting an answer: Mattias Sandell works at " + "Initrode [f-"),
+					"the verdict says it is contested: " + r.text());
+		}
+	}
+
+	private static List<String> objects(List<Fact> facts) {
+		return facts.stream().map(f -> f.rendering().replaceFirst("^Mattias Sandell owns ", "")).toList();
 	}
 }

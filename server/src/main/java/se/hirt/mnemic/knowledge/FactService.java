@@ -51,6 +51,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -100,7 +101,8 @@ public final class FactService {
 	}
 
 	/** A correction's outcome; {@code replacement} is null for a retraction. */
-	public record Corrected(Fact original, Fact replacement) {
+	/** {@code kind}: corrected (a replacement stands), retracted (never true), or retired (a derivation covers it). */
+	public record Corrected(Fact original, Fact replacement, String kind) {
 	}
 
 	/** What taking an observation's reading back removed: its own facts and events, and the closures it had caused. */
@@ -148,6 +150,8 @@ public final class FactService {
 		final List<EntityOut> entityOut = new ArrayList<>();
 		final List<EventOut> eventOut = new ArrayList<>();
 		final List<FactOut> factOut = new ArrayList<>();
+		/** Attributes given on an entity entry, stated as facts of this observation under the predicates named. */
+		final List<FactRef> attributeFacts = new ArrayList<>();
 		final List<PredicateOut> predicateOut = new ArrayList<>();
 		/** Vocabulary the proposal defined or used for the first time: {@code {kind, name, resolution}}. */
 		final List<Map<String, Object>> definitions = new ArrayList<>();
@@ -212,6 +216,7 @@ public final class FactService {
 	private final FactLedger ledger;
 	private final ConflictCheck conflicts;
 	private final EntityTypeRegistry types;
+	private final Deriver deriver;
 	private final Lang lang;
 
 	/**
@@ -223,7 +228,8 @@ public final class FactService {
 
 	FactService(Database db, EntityService entities, PredicateRegistry predicates, EventTypeRegistry eventTypes,
 			EventService events, QuestionService questions, FactQueries queries, FactQuestions asks,
-			FactRenderer renderer, FactLedger ledger, EntityTypeRegistry types) {
+			FactRenderer renderer, FactLedger ledger, EntityTypeRegistry types, Deriver deriver) {
+		this.deriver = deriver;
 		this.db = db;
 		this.entities = entities;
 		this.predicates = predicates;
@@ -235,7 +241,7 @@ public final class FactService {
 		this.renderer = renderer;
 		this.ledger = ledger;
 		this.types = types;
-		this.conflicts = new ConflictCheck(eventTypes, types);
+		this.conflicts = new ConflictCheck(eventTypes, types, predicates);
 		this.lang = renderer.lang();
 	}
 
@@ -294,22 +300,41 @@ public final class FactService {
 			}
 			Optional<Predicate> before = predicates.get(d.name());
 			boolean used = a.p.facts().stream().anyMatch(f -> d.name().equals(f.predicate()));
-			if (before.isPresent() && before.get().isInferred() && !PredicateRegistry.bare(d)) {
-				String name = predicates.register(d, a.obs.id()).name();
-				var m = definition("predicate", name, "defined");
-				m.put("rerendered_facts", renderer.rerender(name));
-				if (!before.get().functional() && predicates.get(name).orElseThrow().functional()) {
-					m.put("rechecked_conflicts", recheckFunctional(name));
+			try {
+				if (before.isPresent() && before.get().isInferred() && !PredicateRegistry.bare(d)) {
+					String name = predicates.register(d, a.obs.id()).name();
+					var m = definition("predicate", name, "defined");
+					m.put("rerendered_facts", renderer.rerender(name));
+					if (!before.get().functional() && predicates.get(name).orElseThrow().functional()) {
+						m.put("rechecked_conflicts", recheckFunctional(name));
+					}
+					a.definitions.add(m);
+				} else if (before.isPresent() && (d.implies() != null || d.definedAs() != null)) {
+					// An existing predicate given rules or implications: taken, and logged as a change of it.
+					String name = predicates.register(d, a.obs.id()).name();
+					var m = definition("predicate", name, "updated");
+					m.put("applied", d.implies() != null && d.definedAs() != null ? List.of("implies", "defined_as")
+							: d.implies() != null ? List.of("implies") : List.of("defined_as"));
+					if (PredicateRegistry.statesMoreThanAdditions(d)) {
+						a.warnings.add("Predicate '" + name + "' is already defined: only implies and defined_as were "
+								+ "taken from the definition; change the rest with correct(pred:" + name + ", {...}).");
+					}
+					a.definitions.add(m);
+				} else if (before.isPresent() && !before.get().isInferred()
+						&& PredicateRegistry.statesMoreThanAdditions(d)) {
+					a.warnings.add("Predicate '" + before.get().name() + "' is already defined; the definition was "
+							+ "left as it is. Change it with correct(pred:" + before.get().name() + ", {...}).");
+				} else if (before.isEmpty() && !used) {
+					PredicateRegistry.Resolution r = predicates.resolve(d.name(), d, a.obs.id(), a.warnings);
+					if (r.asks()) {
+						a.warnings.add("Predicate '" + d.name() + "' reads like '" + r.candidate().name()
+								+ "' and no fact uses it here, so it was not registered; use it in a fact to be asked.");
+					} else {
+						a.definitions.add(definition("predicate", r.predicate().name(), "registered"));
+					}
 				}
-				a.definitions.add(m);
-			} else if (before.isEmpty() && !used) {
-				PredicateRegistry.Resolution r = predicates.resolve(d.name(), d, a.obs.id(), a.warnings);
-				if (r.asks()) {
-					a.warnings.add("Predicate '" + d.name() + "' reads like '" + r.candidate().name()
-							+ "' and no fact uses it here, so it was not registered; use it in a fact to be asked.");
-				} else {
-					a.definitions.add(definition("predicate", r.predicate().name(), "registered"));
-				}
+			} catch (MnemicException e) {
+				skipped(a, e, "Predicate '" + d.name() + "'");
 			}
 		}
 		for (EntityTypeDef d : a.p.entityTypes()) {
@@ -353,8 +378,36 @@ public final class FactService {
 	 * An entity of a type the registry lacks: the type is registered from this use, and the caller is asked once what
 	 * kind of thing it is. Nothing is held; the entity stands whatever the answer.
 	 */
+	/**
+	 * The kinds the proposal's facts expect of an entity: the domains of the predicates it is the subject of and the
+	 * ranges of those it is the object of. Empty when any of them takes anything, or nothing uses it.
+	 */
+	private Set<String> expectedKinds(Application a, EntityRef er) {
+		var out = new LinkedHashSet<String>();
+		for (FactRef f : a.p.facts()) {
+			Predicate p = predicates.get(f.predicate()).orElse(null);
+			if (p == null) {
+				continue;
+			}
+			for (var side : List.of(Map.entry(f.subject(), p.domain()), Map.entry(f.object(), p.range()))) {
+				if (side.getKey() == null || !FactQuestions.isRef(side.getKey(), er)) {
+					continue;
+				}
+				if (side.getValue().contains("*") || side.getValue().contains("literal")) {
+					return Set.of();
+				}
+				out.addAll(side.getValue());
+			}
+		}
+		return out;
+	}
+
 	private void registerTypeFromUse(Application a, Entity e) {
-		String type = e.type();
+		registerTypeFromUse(a, e.type(), e);
+	}
+
+	/** Registers {@code type} from its use for {@code e}, and asks what kind of thing it is. */
+	private void registerTypeFromUse(Application a, String type, Entity e) {
 		if (EntityTypeRegistry.UNKNOWN.equals(type) || types.get(type).isPresent()) {
 			return;
 		}
@@ -393,6 +446,19 @@ public final class FactService {
 
 	private void resolveEntities(Application a) {
 		for (EntityRef er : a.p.entities()) {
+			var attributes = new LinkedHashMap<String, Object>(er.attributes());
+			if (er.gender() != null && !er.gender().isBlank()) {
+				attributes.putIfAbsent("gender", er.gender().trim());
+			}
+			for (Map.Entry<String, Object> at : attributes.entrySet()) {
+				// The shorthand on the entry is a fact like any other: with provenance, correctable, derivable from.
+				if (er.name() == null || at.getValue() == null || String.valueOf(at.getValue()).isBlank()) {
+					continue;
+				}
+				a.attributeFacts.add(new FactRef(er.ref() != null ? er.ref() : er.name(),
+						at.getKey().trim().toLowerCase(Locale.ROOT), String.valueOf(at.getValue()).trim(), null, null,
+						null, null, List.of(), new Proposal.Derivation("explicit"), null, null, null));
+			}
 			if (er.name() == null || er.name().isBlank()) {
 				a.warnings.add(
 						"An entity without a 'name' was skipped" + (er.ref() != null ? " (ref " + er.ref() + ")" : "")
@@ -413,7 +479,8 @@ public final class FactService {
 			Resolved r;
 			try {
 				r = entities.resolve(er.name(), er.type(), er.aliases(), a.obs.id(),
-						distinctFrom(a.refs, entities.exactIds(er.name(), er.aliases(), er.type())));
+						distinctFrom(a.refs, entities.exactIds(er.name(), er.aliases(), er.type())),
+						expectedKinds(a, er));
 			} catch (MnemicException e) {
 				if (e.code() != MnemicException.Code.INVALID_ARGUMENT) {
 					throw e;
@@ -431,7 +498,32 @@ public final class FactService {
 			a.refs.put(key, r.entity());
 			a.refs.put(Names.norm(er.name()), r.entity());
 			a.entityOut.add(new EntityOut(key, r.entity().ref(), r.entity().name(), r.how(), r.score()));
+			if ("created".equals(r.how())) {
+				// Another kind of thing with the same name stays another thing (EVALUATION.md B3), but silently
+				// once cost a caller a duplicate car: said, with the way to fold them if they are one.
+				List<Entity> twins = entities.homonymsOf(r.entity().id());
+				if (!twins.isEmpty()) {
+					a.warnings.add("Entity '" + er.name() + "' (" + r.entity().type() + ") was created beside "
+							+ String.join(", ",
+									twins.stream().map(t -> t.ref() + " '" + t.name() + "' (" + t.type() + ")")
+											.toList())
+							+ ", another kind of thing with the same name. If they are one, fold it with correct("
+							+ r.entity().ref() + ", {\"merge_into\": \"" + twins.getFirst().ref() + "\"}).");
+				}
+			}
 			registerTypeFromUse(a, r.entity());
+			String proposedType = types.canonical(er.type());
+			if (!"created".equals(r.how()) && !EntityTypeRegistry.UNKNOWN.equals(proposedType)
+					&& !EntityTypeRegistry.UNKNOWN.equals(r.entity().type())
+					&& !types.sameKind(r.entity().type(), proposedType)) {
+				// Matched through a kind nobody has placed: the word registers and is asked about, and the match is
+				// said, so a caller who meant another thing can define the kind and try again.
+				registerTypeFromUse(a, proposedType, r.entity());
+				a.warnings.add("Entity '" + er.name() + "' resolved to " + r.entity().ref() + " (" + r.entity().type()
+						+ "): '" + proposedType + "' is a kind nobody has placed, so it cannot tell them apart. If "
+						+ "they are two things, define the type with its parent (entity_types) or answer its kind, "
+						+ "and remember again.");
+			}
 		}
 	}
 
@@ -603,11 +695,12 @@ public final class FactService {
 	 */
 	private void applyFacts(Application a, List<FactRef> opened) {
 		var all = new ArrayList<>(a.p.facts());
+		all.addAll(a.attributeFacts);
 		all.addAll(opened);
 		var order = new ArrayList<Integer>();
 		for (int i = 0; i < all.size(); i++) {
 			String pr = all.get(i).predicate();
-			if ("located_in".equals(pr) || "part_of".equals(pr)) {
+			if (predicates.isContainment(pr)) {
 				order.add(i);
 			}
 		}
@@ -749,7 +842,14 @@ public final class FactService {
 			a.ask(questions.get(q.id()).orElseThrow());
 		}
 		for (long[] ask : stored.asks()) {
-			asks.containment(a.obs, ask[0], ask[1], ask[2]).ifPresent(a::ask);
+			// The predicate the answer would store: the containment predicate that nests the one kind in the other.
+			String within = predicates
+					.containmentFor(types.lineage(entities.get(ask[0]).map(Entity::type).orElse("unknown")),
+							types.lineage(entities.get(ask[1]).map(Entity::type).orElse("unknown")))
+					.map(Predicate::name).orElse(null);
+			if (within != null) {
+				asks.containment(a.obs, ask[0], ask[1], ask[2], within).ifPresent(a::ask);
+			}
 		}
 		return Optional.ofNullable(stored.out());
 	}
@@ -785,7 +885,7 @@ public final class FactService {
 	 * nothing in Sweden") rather than minting an entity called "anything in Sweden".
 	 */
 	private Operands operands(Application a, FactRef f, Predicate pred) {
-		Entity subject = f.subject() == null ? entities.owner() : resolveRef(a, f.subject());
+		Entity subject = f.subject() == null ? entities.owner() : resolveRef(a, f.subject(), kinds(pred.domain()));
 		if (subject == null) {
 			return null;
 		}
@@ -808,13 +908,14 @@ public final class FactService {
 		} else if ("negated".equals(mode) && !namesAnEntity(f.object(), a.refs)) {
 			objectText = f.object().trim();
 		} else {
-			object = resolveRef(a, f.object());
+			object = resolveRef(a, f.object(), kinds(pred.range()));
 			if (object == null) {
 				return null;
 			}
-			if ("only".equals(mode) && !types.isA(object.type(), "place")) {
-				throw MnemicException.invalidArgument("'only' needs a place as its object (the bound everything lies "
-						+ "within); " + object.name() + " is " + object.type() + ".");
+			if ("only".equals(mode) && !predicates.canContain(types.lineage(object.type()))) {
+				throw MnemicException.invalidArgument("'only' needs as its object something things can lie within "
+						+ "(the object of a containment predicate: a place, or what a definition marks so); "
+						+ object.name() + " is " + object.type() + ".");
 			}
 			if ("asserted".equals(mode)) {
 				warnIfContainsAnotherObject(a, subject, pred, object);
@@ -865,7 +966,7 @@ public final class FactService {
 	 * and predicate is almost certainly a restriction written as ownership ("owns Switzerland"): warn.
 	 */
 	private void warnIfContainsAnotherObject(Application a, Entity subject, Predicate pred, Entity object) {
-		if ("located_in".equals(pred.name()) || "part_of".equals(pred.name())) {
+		if (pred.containment()) {
 			return;
 		}
 		List<Long> siblings = db.read(tx -> tx.query("""
@@ -873,7 +974,8 @@ public final class FactService {
 				AND object_id IS NOT NULL AND object_id <> ?""", subject.id(), pred.name(), object.id())).stream()
 				.map(r -> r.lng("object_id")).toList();
 		for (long sibling : siblings) {
-			if (db.read(tx -> Containment.ancestors(tx, sibling)).contains(object.id())) {
+			if (db.read(tx -> Containment.ancestors(tx, sibling, predicates.containmentPredicates()))
+					.contains(object.id())) {
 				String inner = entities.nameOf(sibling);
 				a.warnings.add("'" + subject.name() + " " + pred.name() + " " + object.name() + "': " + object.name()
 						+ " contains " + inner + ", which " + subject.name() + " already " + pred.name()
@@ -887,9 +989,11 @@ public final class FactService {
 	}
 
 	/** The current row with the same key and mode, whatever its bounds. */
+	/** The current stated row a restatement folds into; a derived row (family K) is never it. */
 	private static Optional<Row> currentRow(Tx tx, Operands op) {
 		return tx.queryOne("""
 				SELECT * FROM fact WHERE subject_id = ? AND predicate = ? AND status = 'current'
+				AND derivation_kind <> 'derived'
 				AND COALESCE(object_id, -1) = ? AND COALESCE(lower(object_text), '') = ?
 				AND (? = 1 OR COALESCE(qualifier, '') = ?) AND COALESCE(scope_id, -1) = ? AND mode = ?
 				ORDER BY id LIMIT 1""", op.subject().id(), op.predicate().name(), op.objectId(), op.objectTextKey(),
@@ -981,7 +1085,16 @@ public final class FactService {
 	// ── references ──────────────────────────────────────────────────────
 
 	/** Resolves a reference; null when the name is held behind an entity question (asked here if needed). */
+	/** The kinds a predicate's side expects, or nothing when it takes anything. */
+	private static Set<String> kinds(List<String> side) {
+		return side.contains("*") || side.contains("literal") ? Set.of() : new LinkedHashSet<>(side);
+	}
+
 	private Entity resolveRef(Application a, String ref) {
+		return resolveRef(a, ref, Set.of());
+	}
+
+	private Entity resolveRef(Application a, String ref, Set<String> expected) {
 		if (ref == null || ref.isBlank()) {
 			throw MnemicException.invalidArgument("an entity reference is empty.");
 		}
@@ -998,7 +1111,7 @@ public final class FactService {
 			throw MnemicException.invalidArgument("'" + ref + "' refers to no entity in this proposal.");
 		}
 		Resolved r = entities.resolve(ref, null, List.of(), a.obs.id(),
-				distinctFrom(a.refs, entities.exactIds(ref, List.of(), null)));
+				distinctFrom(a.refs, entities.exactIds(ref, List.of(), null)), expected);
 		if (r.ambiguous()) {
 			var er = new EntityRef(null, ref, null, List.of());
 			a.ask(asks.entity(a.obs, ref, null, r.candidates(), FactQuestions.heldProposal(a.p, er)));
@@ -1152,6 +1265,20 @@ public final class FactService {
 	 */
 	public Corrected correct(long factId, Map<String, Object> replacement, String reason, Observation correction) {
 		Fact original = correctable(factId);
+		FactRef ref = readingOf(original, replacement);
+		if (sameStatement(ref, readingOf(original, Map.of()))) {
+			throw MnemicException.invalidArgument("The correction changes nothing about " + original.ref()
+					+ ": every key names the value on record. Name a key with a different value, {\"wrong\": true}, or "
+					+ "{\"redundant\": true}.");
+		}
+		return correctWith(original, ref, reason, correction);
+	}
+
+	/**
+	 * The fact as a correction reading states it: the original's values, the replacement's over them. With an empty
+	 * replacement, the fact as it stands.
+	 */
+	public FactRef readingOf(Fact original, Map<String, Object> replacement) {
 		String subject = str(replacement, "subject",
 				original.subjectId() == entities.owner().id() ? "self" : entities.nameOf(original.subjectId()));
 		String object = str(replacement, "object",
@@ -1159,21 +1286,41 @@ public final class FactService {
 		String qualifier = str(replacement, "qualifier", original.qualifier());
 		String scope = str(replacement, "scope",
 				original.scopeId() == null ? null : entities.nameOf(original.scopeId()));
+		// A fact moved to another predicate: the vocabulary refactor a dedicated predicate asks for.
+		String predicate = str(replacement, "predicate", original.predicate());
+		if (predicate != null && !predicate.equals(original.predicate())) {
+			predicate = predicates.get(predicate).map(Predicate::name).orElseThrow(() -> MnemicException
+					.invalidArgument("No predicate '" + replacement.get("predicate") + "' to move the fact to."));
+		}
 		ValidTime vt = replacement.get("valid_time") instanceof Map<?, ?> m
 				? new ValidTime(str(m, "start", null), str(m, "end", null), str(m, "precision", null))
 				: (original.validStart() == null && original.validEnd() == null ? null
-						: new ValidTime(original.validStart(), original.validEnd(), original.validStartPrecision()));
+						: new ValidTime(original.validStart(), original.validEnd(),
+								original.validStartPrecision() != null ? original.validStartPrecision()
+										: original.validEndPrecision()));
 		Boolean ended = replacement.containsKey("ended") ? Boolean.TRUE.equals(replacement.get("ended"))
 				: original.ended();
 		Double callerConfidence = replacement.containsKey("caller_confidence")
 				? (replacement.get("caller_confidence") == null ? null
 						: ((Number) replacement.get("caller_confidence")).doubleValue())
 				: original.callerConfidence();
-		var ref = new FactRef(subject, original.predicate(), object, qualifier, scope, vt, ended, List.of(),
+		return new FactRef(subject, predicate, object, qualifier, scope, vt, ended, List.of(),
 				new Proposal.Derivation("explicit"), callerConfidence,
 				"negated".equals(original.mode()) ? Boolean.TRUE : null,
 				"only".equals(original.mode()) ? Boolean.TRUE : null);
-		return correctWith(original, ref, reason, correction);
+	}
+
+	/** Whether two readings state the same fact: the same terms and bounds, whatever the precision noted. */
+	public static boolean sameStatement(FactRef a, FactRef b) {
+		return Objects.equals(a.subject(), b.subject()) && Objects.equals(a.predicate(), b.predicate())
+				&& Objects.equals(a.object(), b.object()) && Objects.equals(a.qualifier(), b.qualifier())
+				&& Objects.equals(a.scope(), b.scope())
+				&& Objects.equals(a.validTime() == null ? null : a.validTime().start(),
+						b.validTime() == null ? null : b.validTime().start())
+				&& Objects.equals(a.validTime() == null ? null : a.validTime().end(),
+						b.validTime() == null ? null : b.validTime().end())
+				&& Objects.equals(a.ended(), b.ended()) && Objects.equals(a.callerConfidence(), b.callerConfidence())
+				&& Objects.equals(a.negated(), b.negated()) && Objects.equals(a.only(), b.only());
 	}
 
 	private Fact correctable(long factId) {
@@ -1203,7 +1350,7 @@ public final class FactService {
 			FactLedger.supersession(tx, original.id(), newId, "correction", reason, null, correction.id(), null);
 			return null;
 		});
-		return new Corrected(queries.get(original.id()).orElseThrow(), queries.get(newId).orElseThrow());
+		return new Corrected(queries.get(original.id()).orElseThrow(), queries.get(newId).orElseThrow(), "corrected");
 	}
 
 	/**
@@ -1219,14 +1366,35 @@ public final class FactService {
 					reason == null || reason.isBlank() ? "user: never true" : reason, null, correction.id(), null);
 			return null;
 		});
-		return new Corrected(queries.get(factId).orElseThrow(), null);
+		return new Corrected(queries.get(factId).orElseThrow(), null, "retracted");
+	}
+
+	/**
+	 * Retires a stated fact a derivation now covers: it was true, and it still is, but the record derives it from the
+	 * facts behind it, so the statement steps back as {@code superseded} by the derived fact (or by nothing named, when
+	 * none covers it at the moment), with the reason on its history. Replayed on rebuild like any correction.
+	 */
+	public Corrected retire(long factId, String reason, Observation correction) {
+		Fact original = correctable(factId);
+		Optional<Fact> cover = deriver.covering(original);
+		storeReading(correction, reading("retires", original, reason, List.of()));
+		db.write(tx -> {
+			tx.update("UPDATE fact SET status = 'superseded', superseded_by = ? WHERE id = ?",
+					cover.map(Fact::id).orElse(null), factId);
+			FactLedger.supersession(tx, factId, cover.map(Fact::id).orElse(null), "supersession",
+					"retired: " + (cover.isPresent() ? "covered by derived " + cover.get().ref() : "stated apart")
+							+ (reason == null || reason.isBlank() ? "" : "; " + reason),
+					null, correction.id(), null);
+			return null;
+		});
+		return new Corrected(queries.get(factId).orElseThrow(), cover.orElse(null), "retired");
 	}
 
 	/**
 	 * The reading of a correction record: the fact it is about, named by its key rather than its id, the reason, and
 	 * the replacement it states (none for a retraction). What a rebuild needs to do it again.
 	 */
-	private Map<String, Object> reading(String kind, Fact about, String reason, List<FactRef> facts) {
+	public Map<String, Object> reading(String kind, Fact about, String reason, List<FactRef> facts) {
 		var key = new LinkedHashMap<String, Object>();
 		key.put("subject", about.subjectId() == entities.owner().id() ? "self" : entities.nameOf(about.subjectId()));
 		key.put("predicate", about.predicate());
@@ -1252,12 +1420,14 @@ public final class FactService {
 	 * matches, what the user stated still stands: the replacement is stored as a fact of the record, with nothing
 	 * marked corrected, and the rebuild reports the record for a person to check. False then.
 	 */
-	public boolean replayCorrection(Observation record) {
+	public String replayCorrection(Observation record) {
 		Map<String, Object> reading = Json.readMap(record.proposalJson());
 		boolean retraction = reading.get("retracts") instanceof Map<?, ?>;
-		Object key = retraction ? reading.get("retracts") : reading.get("corrects");
+		boolean retirement = reading.get("retires") instanceof Map<?, ?>;
+		Object key = retraction ? reading.get("retracts")
+				: retirement ? reading.get("retires") : reading.get("corrects");
 		if (!(key instanceof Map<?, ?> k)) {
-			return false;
+			return "unmatched";
 		}
 		String reason = reading.get("reason") == null ? null : String.valueOf(reading.get("reason"));
 		Proposal p = Proposal.parse(record.proposalJson());
@@ -1266,17 +1436,25 @@ public final class FactService {
 			if (!p.facts().isEmpty()) {
 				apply(record, new Proposal(Proposal.CURRENT_SPEC_VERSION, List.of(), List.of(), p.facts(), List.of()));
 			}
-			return false;
+			return "unmatched";
 		}
 		if (retraction) {
 			retract(target.get().id(), reason, record);
-			return true;
+			return "replayed";
+		}
+		if (retirement) {
+			retire(target.get().id(), reason, record);
+			return "replayed";
 		}
 		if (p.facts().isEmpty()) {
-			return false;
+			return "unmatched";
+		}
+		// A record from before no-op corrections were refused: it stated what stood, and states it again. Nothing to do.
+		if (sameStatement(p.facts().getFirst(), readingOf(target.get(), Map.of()))) {
+			return "no_op";
 		}
 		correctWith(target.get(), p.facts().getFirst(), reason, record);
-		return true;
+		return "replayed";
 	}
 
 	/**

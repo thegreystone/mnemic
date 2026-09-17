@@ -237,6 +237,7 @@ and also shows each predicate's lexicon and the event types.
 |---------------|-----------------------------------------|-----------:|----------:|------------|----------------------------------------------------------------------------------------------|----------------------------------------|
 | `works_at`    | person → organization                   |        yes |        no | high       |                                                                                              |                                        |
 | `holds_role`  | person → literal                        |  per scope |        no | high       |                                                                                              |                                        |
+| `gender`      | person → literal                        |        yes |        no | low        |                                                                                              |                                        |
 | `leads`       | person → project/team/product/organization |      no |        no | high       |                                                                                              |                                        |
 | `lives_in`    | person → place                          |        yes |        no | high       |                                                                                              |                                        |
 | `born_in`     | person → place                          |        yes |        no | low        |                                                                                              |                                        |
@@ -246,6 +247,10 @@ and also shows each predicate's lexicon and the event types.
 | `partner_of`  | person → person                         |        yes |       yes | medium     | girlfriend, boyfriend, partner                                                                            |                                        |
 | `engaged_to`  | person → person                         |        yes |       yes | high       | fiancé, fiancée                                                                                |                                        |
 | `step_parent_of`| person → person                         |         no |        no | low        | stepmother, stepfather                                                                        |                                        |
+| `grandparent_of`| person → person                         |         no |        no | low        | grandmother, grandfather, maternal/paternal …                                                                        |                                        |
+| `aunt_uncle_of` | person → person                         |         no |        no | low        | aunt, uncle                                                                                   |                                        |
+| `cousin_of`     | person → person                         |         no |       yes | low        | cousin                                                                                        |                                        |
+| `in_law_of`     | person → person                         |         no |        no | medium     | mother-in-law … sister-in-law                                                                        |                                        |
 | `sibling_of`  | person → person                         |         no |       yes | low        | brother, sister, twin, twin brother, twin sister, half-brother, half-sister, stepbrother, stepsister |                                 |
 | `owns`        | * → *                                   |         no |        no | medium     |                                                                                              |                                        |
 | `prefers`     | person → *                              |         no |        no | medium     |                                                                                              |                                        |
@@ -261,6 +266,22 @@ and also shows each predicate's lexicon and the event types.
 *Note: a store created before migration V009 carries that migration's inverse
 lexicon for `works_at` (employee, employees, staff) and `located_in` (contains,
 within it, in it); the Java seed leaves both empty on a fresh store.*
+
+`grandparent_of`, `aunt_uncle_of`, `cousin_of`, and `in_law_of` are derived
+(see Derived predicates below), and `sibling_of` and `step_parent_of` are
+derived as well as stated.
+
+*Containment* (`located_in`, `part_of`) means a fact nests its subject inside
+its object: the chains restrictions, closures, and containment questions are
+checked along, and the facts a proposal applies first. Any definition may set
+`containment: true`, and `correct(pred:x, {containment: true})` sets it
+later; one whose range is anything (`part_of`) nests what it is given but
+declares no kind a container, so only kinds a concrete range names (places,
+through `located_in`) are asked where they lie or may bound a restriction.
+An entity type may be `disjoint` (`country` by the seed): two
+different things of that kind never overlap, which is what makes two chains
+disjoint when they meet no common ancestor. Nothing else about places or
+countries lives in the engine.
 
 *Functional* means at most one current object per subject at any valid time.
 A new object for a functional predicate is a potential conflict, not a second
@@ -404,7 +425,10 @@ ambiguous name is a question; a bare unknown name is registered from use.
 entities, in order: first-person references → the owner; exact match of the
 normalised name or any proposed alias against the alias table, with type
 compatibility (a typeless match takes the type it is now given; `place` and
-`country` are the same kind); then a fuzzy score over every live entity of a
+`country` are the same kind; a kind nobody has placed, registered from use
+with no parent or not registered at all, is compatible with any kind, since it
+separates no identities until the user says what it is a kind of, and such a
+match is warned about); then a fuzzy score over every live entity of a
 compatible type, the larger of the shared-name-token ratio and the
 character-trigram Jaccard, behind an entropy gate (nothing shorter than three
 letters, nothing made only of stopwords, and two full names whose leading
@@ -415,7 +439,21 @@ event mentioning the name is held until the caller answers with a candidate
 id or `"new"`; below, a new entity is created. When the name matches one
 entity and a proposed alias another, the two are merged there and then. No
 embedding is involved. Merges are recorded in `entity_merge` with the facts
-and aliases that moved, so they can be reviewed and undone.
+and aliases that moved, so they can be reviewed and undone. An exact name
+under a placed kind that is not the kind on record (Mercury the company,
+Mercury the town), or an untyped name that fits two kinds, is asked about,
+the exact matches being the first candidates at 1.0 ahead of any fuzzy
+match: a caller cannot know what type a thing was first registered under.
+The question is asked once; an answer naming an entity settles every later
+mention (resolution `answered`), and `new` makes another entity that its
+own type then resolves to. `consolidate` lists pairs of different kinds
+sharing a name under `name_collisions`. When nobody typed a name, the
+predicates that use it say what it is: the domains and ranges of the facts
+it appears in shape the fuzzy candidates (an insurer is no candidate for
+the object of `lives_in`) and type the entity when they agree on one kind;
+a kind nobody has placed gets the same shaping. At recall, a name that is
+an alias with its model numbers removed ("raspberry pi") spots every member
+of the family, and the verdict lists each member's facts.
 
 **Temporal normalisation.** A `valid_time` bound is an ISO date (`2018`,
 `2018-03`, `2018-03-05`, or an instant), whose precision is inferred when not
@@ -565,7 +603,9 @@ and events the old reading produced and were taken back, and `reopened_facts`, t
 closed by them and are current again. Re-read when the reading was wrong; `correct` when the user says the world
 is otherwise. Fact and event ids are handles for a conversation; observation ids last. `resolve` alone, with neither
 `text` nor `observation_id`, answers questions without recording an observation. `correct` takes an entity too
-(`ent-12` with `name`, `type`, or `aliases`, the list to keep). A fact is shown with one `standing`: current, ended, or future by its dates while the record holds it, else
+(`ent-12` with `name`, `type`, `aliases`, the list to keep, or `merge_into`, which folds it into the entity named:
+facts, events, and aliases move, and the old id forwards to the survivor). `forget(ent-12)` removes an entity no
+fact, event, or merge names, such as a duplicate left behind; one that facts name is refused with them listed. A fact is shown with one `standing`: current, ended, or future by its dates while the record holds it, else
 superseded, corrected, pending, or rejected. A present-tense recall that misses beside ended facts names them. A fact stated beside the event that
 opens it takes that event as its explanation even without `derived_from`. Ids are `obs-N`, `ent-N`, `evt-N`, `f-N`, `q-N`.
 
@@ -609,11 +649,16 @@ The response carries what was done (`merges`, `reclosed_facts`, `duplicates`,
 `retired`, `embedded`, `proposed`, `resolved_questions`) and what needs the
 caller: the `backlog` of observations still without a proposal (with an
 excerpt each; `propose` gives them their reading), `open_questions`,
+`name_collisions` (live entities of kinds that cannot be one thing sharing a
+name, with the correction that folds them if they are one),
 `inferred_vocabulary` (terms registered from use and not yet described),
 `similar_vocabulary` (predicates registered from use that lie close in meaning
 to another), `descriptive_events` (events whose type is a sentence, with the
 observation to re-read), `unused_vocabulary` (predicates, event types, and entity types that nothing uses and whose
-defining observation was forgotten), `removed_entities` (entities a forgotten observation created that nothing refers
+defining observation was forgotten), `unresolved_derivations` (stated facts on derived predicates that no chain
+reaches, with whether the chain is complete and the `derivation` question a complete one raised),
+`misfiled_relations` (stated `related_to` facts whose role a predicate of its own names, with the derived fact that
+covers each when one does and the correction to make), `removed_entities` (entities a forgotten observation created that nothing refers
 to any more), and
 `review`: plans whose date has passed with no word since (`due: true`), then
 the open facts longest without confirmation on predicates that age, oldest
@@ -624,8 +669,11 @@ predicate's staleness threshold, and flagging `likely_changed` past it.
 `consolidate(rebuild: true)` re-derives every fact and event from the observations and their readings, in order:
 correction records are replayed against the fact their key names (their reading holds the key, the reason, and the
 replacement), answers once given are given again, entities keep their ids, facts and events get new ones. The reply's
-`rebuilt` reports `observations`, `corrections`, `answers`, `facts_before`, `facts_after`, and `unmatched`, the
-correction records whose fact no longer exists (what they stated stands as facts of the record). Never on a dry run.
+`rebuilt` reports `observations`, `corrections`, `answers`, `facts_before`, `facts_after`, `unmatched` (the
+correction records whose fact no longer exists; what they stated stands as facts of the record), `no_op` (records
+from before a correction that changed nothing was refused, recognised and left alone), and the questions
+the replay left open: `open_questions_before`, `open_questions_after`, and their ids under `questions`, since a
+reading that once registered a term without asking may ask now. Never on a dry run.
 
 Mnemic is correct without a proposer. It is only less refined.
 
@@ -838,78 +886,159 @@ See [EVALUATION.md](EVALUATION.md). Layer 2 earns its place only if it
 measurably improves entity duplication rate, fact precision and recall, stale
 fact rate, and correction traceability over caller-only extraction.
 
-## Planned, not built (as of 2026-09-12)
+## Derived predicates
 
-The reasoning below is kept because it still holds; none of it is
-implemented, and the shipped behaviour is what the sections above describe.
-
-### Derived predicates
-
-A predicate definition would include a **rule** that defines it in terms of
-other predicates:
+A predicate may be defined by **rules** over other predicates (EVALUATION.md,
+family K). The definition carries them as `defined_as`, on a proposal's
+`predicates` entry or through `correct(pred:x, {defined_as: [...]})`:
 
 ```json
 {
   "name": "grandparent_of",
   "description": "Subject is a parent of a parent of object.",
   "domain": "person", "range": "person",
-  "defined_as": [ { "path": ["parent_of", "parent_of"] } ],
-  "qualifiers": {
-    "grandmother": { "path": ["parent_of[mother]", "parent_of"] },
-    "grandfather": { "path": ["parent_of[father]", "parent_of"] },
-    "maternal":    { "path": ["parent_of", "parent_of[mother]"] },
-    "paternal":    { "path": ["parent_of", "parent_of[father]"] }
-  }
+  "lexicon": ["grandparent", "grandmother", "grandfather"],
+  "render": "{subject} is {object}'s {qualifier|grandparent}",
+  "defined_as": [
+    { "path": ["parent_of", "parent_of[mother]"], "qualifier": "maternal grandparent",
+      "by": { "attribute": "gender", "values": { "female": "maternal grandmother", "male": "maternal grandfather" } } },
+    { "path": ["parent_of", "parent_of[father]"], "qualifier": "paternal grandparent",
+      "by": { "attribute": "gender", "values": { "female": "paternal grandmother", "male": "paternal grandfather" } } },
+    { "path": ["parent_of", "parent_of"], "qualifier": "grandparent",
+      "by": { "attribute": "gender", "values": { "female": "grandmother", "male": "grandfather" } } }
+  ],
+  "implies": { "grandmother": { "gender": "female" }, "grandfather": { "gender": "male" } }
 }
 ```
 
-A path is a sequence of predicates with optional qualifier bindings. Layer 2
-would type-check it: the range of each hop must be compatible with the domain
-of the next. Rules may reference other derived predicates but must be
-**non-recursive**; bounded repetition (`parent_of{1,4}`) is allowed,
-transitive closure is refused, because unbounded materialization explodes and
-valid-time intersection over an unbounded chain is meaningless.
+A rule is a **path** of hops from the subject to the object, walked over the
+current facts. A hop names a predicate, optionally bound to a qualifier
+(`parent_of[mother]`: the middle person is the object's mother) and
+optionally walked against its direction (`^parent_of`: from a child to a
+parent). A symmetric predicate is walked either way. Bounded repetition
+(`parent_of{1,4}`) expands to one rule per length; unbounded repetition
+(`parent_of+`) is refused, because a materialised derivation must end and a
+valid time over an unbounded chain means nothing. `not` names predicates that
+must not hold directly between the two ends (a step-parent is the spouse of a
+parent who is *not* a parent), written `^pred` to exclude the fact running
+the other way; `min_paths` and `max_paths` bound how many
+distinct paths must join the pair; `qualifier` is what the derived fact
+carries, and `by` chooses it instead by the value of an **attribute** of the
+subject: `{"attribute": "gender", "values": {"female": "aunt", "male":
+"uncle"}}`, where the attribute is any registered predicate whose facts give
+the subject a literal value (`gender`, or a caller's `handedness`). A value
+the rule does not name, or none, gives the plain `qualifier`. `by_gender`
+still parses, as `by` on the attribute `gender`. Rules are tried in order for
+each pair, so the specific ones go first.
 
-This is Datalog, not a graph-database feature. At Mnemic's scale it is a
-recursive query in SQLite or a walk over an in-memory adjacency list; a graph
-server would add nothing to the temporal, provenance, or confidence model,
-which it does not have.
+**Where an attribute's value comes from.** First a current fact under the
+attribute predicate itself, its word canonicalised by that predicate's own
+`implies` (`gender` declares `woman → gender female`, so "Britt is a woman"
+reads as female). Failing that, what the subject's other stated facts imply:
+a predicate may declare `implies`, a map from a qualifier or literal value to
+the attributes it fixes (`parent_of`: `mother → gender female`, `spouse_of`:
+`husband → gender male`), and every current stated fact whose predicate
+declares something for its term contributes; when they disagree, nothing is
+read. Derived rows never contribute, so a guess cannot feed itself. An
+implied value is also materialised as a derived fact under the attribute
+predicate (`derived_by` kind `implied`, resting on the facts that imply it),
+so it can be asked about and seen; a stated value takes its place without a
+conflict, and it returns if the statement is withdrawn. `implies`
+is set on a definition, corrected through `correct(pred:x, {implies})`, and
+shown by `inspect`; an attribute it names must be a registered predicate. The
+seed vocabulary declares the obvious ones (parents, step-parents, spouses,
+partners, the gendered kinship terms); `sibling_of` deliberately declares
+none, since a reading too often attaches the role to the wrong side, and a
+store that trusts its sibling facts opts in with one correction. Nothing
+about gender in particular is known to the engine: it is the seed's first
+attribute, not a special case. The registry type-checks a rule when it is
+stored: every hop names a registered predicate, no hop names the predicate
+itself or one that rests on it (rules over derived predicates are fine, cycles
+are not), each hop's range fits the next hop's domain, and no hop ends in a
+literal. A definition naming an existing predicate may add `implies` and
+`defined_as` to it (reported as `updated`, logged as a change); anything else
+it states about an existing predicate is left alone with a warning pointing
+at `correct`. A definition that fails is skipped with a warning naming why; the
+observation stands.
 
-**Derived facts would be materialized.** Facts are already a rebuildable
-projection (see [DESIGN.md](DESIGN.md), Events versus Facts); derived facts
-are the same projection one layer further. They must exist as rows because
-recall indexes renderings — "Hedvig is Mattias's grandmother" has to be a
-string for the lexical and semantic channels to find it. A derived fact would
-record the rule and the base fact ids as its derivation (`derivation_kind:
-derived`, reserved today), its valid time the intersection of the base
-intervals, its confidence the product of the base confidences, invalidated
-and recomputed when any base fact changes (the `invalidated` status exists in
-the schema for this).
+**Derived facts are materialised.** After anything that changes facts, and at
+start, every rule is walked and the derived rows are brought in line: a pair a
+rule now reaches gets a row, a row no rule reaches any more is `invalidated`
+with the reason on its history ("a base fact changed: f-12 (corrected)"), a
+row whose qualifier or interval changed is rewritten. A derived row carries
+`derivation: derived`, the rule and the base facts it rests on (`derived_by`
+in `inspect`), the intersection of the base intervals as its valid time
+(`start_source` and `end_source` `derived`), and the observation of its first
+base fact as its home, so a forget or a rebuild that takes the base away takes
+it away, and the next derivation brings it back if another base still carries
+it. Derived rows are counted apart (`derived_facts` in `status`), are not
+listed among an observation's own facts, and are found by recall like any
+other: they are rendered sentences, indexed in the same channels. A `remember`
+reply carries what the pass did under `derived` (`facts`, `invalidated`,
+`updated`, `corroborated`) when it did anything.
 
-**Asserted facts on derived predicates.** A user may state a derived relation
-directly: "Hedvig is my grandmother." This would be stored as an asserted
-fact, not a derived one, and not placed in the graph as a path: the
-intermediate parent is unknown, and Mnemic never fabricates a placeholder
-entity. The fact would carry `derivation: unresolved`, plus any partial
-constraint the observation gives ("my paternal grandmother" → `via:
-parent_of[father]`), and `consolidate` would attempt to **unify** it with the
-materialized derivations of the same predicate, subject, and object: exactly
-one derivation matches → linked as corroboration; none, chain incomplete →
-stays unresolved, no question; none, chain complete and contradicting → a
-`conflict` question. Nothing about the asserted fact changes by unification.
+**A stated fact on a derived predicate stays stated.** "Signe is my
+grandmother" is stored as an asserted fact with no placeholder parent
+invented; `inspect` shows it `unification: unresolved`. When a chain later
+reaches the same pair, the stated fact is the row: it is `corroborated` by the
+base facts (`corroborated_by`), and a derived row that stood for the pair is
+invalidated in its favour. A restatement never folds into a derived row. When
+no chain reaches it, `consolidate` lists it under `unresolved_derivations`
+with what the chains say: `incomplete` when a chain from the fact's object
+stops short (a parent whose parents are unknown), in which case nothing is
+asked because the statement may still fit; `complete` when every chain
+continues and ends elsewhere, in which case a `derivation` question is raised
+once, naming the derived facts, and answered `keep` (the statement stands) or
+`wrong` (it is rejected). This is Datalog over the fact table, not a graph
+database: at Mnemic's scale a walk over an in-memory adjacency list, and a
+graph server would add nothing to the temporal and provenance model.
 
-Today `defined_as` is an unknown key: the proposal parser ignores it and names
-it in `warnings`, the predicate is registered from its other properties, and a
-fact under it is an ordinary asserted fact. A `qualifiers` object is rejected
-as an invalid proposal, since the key exists and takes a string array.
+**Seed kinship.** `grandparent_of`, `aunt_uncle_of`, `cousin_of`, and
+`in_law_of` are seed predicates defined by rules, and `sibling_of` and
+`step_parent_of` carry rules beside their stated use: siblings from a shared
+parent, step-parents from the spouse or partner of a parent who is not a
+parent, aunts and uncles from a parent's sibling or their spouse, cousins from
+a parent's sibling's children, in-laws from a spouse's parents and siblings
+and a child's spouse. State the parents, marriages, and partnerships; the
+rest follows, with the marriage's dates on the in-laws and an ended marriage
+ending them. A half-sibling is not decided from the parents the store happens
+to know: stated, it is corroborated by the shared parent. A rule the user
+replaces through `correct` is kept across restarts; a seed predicate whose
+rules were never touched takes the seed's.
+
+Three more things follow from the rules. A relation that does not change
+with time (volatility low) outlives a base fact a death ended: a stepfather
+who died is a late stepfather, not a former one, while a divorce ends the
+relation and a coworker relation ends with the job, death or not. A
+person's gender is a fact under the seed predicate `gender` (person →
+literal, functional; "Britt is female"), stated outright or through the
+`gender` shorthand on an entity entry; `attributes: {"handedness": "left"}`
+on an entry does the same for any attribute. `consolidate` lists under
+`attribute_unknown`, per attribute, the entities whose derived relations
+rendered with the plain qualifier for want of a value, each with its
+`stated_roles` and whether their predicates declare an implication, and an entity's card
+shows its `attributes`: one value each, from its current facts under
+functional predicates that take a literal. And a stated `related_to` fact whose role a dedicated predicate
+names is listed by `consolidate` under `misfiled_relations`: when a derived
+fact covers it, `correct(f-N, {redundant: true})` retires it (the reply says
+`retired`, the fact's standing is `superseded` by the derived fact under
+`superseded_by`, the record reads "Retirement of"); when none does,
+`correct(f-N, {predicate: ...})` moves it to the predicate it belongs to. A
+correction whose keys all name the value on record is refused and leaves no
+record, so the log holds only corrections that were valid when written.
+
+## Planned, not built (as of 2026-09-12)
+
+The reasoning below is kept because it still holds; none of it is
+implemented, and the shipped behaviour is what the sections above describe.
 
 ### Predicate merges and re-derivation
 
 `consolidate` would merge two predicates that later evidence shows to be the
 same, re-pointing their facts with the merge recorded in history, and would
 re-run Layer 2 over facts stored under a spec version older than the current
-one. `spec_version` is stored on observations and facts for this; no merge or
-re-run exists.
+one. `spec_version` is stored on observations and facts for this. The merge exists
+(`correct(pred:x, {merge_into: y})`); the re-run does not.
 
 ### MCP sampling
 

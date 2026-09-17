@@ -35,6 +35,7 @@ import se.hirt.mnemic.knowledge.EntityService;
 import se.hirt.mnemic.knowledge.EntityTypeRegistry;
 import se.hirt.mnemic.knowledge.Fact;
 import se.hirt.mnemic.knowledge.FactQueries;
+import se.hirt.mnemic.knowledge.PredicateRegistry;
 import se.hirt.mnemic.knowledge.Names;
 import se.hirt.mnemic.knowledge.Predicate;
 import se.hirt.mnemic.knowledge.PredicateRegistry.Cue;
@@ -43,6 +44,7 @@ import se.hirt.mnemic.recall.RecallResult.Structured;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -61,8 +63,11 @@ final class StructuredProbe {
 	private final FactQueries facts;
 	private final Containment containment;
 	private final EntityTypeRegistry types;
+	private final PredicateRegistry predicates;
 
-	StructuredProbe(EntityService entities, FactQueries facts, Containment containment, EntityTypeRegistry types) {
+	StructuredProbe(EntityService entities, FactQueries facts, Containment containment, EntityTypeRegistry types,
+			PredicateRegistry predicates) {
+		this.predicates = predicates;
 		this.entities = entities;
 		this.facts = facts;
 		this.containment = containment;
@@ -81,6 +86,7 @@ final class StructuredProbe {
 		var matched = new ArrayList<Fact>();
 		var near = new ArrayList<Fact>();
 		var future = new ArrayList<Fact>();
+		var notes = new ArrayList<String>();
 		for (Entity e : q.spotted()) {
 			String direction = direction(cue, e, q.text());
 			// A past-tense yes/no question is answered by ended facts too.
@@ -106,16 +112,30 @@ final class StructuredProbe {
 				// other side ("Mattias's half-sister" against "Mattias is Clara's half-brother") the family matches
 				// and the gender, which is not on record, is not invented.
 				boolean qualifierOk = cue.qualifier() == null || cue.qualifier().equalsIgnoreCase(f.qualifier())
+						|| Predicate.qualifierWithin(cue.qualifier(), f.qualifier())
 						|| (f.qualifier() == null && cue.predicate().qualifiers().isEmpty())
 						|| (cue.predicate().symmetric()
 								&& Predicate.sameQualifierFamily(cue.qualifier(), f.qualifier()));
 				if (qualifierOk) {
 					if (matched.stream().noneMatch(m -> m.id() == f.id())) {
 						matched.add(f);
+						// "aunt" asked, "aunt or uncle" on record: it answers, and says what is not on record.
+						if (cue.qualifier() != null && f.qualifier() != null
+								&& !cue.qualifier().equalsIgnoreCase(f.qualifier())) {
+							notes.add(f.ref() + " is recorded as '" + f.qualifier() + "', which covers '"
+									+ cue.qualifier() + "' without settling it");
+						}
 					}
 				} else {
 					near.add(f);
 				}
+			}
+		}
+		// A fact held pending under this predicate (a conflict nobody has answered) contests the verdict: said.
+		for (Entity e : q.spotted()) {
+			for (Fact p : facts.pending(e.id(), cue.predicate().name())) {
+				notes.add("pending on " + cue.predicate().name() + ", a conflict awaiting an answer: " + p.rendering()
+						+ " [" + p.ref() + "]");
 			}
 		}
 		// The bounds on what the spotted subjects have under this predicate. A question that names a thing shows
@@ -130,14 +150,31 @@ final class StructuredProbe {
 		}
 		Fact decidedBy = null;
 		String basis = null;
-		var notes = new ArrayList<String>();
+		// A question is about the things it names: only facts touching each of them (directly, or through the
+		// place it lies in) answer it. "Does Mattias own a boat" is not answered by his apartments, and "how many
+		// Raspberry Pi 5 do I own" not by the Raspberry Pi 4.
+		if (!xs.isEmpty()) {
+			// Every thing named, where the members of one family ("raspberry pi": the Pi 4 and the Pi 5) count as
+			// one thing a fact about either touches.
+			var families = new LinkedHashMap<String, List<Entity>>();
+			for (Entity x : q.spotted()) {
+				families.computeIfAbsent(EntityService.familyKey(x.name()), k -> new ArrayList<>()).add(x);
+			}
+			// A yes/no question is about its subject too ("does Mattias work at Initrode" is not answered by
+			// Anna's job there); an open one names the owner as a possessive as often as not ("where is my
+			// raspberry pi"), so there only the other things must be touched.
+			long ownerId = entities.owner().id();
+			List<List<Entity>> required = families.values().stream()
+					.filter(g -> q.polar() || g.stream().noneMatch(x -> x.id() == ownerId)).toList();
+			java.util.function.Predicate<Fact> about = f -> required.stream()
+					.allMatch(g -> g.stream().anyMatch(x -> touches(f, x)));
+			var dropped = matched.stream().filter(f -> !about.test(f)).toList();
+			matched.removeAll(dropped);
+			near.addAll(0, dropped);
+			future.removeIf(f -> !about.test(f));
+		}
 		if (q.polar()) {
-			// A yes/no question is about the thing it names: only facts touching it (directly, or through the
-			// place it lies in) support a yes. "Does Mattias own a boat" is not answered by his apartments.
-			if (!xs.isEmpty()) {
-				matched.removeIf(f -> q.spotted().stream().anyMatch(x -> !touches(f, x)));
-				future.removeIf(f -> q.spotted().stream().anyMatch(x -> !touches(f, x)));
-			} else if (!q.residual().isEmpty()) {
+			if (xs.isEmpty() && !q.residual().isEmpty()) {
 				matched.removeIf(f -> Names.tokens(f.rendering()).stream().noneMatch(q.residual()::contains));
 				future.removeIf(f -> Names.tokens(f.rendering()).stream().noneMatch(q.residual()::contains));
 			}
@@ -170,7 +207,7 @@ final class StructuredProbe {
 				for (Fact b : bounds) {
 					if ("only".equals(b.mode()) && b.objectId() != null) {
 						for (Entity x : xs) {
-							if (types.isA(x.type(), "place") && x.id() != b.objectId()
+							if (predicates.canContain(types.lineage(x.type())) && x.id() != b.objectId()
 									&& containment.of(x.id(), b.objectId()).relation() == Relation.UNKNOWN) {
 								notes.add("whether " + x.name() + " is within " + entities.nameOf(b.objectId())
 										+ " is not known");
@@ -201,6 +238,64 @@ final class StructuredProbe {
 				near.addAll(0, matched);
 				matched.clear();
 				notes.add("the question names " + String.join(", ", q.named()) + ", which none of the facts mention");
+			}
+		}
+		if (!q.kinds().isEmpty() && !matched.isEmpty() && decidedBy == null && !cue.predicate().literalRange()) {
+			// "What motorcycles does Mattias own": the kind asked for is checked against the type of the other side
+			// of each fact. A kind on record narrows the answer, the rest becoming near-misses; one the store never
+			// heard of cannot, and the verdict says so instead of passing the facts off as the answer (F19).
+			var asked = new ArrayList<String>();
+			var unknown = new ArrayList<String>();
+			for (String k : q.kinds()) {
+				types.kindNamedBy(k).ifPresentOrElse(t -> {
+					if (!asked.contains(t)) {
+						asked.add(t);
+					}
+				}, () -> unknown.add(k));
+			}
+			String under = cue.predicate().name() + " for " + entity.name();
+			if (asked.isEmpty()) {
+				// The store cannot evaluate the word, so it neither narrows nor denies: the facts are everything
+				// recorded, and the note says none is classified as what was asked.
+				notes.add("'" + String.join("', '", unknown) + "' names no kind of thing on record; the "
+						+ matched.size() + (matched.size() == 1 ? " fact" : " facts") + " under " + under
+						+ (matched.size() == 1 ? " is" : " are") + " everything recorded, none of "
+						+ (matched.size() == 1 ? "it" : "them") + " classified so");
+			} else {
+				var kept = new ArrayList<Fact>();
+				var other = new ArrayList<Fact>();
+				var unsure = new ArrayList<String>();
+				for (Fact f : matched) {
+					String t = otherType(f, q.spotted());
+					if (t != null && asked.stream().anyMatch(k -> types.isA(t, k))) {
+						kept.add(f);
+						continue;
+					}
+					other.add(f);
+					// What the store cannot classify (no kind, or a kind nobody has placed) may be one: said.
+					if (t == null || EntityTypeRegistry.UNKNOWN.equals(t)) {
+						unsure.add(otherName(f, q.spotted()) + " (no kind on record)");
+					} else if (types.unplaced(t)) {
+						unsure.add(otherName(f, q.spotted()) + " (" + t + ", a kind nobody has placed)");
+					}
+				}
+				if (kept.isEmpty()) {
+					notes.add("nothing under " + under + " is recorded as a " + String.join(" or ", asked) + "; the "
+							+ other.size() + (other.size() == 1 ? " fact" : " facts") + " of other kinds "
+							+ (other.size() == 1 ? "is" : "are") + " listed as near-misses");
+				} else if (!other.isEmpty()) {
+					notes.add(other.size() + (other.size() == 1 ? " fact" : " facts") + " under " + under
+							+ " of other kinds than " + String.join(" or ", asked) + " listed as near-misses");
+				}
+				if (!unsure.isEmpty()) {
+					notes.add("may be one: " + String.join("; ", unsure));
+				}
+				if (!unknown.isEmpty()) {
+					notes.add("'" + String.join("', '", unknown) + "' names no kind of thing on record");
+				}
+				near.addAll(0, other);
+				matched.clear();
+				matched.addAll(kept);
 			}
 		}
 		// A present-tense miss beside facts that ended: named, so the reader does not take "no current value" for
@@ -263,7 +358,7 @@ final class StructuredProbe {
 		}
 		case "only" -> {
 			for (Entity x : xs) {
-				if (b.objectId() == null || !types.isA(x.type(), "place") || x.id() == b.objectId()) {
+				if (b.objectId() == null || !predicates.canContain(types.lineage(x.type())) || x.id() == b.objectId()) {
 					continue;
 				}
 				Relation r = containment.of(x.id(), b.objectId()).relation();
@@ -308,7 +403,7 @@ final class StructuredProbe {
 			return xs.stream().anyMatch(x -> types.isA(x.type(), b.objectText()));
 		}
 		case "only" -> {
-			return xs.stream().anyMatch(x -> types.isA(x.type(), "place"));
+			return xs.stream().anyMatch(x -> predicates.canContain(types.lineage(x.type())));
 		}
 		default -> {
 			return true;
@@ -317,11 +412,29 @@ final class StructuredProbe {
 	}
 
 	/** The fact is about x: x is its subject or object, or its object lies within x (a property in a canton). */
+	/** The type of the side of a fact the question did not name; null for a literal object. */
+	private String otherType(Fact f, List<Entity> spotted) {
+		Long otherId = otherId(f, spotted);
+		return otherId == null ? null : entities.get(otherId).map(Entity::type).orElse(null);
+	}
+
+	/** The name of the side of a fact the question did not name; the literal itself for a literal object. */
+	private String otherName(Fact f, List<Entity> spotted) {
+		Long otherId = otherId(f, spotted);
+		return otherId == null ? String.valueOf(f.objectText()) : entities.nameOf(otherId);
+	}
+
+	private static Long otherId(Fact f, List<Entity> spotted) {
+		boolean subjectAsked = spotted.stream().anyMatch(x -> x.id() == f.subjectId());
+		return subjectAsked ? f.objectId() : Long.valueOf(f.subjectId());
+	}
+
 	private boolean touches(Fact f, Entity x) {
-		if (f.subjectId() == x.id() || (f.objectId() != null && f.objectId() == x.id())) {
+		if (f.subjectId() == x.id() || (f.objectId() != null && f.objectId() == x.id())
+				|| (f.scopeId() != null && f.scopeId() == x.id())) {
 			return true;
 		}
-		return f.objectId() != null && types.isA(x.type(), "place")
+		return f.objectId() != null && predicates.canContain(types.lineage(x.type()))
 				&& containment.ancestors(f.objectId()).contains(x.id());
 	}
 
@@ -415,8 +528,8 @@ final class StructuredProbe {
 		var seen = new HashSet<Long>();
 		var frontier = new ArrayList<Long>();
 		for (Fact f : matched) {
-			if (f.objectId() != null
-					&& entities.get(f.objectId()).map(x -> types.isA(x.type(), "place")).orElse(false)) {
+			if (f.objectId() != null && entities.get(f.objectId())
+					.map(x -> predicates.canContain(types.lineage(x.type()))).orElse(false)) {
 				frontier.add(f.objectId());
 			}
 		}
@@ -426,10 +539,13 @@ final class StructuredProbe {
 				if (!seen.add(id)) {
 					continue;
 				}
-				for (Fact f : facts.probe(id, "located_in", asOf, now, false)) {
-					if (f.subjectId() == id && f.objectId() != null && out.stream().noneMatch(x -> x.id() == f.id())) {
-						out.add(f);
-						next.add(f.objectId());
+				for (String within : predicates.containmentPredicates()) {
+					for (Fact f : facts.probe(id, within, asOf, now, false)) {
+						if (f.subjectId() == id && f.objectId() != null
+								&& out.stream().noneMatch(x -> x.id() == f.id())) {
+							out.add(f);
+							next.add(f.objectId());
+						}
 					}
 				}
 			}

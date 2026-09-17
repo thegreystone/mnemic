@@ -27,7 +27,13 @@ MEMORY PROTOCOL
    observation, read it again: `remember(observation_id, proposal)` replaces the reading and the text keeps
    its id and date; use `correct` only when the user says the world is otherwise. `consolidate` lists
    observations worth re-reading under `descriptive_events`. Call `inspect('registry')` when unsure what relation,
-   event type, or entity type to use; `status` only counts them. Record at
+   event type, or entity type to use; `status` only counts them. Grandparents, aunts and uncles, cousins,
+   in-laws, siblings, and step-parents are derived from `parent_of`, `spouse_of`, `partner_of`, and
+   `sibling_of`: record the parents and marriages, and state the derived relation only when the user gives
+   it without the chain behind it. A person's gender is a `gender` fact (or `gender` on the entity entry);
+   the rules read it ahead of what other facts imply. A predicate you define may say what its
+   qualifiers imply about an attribute (`implies`), and a rule may choose its qualifier by any
+   attribute predicate (`by`). Record at
    natural boundaries: a topic change, the end of a task, before your context is compacted. Do not record
    every message.
 4. SURFACE. If a response carries `questions`, put them to the user in your own words and answer them with
@@ -46,6 +52,8 @@ MEMORY PROTOCOL
    how a fact came to be what it is. When a predicate's wording is wrong, `correct` it by name.
 7. TIDY. At the end of a session call `consolidate`: it merges entities later shown to be the same, closes
    what a later event ended, and lists what still needs you: observations without a proposal, open questions,
+   `name_collisions` (two kinds of thing under one name: fold them with `correct(ent-N, {merge_into})` if they
+   are one, or leave them),
    predicates used often enough to deserve a definition, and `review`, the open facts longest without
    confirmation on things that change (jobs, homes, ownership). Opening a session by confirming those five
    beats trusting eighty.

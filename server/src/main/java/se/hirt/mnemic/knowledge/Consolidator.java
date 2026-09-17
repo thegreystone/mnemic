@@ -29,6 +29,7 @@
 package se.hirt.mnemic.knowledge;
 
 import se.hirt.mnemic.persistence.Database;
+import se.hirt.mnemic.protocol.Json;
 import se.hirt.mnemic.persistence.Row;
 
 import java.util.ArrayList;
@@ -45,9 +46,11 @@ import java.util.Optional;
 public final class Consolidator {
 
 	/** What consolidation did or would do. */
-	public record Outcome(List<Map<String, Object>> merges, int reclosed, List<Map<String, Object>> inferredVocabulary,
-			List<Map<String, Object>> similarVocabulary, List<Map<String, Object>> descriptiveEvents,
-			List<Map<String, Object>> unusedVocabulary, List<Map<String, Object>> resolvedQuestions,
+	public record Outcome(List<Map<String, Object>> merges, List<Map<String, Object>> nameCollisions, int reclosed,
+			List<Map<String, Object>> inferredVocabulary, List<Map<String, Object>> similarVocabulary,
+			List<Map<String, Object>> descriptiveEvents, List<Map<String, Object>> unusedVocabulary,
+			List<Map<String, Object>> unresolvedDerivations, List<Map<String, Object>> misfiledRelations,
+			List<Map<String, Object>> attributeUnknown, List<Map<String, Object>> resolvedQuestions,
 			List<Map<String, Object>> review, List<Map<String, Object>> duplicates, int removedEntities) {
 	}
 
@@ -61,10 +64,14 @@ public final class Consolidator {
 	private final QuestionResolver resolver;
 	private final FactLedger ledger;
 	private final FactRenderer renderer;
+	private final QuestionService questions;
+	private final Deriver deriver;
 
 	Consolidator(Database db, EntityService entities, PredicateRegistry predicates, EventTypeRegistry eventTypes,
 			EntityTypeRegistry entityTypes, EventService events, FactQueries facts, QuestionResolver resolver,
-			FactLedger ledger, FactRenderer renderer) {
+			FactLedger ledger, FactRenderer renderer, QuestionService questions, Deriver deriver) {
+		this.questions = questions;
+		this.deriver = deriver;
 		this.db = db;
 		this.entities = entities;
 		this.predicates = predicates;
@@ -88,8 +95,9 @@ public final class Consolidator {
 		if (!dryRun) {
 			forgetDefinedBy();
 		}
-		return new Outcome(merges, reclosed, inferredVocabulary(), predicates.closePairs(), descriptiveEvents(),
-				unusedVocabulary(), resolved, facts.review(5), duplicates, removed);
+		return new Outcome(merges, nameCollisions(), reclosed, inferredVocabulary(), predicates.closePairs(),
+				descriptiveEvents(), unusedVocabulary(), unresolvedDerivations(dryRun), misfiledRelations(),
+				deriver.attributeUnknown(), resolved, facts.review(5), duplicates, removed);
 	}
 
 	/**
@@ -160,6 +168,109 @@ public final class Consolidator {
 		return m;
 	}
 
+	/**
+	 * Asserted facts on derived predicates that no chain reaches (K3–K7): each with what the chains say. When the
+	 * chains from the fact's object are complete and end elsewhere, the record contradicts the statement and a
+	 * {@code derivation} question is raised once; an incomplete chain leaves room, and nothing is asked.
+	 */
+	private List<Map<String, Object>> unresolvedDerivations(boolean dryRun) {
+		var out = new ArrayList<Map<String, Object>>();
+		for (Predicate p : predicates.derived()) {
+			for (Row r : db.read(tx -> tx.query("SELECT * FROM fact WHERE predicate = ? AND status = 'current' AND "
+					+ "object_id IS NOT NULL AND mode = 'asserted' AND derivation_kind <> 'derived' ORDER BY id",
+					p.name()))) {
+				Fact f = Fact.from(r);
+				if ("corroborated".equals(deriver.unificationOf(f))) {
+					continue;
+				}
+				Deriver.Chains chains = deriver.chainsFor(f);
+				var m = new LinkedHashMap<String, Object>();
+				m.put("fact", f.ref());
+				m.put("rendering", f.rendering());
+				m.put("chain", chains.complete() ? "complete" : "incomplete");
+				List<Fact> derived = derivedFor(f);
+				m.put("derived", derived.stream().map(Fact::ref).toList());
+				if (chains.contradicts(f)) {
+					m.put("question", dryRun ? null : askDerivation(f, derived));
+				}
+				out.add(m);
+			}
+		}
+		return out;
+	}
+
+	/**
+	 * Stated related_to facts whose role a predicate of its own names (partner → partner_of, aunt → aunt_uncle_of):
+	 * each with that predicate, the derived fact that already covers the pair when one does (a shadow: retire the
+	 * statement with {@code correct(f-N, {redundant: true})}), and otherwise the move to make
+	 * ({@code correct(f-N, {predicate: ...})}), so the store holds stated primitives and what follows from them.
+	 */
+	private List<Map<String, Object>> misfiledRelations() {
+		var out = new ArrayList<Map<String, Object>>();
+		// A generic relation: anything to anything, its qualifier free text. related_to is the seed's; any other
+		// registered the same way counts the same.
+		List<String> generic = predicates.all().stream().filter(
+				p -> p.qualifiers().isEmpty() && p.domain().equals(List.of("*")) && p.range().equals(List.of("*")))
+				.map(Predicate::name).toList();
+		var rows = new ArrayList<Row>();
+		for (String g : generic) {
+			rows.addAll(db.read(tx -> tx.query("SELECT * FROM fact WHERE predicate = ? AND status = 'current' AND "
+					+ "qualifier IS NOT NULL AND object_id IS NOT NULL AND derivation_kind <> 'derived' ORDER BY id",
+					g)));
+		}
+		for (Row r : rows) {
+			Fact f = Fact.from(r);
+			Optional<Predicate> target = predicates.dedicatedFor(f.qualifier());
+			if (target.isEmpty()) {
+				continue;
+			}
+			Optional<Fact> covered = deriver.covering(f);
+			var m = new LinkedHashMap<String, Object>();
+			m.put("fact", f.ref());
+			m.put("rendering", f.rendering());
+			m.put("qualifier", f.qualifier());
+			m.put("predicate", target.get().name());
+			m.put("derived", covered.map(Fact::ref).orElse(null));
+			m.put("observation", "obs-" + f.observationId());
+			m.put("hint",
+					covered.isPresent()
+							? "correct(\"" + f.ref() + "\", {\"redundant\": true}): " + covered.get().rendering()
+									+ " covers it"
+							: "correct(\"" + f.ref() + "\", {\"predicate\": \"" + target.get().name()
+									+ "\"}), or re-read obs-" + f.observationId() + " with it");
+			out.add(m);
+		}
+		return out;
+	}
+
+	/** The derived rows of the same predicate that end at the fact's object. */
+	private List<Fact> derivedFor(Fact f) {
+		return db.read(tx -> tx.query(
+				"SELECT * FROM fact WHERE predicate = ? AND status = 'current' AND "
+						+ "derivation_kind = 'derived' AND (object_id = ? OR subject_id = ?) ORDER BY id",
+				f.predicate(), f.objectId(), f.objectId())).stream().map(Fact::from).toList();
+	}
+
+	private String askDerivation(Fact f, List<Fact> derived) {
+		Optional<Row> asked = db.read(tx -> tx.queryOne(
+				"SELECT id FROM question WHERE kind = 'derivation' AND fact_id = ? ORDER BY id DESC", f.id()));
+		if (asked.isPresent()) {
+			return "q-" + asked.get().lng("id");
+		}
+		var c = new ArrayList<Map<String, Object>>();
+		c.add(Map.of("n", 1, "id", "keep", "label", "the statement stands; the record's chains are missing something"));
+		c.add(Map.of("n", 2, "id", "wrong", "label", "the statement was wrong; the record's chains are right"));
+		String others = derived.isEmpty() ? "no one"
+				: String.join("; ", derived.stream().map(Fact::rendering).toList());
+		String message = "\"" + f.rendering() + "\" was stated, but " + f.predicate() + " is derived from other facts, "
+				+ "and every chain from " + entities.nameOf(f.objectId()) + " is complete and reaches " + others
+				+ ". Ask the user which is right.";
+		String payload = Json.write(Map.of("fact", f.ref(), "derived", derived.stream().map(Fact::ref).toList()));
+		return questions
+				.create("derivation", null, f.id(), entities.nameOf(f.subjectId()), f.predicate(), c, payload, message)
+				.ref();
+	}
+
 	/** Vocabulary defined by an observation since forgotten stays, but no longer points at a tombstone. */
 	private void forgetDefinedBy() {
 		int n = db.write(tx -> {
@@ -192,6 +303,27 @@ public final class Consolidator {
 				m.put("observation", "obs-" + r.lng("observation_id"));
 				out.add(m);
 			}
+		}
+		return out;
+	}
+
+	/**
+	 * Live entities of kinds that cannot be one thing, sharing a name: the same thing typed twice, or two things that
+	 * happen to share a name. Never merged unasked; listed with the correction that folds them if they are one.
+	 */
+	private List<Map<String, Object>> nameCollisions() {
+		var out = new ArrayList<Map<String, Object>>();
+		for (EntityService.Collision c : entities.nameCollisions()) {
+			var m = new LinkedHashMap<String, Object>();
+			m.put("shared", c.alias());
+			m.put("entity", c.a().ref());
+			m.put("name", c.a().name());
+			m.put("type", c.a().type());
+			m.put("and", c.b().ref());
+			m.put("and_name", c.b().name());
+			m.put("and_type", c.b().type());
+			m.put("if_one", "correct(" + c.b().ref() + ", {\"merge_into\": \"" + c.a().ref() + "\"})");
+			out.add(m);
 		}
 		return out;
 	}

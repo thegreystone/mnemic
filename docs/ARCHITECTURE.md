@@ -71,6 +71,10 @@ log. Two operations keep it so.
   now names (or, when none matches, keep what the user stated as a fact of the record and are reported as
   `unmatched`), and answers once given to an observation's questions are given again when the same question comes
   back. Entities keep their ids; facts and events get new ones. The projection is therefore a cache of the log.
+- **Deriving.** Derived predicates (`Deriver`, EVALUATION.md family K) are the projection one layer further: after
+  anything that changes facts, and at start, the rules are walked over the current facts and the derived rows are
+  made, rewritten, or invalidated to match, each resting on the base facts it was walked over. They are never
+  corrected or forgotten in themselves: the base facts are, and the derivation follows.
 
 Fact and event ids are handles for a conversation; observation ids last. `forget` is the only operation that removes
 a log entry, and it shares the undoing with re-reading; it also removes the aliases the observation added to entities

@@ -31,6 +31,8 @@
  */
 package se.hirt.mnemic.knowledge;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
@@ -65,6 +67,28 @@ public enum Lang {
 			}
 		}
 		throw new IllegalArgumentException("Unsupported language '" + code + "'; use en or de.");
+	}
+
+	/**
+	 * The forms an English word of a question may be the plural of, the word itself first: "companies" → company,
+	 * "boxes" → box, "vehicles" → vehicle. Which one names a kind is for the type registry to say.
+	 */
+	public static List<String> singulars(String word) {
+		var out = new ArrayList<String>();
+		out.add(word);
+		if (word == null || word.length() < 4) {
+			return out;
+		}
+		if (word.endsWith("ies")) {
+			out.add(word.substring(0, word.length() - 3) + "y");
+		}
+		if (word.endsWith("es")) {
+			out.add(word.substring(0, word.length() - 2));
+		}
+		if (word.endsWith("s") && !word.endsWith("ss")) {
+			out.add(word.substring(0, word.length() - 1));
+		}
+		return out;
 	}
 
 	// ── temporal suffixes ──
@@ -140,7 +164,21 @@ public enum Lang {
 			Map.entry("twin sister", "Zwillingsschwester"), Map.entry("wife", "Ehefrau"),
 			Map.entry("husband", "Ehemann"), Map.entry("spouse", "Ehepartner"), Map.entry("partner", "Partner"),
 			Map.entry("girlfriend", "Freundin"), Map.entry("boyfriend", "Freund"), Map.entry("fiancé", "Verlobter"),
-			Map.entry("fiancée", "Verlobte"), Map.entry("step-parent", "Stiefelternteil"));
+			Map.entry("fiancée", "Verlobte"), Map.entry("step-parent", "Stiefelternteil"),
+			Map.entry("grandmother", "Großmutter"), Map.entry("grandfather", "Großvater"),
+			Map.entry("grandparent", "Großelternteil"),
+			Map.entry("maternal grandmother", "Großmutter mütterlicherseits"),
+			Map.entry("maternal grandfather", "Großvater mütterlicherseits"),
+			Map.entry("maternal grandparent", "Großelternteil mütterlicherseits"),
+			Map.entry("paternal grandmother", "Großmutter väterlicherseits"),
+			Map.entry("paternal grandfather", "Großvater väterlicherseits"),
+			Map.entry("paternal grandparent", "Großelternteil väterlicherseits"), Map.entry("aunt", "Tante"),
+			Map.entry("uncle", "Onkel"), Map.entry("aunt or uncle", "Tante oder Onkel"),
+			Map.entry("cousin", "Cousin oder Cousine"), Map.entry("mother-in-law", "Schwiegermutter"),
+			Map.entry("father-in-law", "Schwiegervater"), Map.entry("parent-in-law", "Schwiegerelternteil"),
+			Map.entry("son-in-law", "Schwiegersohn"), Map.entry("daughter-in-law", "Schwiegertochter"),
+			Map.entry("child-in-law", "Schwiegerkind"), Map.entry("brother-in-law", "Schwager"),
+			Map.entry("sister-in-law", "Schwägerin"), Map.entry("sibling-in-law", "Schwager oder Schwägerin"));
 
 	/** A family qualifier in the language's words; the stored value stays the vocabulary's (English) term. */
 	public String qualifier(String qualifier) {

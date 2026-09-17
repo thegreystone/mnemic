@@ -49,7 +49,7 @@ import java.util.Set;
 public record Predicate(String name, String description, List<String> domain, List<String> range, boolean functional,
 		String functionalScope, boolean symmetric, String inverse, String volatility, List<String> lexicon,
 		String render, List<String> qualifiers, List<String> aliases, List<String> inverseLexicon, Long definedBy,
-		boolean seed, boolean inferred) {
+		boolean seed, boolean inferred, boolean containment) {
 
 	/**
 	 * Qualifiers that name the same relation from the two sides of it: brother and sister are one relation seen from a
@@ -89,6 +89,23 @@ public record Predicate(String name, String description, List<String> domain, Li
 			return true;
 		}
 		return QUALIFIER_FAMILIES.stream().anyMatch(f -> f.contains(x) && f.contains(y));
+	}
+
+	/**
+	 * A one-word question inside a composed role: "grandmother" asked, "paternal grandmother" stored. Words, not
+	 * letters: "mother" is not within "mother-in-law".
+	 */
+	public static boolean qualifierWithin(String asked, String stored) {
+		if (asked == null || stored == null || asked.contains(" ")) {
+			return false;
+		}
+		String a = asked.trim().toLowerCase(Locale.ROOT);
+		for (String word : stored.trim().toLowerCase(Locale.ROOT).split("\\s+")) {
+			if (word.equals(a)) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/** Domain and range share a concrete type: a relation between like things, where a term names a side. */
@@ -148,7 +165,7 @@ public record Predicate(String name, String description, List<String> domain, Li
 		if (negatedTemplate != null && !negatedTemplate.isBlank()) {
 			return new Predicate(name, description, domain, range, functional, functionalScope, symmetric, inverse,
 					volatility, lexicon, negatedTemplate, qualifiers, aliases, inverseLexicon, definedBy, seed,
-					inferred).render(subject, object, scope, qualifier);
+					inferred, containment).render(subject, object, scope, qualifier);
 		}
 		String full = render(subject, object, scope, qualifier);
 		if (lang != Lang.EN) {

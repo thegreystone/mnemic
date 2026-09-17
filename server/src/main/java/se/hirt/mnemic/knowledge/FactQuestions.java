@@ -206,7 +206,7 @@ final class FactQuestions {
 	}
 
 	/** Asks whether {@code top} lies within {@code bound}; empty when the same question is already open. */
-	Optional<Question> containment(Observation obs, long top, long bound, long servesFactId) {
+	Optional<Question> containment(Observation obs, long top, long bound, long servesFactId, String predicate) {
 		String payload = Json.write(Map.of("entity", "ent-" + top, "within", "ent-" + bound));
 		boolean open = questions.open(200).stream()
 				.anyMatch(q -> "containment".equals(q.kind()) && payload.equals(q.payload()));
@@ -217,11 +217,11 @@ final class FactQuestions {
 		String boundName = entities.nameOf(bound);
 		String serves = facts.get(servesFactId).map(Fact::rendering).orElse("the restriction");
 		List<Map<String, Object>> c = List.of(choice(1, "yes",
-				topName + " is within " + boundName + " (stores " + topName + " located_in " + boundName + ")", null),
-				choice(2, "no", topName + " is not within " + boundName, null));
+				topName + " is within " + boundName + " (stores " + topName + " " + predicate + " " + boundName + ")",
+				null), choice(2, "no", topName + " is not within " + boundName, null));
 		String message = "Is " + topName + " within " + boundName + "? The containment chain on record stops at "
 				+ topName + ", and \"" + serves + "\" holds only if it is. Answer yes or no.";
-		return Optional.of(questions.create("containment", obs.id(), null, topName, "located_in", c, payload, message));
+		return Optional.of(questions.create("containment", obs.id(), null, topName, predicate, c, payload, message));
 	}
 
 	private static List<Map<String, Object>> numbered(List<Candidate> candidates, String newLabel) {
@@ -286,7 +286,7 @@ final class FactQuestions {
 		return isRef(f.subject(), er) || isRef(f.object(), er) || isRef(f.scope(), er);
 	}
 
-	private static boolean isRef(String s, EntityRef er) {
+	static boolean isRef(String s, EntityRef er) {
 		return s != null && (s.equals(er.ref()) || Names.norm(s).equals(Names.norm(er.name())));
 	}
 }

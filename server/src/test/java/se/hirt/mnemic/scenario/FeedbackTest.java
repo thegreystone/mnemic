@@ -489,14 +489,14 @@ class FeedbackTest {
 	@Scenario("T6")
 	void aStoredQualifierCuesItsPredicate() {
 		try (Engine e = TestHomes.engine("t6-qualifier-cue")) {
-			remember(e, "Erik is my cousin.", proposal().entity("e1", "Erik Nyberg", "person")
-					.fact(fact("self", "related_to", "e1", "cousin", null, null, null, null, null, null)));
+			remember(e, "Erik is my godfather.", proposal().entity("e1", "Erik Nyberg", "person")
+					.fact(fact("self", "related_to", "e1", "godfather", null, null, null, null, null, null)));
 			remember(e, "Katja was my partner.", proposal().entity("e1", "Katja Berg", "person")
 					.fact(fact("self", "related_to", "e1", "former partner", null, null, null, null, null, null)));
-			RecallResult r = recall(e, "who is Mattias's cousin");
+			RecallResult r = recall(e, "who is Mattias's godfather");
 			assertTrue(r.structured().matched(), r.text());
 			assertEquals("related_to", r.structured().predicate());
-			assertEquals(List.of("Mattias Sandell is related to Erik Nyberg (cousin)"),
+			assertEquals(List.of("Mattias Sandell is related to Erik Nyberg (godfather)"),
 					r.structured().facts().stream().map(Fact::rendering).toList(), "the qualifier narrows the answer");
 			RecallResult p = recall(e, "who was Mattias's former partner");
 			assertTrue(p.structured().matched(), p.text());
