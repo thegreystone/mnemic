@@ -380,11 +380,12 @@ remember(text: "Bosse died in 2014.")
 recall(query: "where does Bosse live")
 ```
 
-Expect: both of Bosse's open facts (`lives_in`, `parent_of`) are closed by
-the `died` event: `ended: true`, end `2014`, standing `ended` (closed, not
-replaced or corrected). A plain recall is a MISS, nothing
-being current; with `include_history: true` the fact is returned marked
-ended.
+Expect: Bosse's home (`lives_in`) is closed by the `died` event: `ended:
+true`, end `2014`, standing `ended` (closed, not replaced or corrected). A
+plain recall is a MISS, nothing being current; with `include_history: true`
+the fact is returned marked ended. His being Mattias's stepfather
+(`parent_of`) is a lasting relation and stays open (K40): a late stepfather
+is still a stepfather.
 
 ---
 
@@ -1637,10 +1638,11 @@ remember(text: "Lena died in 2020.", proposal: { events: [ died(Lena) 2020 ] })
 ```
 
 Expect: Lena's marriage to Konrad ends with her, but "Lena is Mattias's
-stepmother (since 2015)" stays current: a relation whose predicate does not
-change with time (volatility low) outlives a base fact a death ended. A
-divorce ends it ("2016 – 2019"). A relation that does change with time
-(`coworker_of`, medium) ends when its base does, death or not.
+stepmother (since 2015)" stays current: a lasting relation (`lasting` on
+the predicate; the seed kinship predicates are) outlives a base fact a death
+ended, and `inspect` names the outlived base under `outlived`. A divorce
+ends it ("2016 – 2019"). A relation that is not lasting (`coworker_of`) ends
+when its base does, death or not.
 
 ### K22. A fact moves to another predicate, and unknown keys are refused
 
@@ -1817,6 +1819,51 @@ round of debugging: the store showed no implication where the caller was
 sure it had sent one.
 
 ---
+
+### K38. A base fact ended on the day of a death was ended by it
+
+```text
+remember(text: "Lena died on 4 March 2020.", proposal: { events: [ died(Lena) 2020-03-04 ] })
+remember(text: "Konrad was married to Lena from 2015 until her death.",
+         proposal: { facts: [ spouse_of(Lena, Konrad, wife) 2015 – 2020-03-04 ] })
+```
+
+Expect: the marriage was written with the death day as its end rather than
+closed by the death event, and the lasting relation outlives it all the
+same: "Lena is Mattias's stepmother (since 2015)" stays current (K21). The
+dates match at the coarser precision of the two ("until 2021" beside a
+death on 2021-05-09). Only an end the caller wrote themselves is read
+this way: an end an event explains keeps its explanation, so a divorce in
+the year of a death stays a divorce ("2016 – 2019"), and the marriage
+facts themselves keep the ends they were given.
+
+### K39. A death closes a relation stated from either side
+
+```text
+remember(text: "Konrad married Lena in 2015.", proposal: { facts: [ spouse_of(Konrad, Lena, husband) 2015 ] })
+remember(text: "Lena died in 2020.", proposal: { events: [ died(Lena) 2020 ] })
+```
+
+Expect: the marriage ends with Lena although she is the fact's object, not
+its subject: a death closes the deceased's own open facts and the symmetric
+ones they stand on either side of, and the lasting step-parent relation
+outlives it as in K21. Another party's fact about the deceased (an
+employment at an organization that was wound up) is that party's own story
+and stays, as S11 says.
+
+### K40. A death does not end the deceased's lasting facts
+
+```text
+remember(text: "Konrad and Gunilla married in 1970.", proposal: { facts: [ spouse_of(Konrad, Gunilla, husband) 1970 ] })
+remember(text: "Konrad died in 2021.", proposal: { events: [ died(Konrad) 2021 ] })
+```
+
+Expect: the marriage ends at 2021, and "Konrad is Mattias's father" stays
+current with no end: `parent_of` is lasting, a father stays a father. A
+predicate defined with `lasting: true` behaves the same; one defined without
+it ends with the person, as a job or a home does. `lasting` is told apart
+from `volatility`: a marriage never goes stale and still ends with the
+spouse.
 
 ## M. Time filtering
 

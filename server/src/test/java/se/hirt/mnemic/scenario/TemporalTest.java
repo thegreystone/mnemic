@@ -420,8 +420,10 @@ class TemporalTest {
 							.fact("e1", "lives_in", "e2"));
 			RememberOutcome died = remember(e, "Bosse died in 2014.",
 					proposal().entity("e1", "Bosse", "person").event("ev1", "died", "2014", "e1"));
-			assertEquals(2, died.applied().superseded().size(),
-					"both open facts closed: " + died.applied().superseded());
+			// The home ends with him; the kinship is lasting and stays (K40): a late stepfather is still a stepfather.
+			assertEquals(1, died.applied().superseded().size(), "only the home closed: " + died.applied().superseded());
+			assertEquals("current", stored(e, lives, 0).status());
+			assertFalse(stored(e, lives, 0).ended(), "a lasting relation is not ended by a death");
 			Fact livesIn = stored(e, lives, 1);
 			assertTrue(livesIn.ended());
 			assertEquals("2014-01-01", livesIn.validEnd());

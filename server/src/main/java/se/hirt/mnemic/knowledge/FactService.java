@@ -759,10 +759,11 @@ public final class FactService {
 			inferred.put("functional", p.functional());
 			inferred.put("symmetric", p.symmetric());
 			inferred.put("volatility", p.volatility());
+			inferred.put("lasting", p.lasting());
 			inferred.put("lexicon", p.lexicon());
 			inferred.put("render", p.render());
 			inferred.put("correct", "correct(\"pred:" + p.name()
-					+ "\", {domain, range, functional, symmetric, volatility, lexicon, render, description})");
+					+ "\", {domain, range, functional, symmetric, volatility, lasting, lexicon, render, description})");
 			a.defined("predicate", p.name(), "inferred", inferred);
 			a.warnings.add("Predicate '" + f.predicate() + "' was registered from this use with everything inferred "
 					+ "from its name (see definitions); state what you know in 'predicates' or through correct.");

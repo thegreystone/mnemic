@@ -441,7 +441,15 @@ Integer specVersion, List<EntityRef> entities, List<EventRef> events, List<FactR
 			String functionalScope, Boolean symmetric, String inverse, String volatility, List<String> lexicon,
 			String render, List<String> qualifiers, List<String> aliases, Map<String, Object> renders,
 			@JsonProperty("defined_as")
-			Object definedAs, Map<String, Object> implies, Boolean containment, List<String> groups) {
+			Object definedAs, Map<String, Object> implies, Boolean containment, List<String> groups, Boolean lasting) {
+		public PredicateDef(String name, String description, String domain, String range, Boolean functional,
+				String functionalScope, Boolean symmetric, String inverse, String volatility, List<String> lexicon,
+				String render, List<String> qualifiers, List<String> aliases, Map<String, Object> renders,
+				Object definedAs, Map<String, Object> implies, Boolean containment, List<String> groups) {
+			this(name, description, domain, range, functional, functionalScope, symmetric, inverse, volatility, lexicon,
+					render, qualifiers, aliases, renders, definedAs, implies, containment, groups, null);
+		}
+
 		public PredicateDef(String name, String description, String domain, String range, Boolean functional,
 				String functionalScope, Boolean symmetric, String inverse, String volatility, List<String> lexicon,
 				String render, List<String> qualifiers, List<String> aliases, Map<String, Object> renders,
@@ -483,7 +491,8 @@ Integer specVersion, List<EntityRef> entities, List<EventRef> events, List<FactR
 		/**
 		 * {@code renders}: per-language templates, {@code {"de": {"render": ..., "negated": ..., "lexicon": [...]}}}.
 		 * {@code groups}: the groups the predicate belongs to ("family"); null when the definition says nothing about
-		 * them, so that a partial definition leaves them alone.
+		 * them, so that a partial definition leaves them alone. {@code lasting}: a participant's death does not end the
+		 * relation.
 		 */
 		public PredicateDef {
 			renders = renders == null ? Map.of() : renders;

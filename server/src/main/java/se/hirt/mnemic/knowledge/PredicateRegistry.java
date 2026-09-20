@@ -137,6 +137,7 @@ public final class PredicateRegistry {
 		seedIfMissing();
 		seedRendersIfMissing();
 		seedGroupsIfMissing();
+		seedLastingIfMissing();
 		fillLexicons();
 	}
 
@@ -578,7 +579,7 @@ public final class PredicateRegistry {
 		return d.description() != null || d.domain() != null || d.range() != null || d.functional() != null
 				|| d.functionalScope() != null || d.symmetric() != null || d.inverse() != null || d.volatility() != null
 				|| !d.lexicon().isEmpty() || d.render() != null || !d.qualifiers().isEmpty() || !d.aliases().isEmpty()
-				|| !d.renders().isEmpty() || d.containment() != null || d.groups() != null;
+				|| !d.renders().isEmpty() || d.containment() != null || d.groups() != null || d.lasting() != null;
 	}
 
 	static boolean bare(PredicateDef d) {
@@ -586,7 +587,7 @@ public final class PredicateRegistry {
 				&& d.functionalScope() == null && d.symmetric() == null && d.inverse() == null && d.volatility() == null
 				&& d.lexicon().isEmpty() && d.render() == null && d.qualifiers().isEmpty() && d.aliases().isEmpty()
 				&& d.renders().isEmpty() && d.definedAs() == null && d.implies() == null && d.containment() == null
-				&& d.groups() == null;
+				&& d.groups() == null && d.lasting() == null;
 	}
 
 	// ── meaning ──────────────────────────────────────────────────────────
@@ -935,7 +936,7 @@ public final class PredicateRegistry {
 				def.functionalScope(), Boolean.TRUE.equals(def.symmetric()), def.inverse(),
 				def.volatility() == null ? "medium" : def.volatility(), lexicon, render, def.qualifiers(),
 				def.aliases(), List.of(), observationId, false, bare(def), Boolean.TRUE.equals(def.containment()),
-				groups);
+				groups, Boolean.TRUE.equals(def.lasting()));
 		List<Rule> parsed = def.definedAs() == null ? List.of() : Rule.parse(def.definedAs());
 		validateRules(name, parsed);
 		Map<String, Map<String, String>> implied = parseImplies(name, def.implies());
@@ -998,6 +999,9 @@ public final class PredicateRegistry {
 		if (def.groups() != null) {
 			replacement.put("groups", def.groups());
 		}
+		if (def.lasting() != null) {
+			replacement.put("lasting", def.lasting());
+		}
 		return update(p.name(), replacement, "defined after registration from use");
 	}
 
@@ -1022,6 +1026,7 @@ public final class PredicateRegistry {
 		String newImplies = null;
 		boolean impliesChanged = false;
 		boolean containment = p.containment();
+		boolean lasting = p.lasting();
 		List<String> groups = p.groups();
 		var changes = new ArrayList<String[]>();
 		for (Map.Entry<String, Object> e : replacement.entrySet()) {
@@ -1046,6 +1051,10 @@ public final class PredicateRegistry {
 			case "containment" -> {
 				old = String.valueOf(containment);
 				containment = Boolean.parseBoolean(String.valueOf(e.getValue()));
+			}
+			case "lasting" -> {
+				old = String.valueOf(lasting);
+				lasting = Boolean.parseBoolean(String.valueOf(e.getValue()));
 			}
 			case "render" -> {
 				old = render;
@@ -1104,7 +1113,7 @@ public final class PredicateRegistry {
 			}
 			default -> throw MnemicException.invalidArgument("Unknown predicate property '" + e.getKey()
 					+ "'; correctable: description, domain, range, render, renders, lexicon, inverse_lexicon, qualifiers, "
-					+ "functional, symmetric, volatility, defined_as, implies, containment, groups.");
+					+ "functional, symmetric, volatility, defined_as, implies, containment, groups, lasting.");
 			}
 			changes.add(new String[] {e.getKey(), old,
 					"defined_as".equals(e.getKey()) ? rule
@@ -1127,14 +1136,15 @@ public final class PredicateRegistry {
 		final List<String> dom = domain;
 		final List<String> rng = range;
 		final List<String> grp = groups;
+		final boolean last = lasting;
 		db.write(tx -> {
 			tx.update(
 					"""
 							UPDATE predicate SET render = ?, lexicon = ?, qualifiers = ?, functional = ?, symmetric = ?, volatility = ?,
-							description = ?, inverse_lexicon = ?, domain = ?, range = ?, containment = ?, groups = ?, inferred = 0
-							WHERE name = ?""",
+							description = ?, inverse_lexicon = ?, domain = ?, range = ?, containment = ?, groups = ?, lasting = ?,
+							inferred = 0 WHERE name = ?""",
 					r, json(l), json(q), f ? 1 : 0, sym ? 1 : 0, v, d, json(inv), json(dom), json(rng), cont ? 1 : 0,
-					json(grp), p.name());
+					json(grp), last ? 1 : 0, p.name());
 			if (newRule != null) {
 				tx.update("UPDATE predicate SET rule = ? WHERE name = ?", newRule, p.name());
 			}
@@ -1525,10 +1535,10 @@ public final class PredicateRegistry {
 						"""
 								UPDATE predicate SET description = ?, domain = ?, range = ?, functional = ?, functional_scope = ?,
 								                     symmetric = ?, volatility = ?, lexicon = ?, render = ?, qualifiers = ?,
-								                     inverse_lexicon = ?, seed = 1, inferred = 0 WHERE name = ?""",
+								                     inverse_lexicon = ?, lasting = ?, seed = 1, inferred = 0 WHERE name = ?""",
 						p.description(), json(p.domain()), json(p.range()), p.functional() ? 1 : 0, p.functionalScope(),
 						p.symmetric() ? 1 : 0, p.volatility(), json(p.lexicon()), p.render(), json(p.qualifiers()),
-						json(p.inverseLexicon()), p.name()));
+						json(p.inverseLexicon()), p.lasting() ? 1 : 0, p.name()));
 				adopted.add(p.name());
 				cache = null;
 			}
@@ -1814,11 +1824,39 @@ public final class PredicateRegistry {
 		boolean symmetric, String volatility, List<String> lexicon, String render, List<String> qualifiers,
 		List<String> inverseLexicon) {
 		return new Predicate(name, description, domain, range, functional, scope, symmetric, null, volatility, lexicon,
-				render, qualifiers, List.of(), inverseLexicon, null, true, false, CONTAINMENT_SEEDS.contains(name));
+				render, qualifiers, List.of(), inverseLexicon, null, true, false, CONTAINMENT_SEEDS.contains(name),
+				List.of(), LASTING_SEEDS.contains(name));
 	}
 
 	/** The seed predicates whose facts nest the subject inside the object. */
 	private static final Set<String> CONTAINMENT_SEEDS = Set.of("located_in", "part_of");
+
+	/**
+	 * The seed relations a participant's death does not end: kin by blood or by record, and what is derived from them.
+	 * A marriage, a partnership, an engagement, a job, a home, a membership end with the person.
+	 */
+	static final Set<String> LASTING_SEEDS = Set.of("parent_of", "sibling_of", "born_in", "gender", "step_parent_of",
+			"grandparent_of", "aunt_uncle_of", "cousin_of", "in_law_of");
+
+	/**
+	 * A seed predicate in the lasting set carries the flag unless the user changed it (a change on its log), so a store
+	 * from before the property existed takes it at this start.
+	 */
+	private void seedLastingIfMissing() {
+		var userSet = new HashSet<String>();
+		for (Row r : db
+				.read(tx -> tx.query("SELECT DISTINCT predicate FROM predicate_change WHERE field = 'lasting'"))) {
+			userSet.add(r.str("predicate"));
+		}
+		for (String name : LASTING_SEEDS) {
+			Predicate p = load().get(name);
+			if (p == null || !p.seed() || p.lasting() || userSet.contains(name)) {
+				continue;
+			}
+			db.write(tx -> tx.update("UPDATE predicate SET lasting = 1 WHERE name = ?", name));
+			cache = null;
+		}
+	}
 
 	// ── persistence ──────────────────────────────────────────────────────
 
@@ -1863,7 +1901,7 @@ public final class PredicateRegistry {
 							new Predicate(p.name(), p.description(), p.domain(), p.range(), p.functional(),
 									p.functionalScope(), p.symmetric(), p.inverse(), p.volatility(), lexicon,
 									r.str("render"), p.qualifiers(), p.aliases(), inverse, p.definedBy(), p.seed(),
-									p.isInferred(), p.containment(), p.groups()));
+									p.isInferred(), p.containment(), p.groups(), p.lasting()));
 					if (r.str("negated") != null) {
 						negated.put(p.name(), r.str("negated"));
 					}
@@ -1910,12 +1948,12 @@ public final class PredicateRegistry {
 		tx.insert("""
 				INSERT INTO predicate(name, description, domain, range, functional, functional_scope, symmetric,
 				                      inverse, volatility, lexicon, render, qualifiers, aliases, inverse_lexicon,
-				                      defined_by, seed, inferred, created_at, containment, groups)
-				VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", p.name(), p.description(), json(p.domain()),
+				                      defined_by, seed, inferred, created_at, containment, groups, lasting)
+				VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", p.name(), p.description(), json(p.domain()),
 				json(p.range()), p.functional() ? 1 : 0, p.functionalScope(), p.symmetric() ? 1 : 0, p.inverse(),
 				p.volatility(), json(p.lexicon()), p.render(), json(p.qualifiers()), json(p.aliases()),
 				json(p.inverseLexicon()), p.definedBy(), p.seed() ? 1 : 0, p.isInferred() ? 1 : 0,
-				Instant.now().toString(), p.containment() ? 1 : 0, json(p.groups()));
+				Instant.now().toString(), p.containment() ? 1 : 0, json(p.groups()), p.lasting() ? 1 : 0);
 		return null;
 	}
 
@@ -1924,7 +1962,7 @@ public final class PredicateRegistry {
 				r.lng("functional") == 1, r.str("functional_scope"), r.lng("symmetric") == 1, r.str("inverse"),
 				r.str("volatility"), list(r.str("lexicon")), r.str("render"), list(r.str("qualifiers")),
 				list(r.str("aliases")), list(r.str("inverse_lexicon")), r.lngOrNull("defined_by"), r.lng("seed") == 1,
-				r.lng("inferred") == 1, r.lng("containment") == 1, list(r.str("groups")));
+				r.lng("inferred") == 1, r.lng("containment") == 1, list(r.str("groups")), r.lng("lasting") == 1);
 	}
 
 	private List<String> types(String csv) {

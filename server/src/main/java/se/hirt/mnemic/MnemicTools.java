@@ -790,6 +790,9 @@ public class MnemicTools {
 		}
 		m.put("symmetric", p.symmetric());
 		m.put("volatility", p.volatility());
+		if (p.lasting()) {
+			m.put("lasting", true);
+		}
 		if (!p.qualifiers().isEmpty()) {
 			m.put("qualifiers", p.qualifiers());
 		}

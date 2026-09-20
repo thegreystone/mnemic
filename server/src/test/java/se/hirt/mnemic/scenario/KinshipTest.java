@@ -42,6 +42,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static se.hirt.mnemic.TestHomes.fact;
@@ -281,6 +282,128 @@ class KinshipTest {
 			assertNull(misfiled.getFirst().get("derived"));
 			assertTrue(String.valueOf(misfiled.getFirst().get("hint")).contains("\"predicate\": \"step_parent_of\""),
 					misfiled.toString());
+		}
+	}
+
+	@Test
+	@Scenario("K38")
+	void aBaseFactEndedOnTheDayOfADeathWasEndedByIt() {
+		try (Engine e = TestHomes.engine("k38-death-date")) {
+			parents(e);
+			// The death is on record first; the marriage arrives later, written with the death day as its end.
+			remember(e, "Lena died on 4 March 2020.",
+					proposal().entity("e1", "Lena Berg", "person").event("ev1", "died", "2020-03-04", "e1"));
+			remember(e, "Konrad was married to Lena from 2015 until her death.",
+					proposal().entity("e1", "Lena Berg", "person").entity("e2", "Konrad Nyberg", "person")
+							.fact(fact("e1", "spouse_of", "e2", "wife", null, "2015", "2020-03-04", null, null, null)));
+			assertEquals(List.of("Lena Berg is Mattias Sandell's stepmother (since 2015)"),
+					renderings(e, "step_parent_of"), "ended on the day she died: ended by her death");
+			// Written at year precision, the same.
+			remember(e, "Konrad was married to Ulla from 2016 until her death.",
+					proposal().entity("e1", "Ulla Lind", "person").entity("e2", "Konrad Nyberg", "person")
+							.fact(fact("e1", "spouse_of", "e2", "wife", null, "2016", "2021", null, null, null)));
+			remember(e, "Ulla died on 9 May 2021.",
+					proposal().entity("e1", "Ulla Lind", "person").event("ev1", "died", "2021-05-09", "e1"));
+			assertTrue(
+					renderings(e, "step_parent_of").contains("Ulla Lind is Mattias Sandell's stepmother (since 2016)"),
+					renderings(e, "step_parent_of").toString());
+			// An end on another day is an end: a divorce, a separation, whatever it was.
+			remember(e, "Konrad was married to Maj from 2017 to 2018.",
+					proposal().entity("e1", "Maj Ek", "person").entity("e2", "Konrad Nyberg", "person")
+							.fact(fact("e1", "spouse_of", "e2", "wife", null, "2017", "2018", null, null, null)));
+			remember(e, "Maj died in 2023.",
+					proposal().entity("e1", "Maj Ek", "person").event("ev1", "died", "2023", "e1"));
+			assertTrue(
+					renderings(e, "step_parent_of")
+							.contains("Maj Ek is Mattias Sandell's stepmother (2017 \u2013 2018)"),
+					renderings(e, "step_parent_of").toString());
+			// An end another event explains keeps its explanation, even on the year of a death: a divorce is a divorce.
+			remember(e, "Konrad married Siv in 2016.",
+					proposal().entity("e1", "Siv Alm", "person").entity("e2", "Konrad Nyberg", "person")
+							.fact(fact("e1", "spouse_of", "e2", "wife", null, "2016", null, null, null, null)));
+			remember(e, "Konrad and Siv divorced in 2019.", proposal().entity("e1", "Konrad Nyberg", "person")
+					.entity("e2", "Siv Alm", "person").event("ev1", "divorced", "2019", "e1", "e2"));
+			remember(e, "Siv died in 2019.",
+					proposal().entity("e1", "Siv Alm", "person").event("ev1", "died", "2019", "e1"));
+			assertTrue(
+					renderings(e, "step_parent_of")
+							.contains("Siv Alm is Mattias Sandell's stepmother (2016 \u2013 2019)"),
+					renderings(e, "step_parent_of").toString());
+			// The marriages themselves keep the ends they were given.
+			Fact ulla = e.facts().factsOf(e.entities().byRef("Ulla Lind").orElseThrow().id()).stream()
+					.filter(f -> "spouse_of".equals(f.predicate())).findFirst().orElseThrow();
+			assertEquals("2021-01-01", ulla.validEnd());
+			assertEquals("stated", ulla.endSource());
+			// The record says why a row without an end still stands.
+			Fact stepmother = e.facts().factsOf(e.entities().owner().id()).stream()
+					.filter(f -> "step_parent_of".equals(f.predicate()) && f.rendering().startsWith("Lena Berg"))
+					.findFirst().orElseThrow();
+			Object outlived = e.deriver().derivationOf(stepmother.id()).get("outlived");
+			assertNotNull(outlived, e.deriver().derivationOf(stepmother.id()).toString());
+			assertTrue(outlived.toString().contains("Lena Berg is Konrad Nyberg's wife"), outlived.toString());
+		}
+	}
+
+	@Test
+	@Scenario("K40")
+	void aDeathDoesNotEndTheDeceasedsLastingFacts() {
+		try (Engine e = TestHomes.engine("k40-lasting")) {
+			parents(e);
+			assertTrue(e.predicates().get("parent_of").orElseThrow().lasting());
+			assertFalse(e.predicates().get("spouse_of").orElseThrow().lasting());
+			remember(e, "Konrad and Gunilla married in 1970.",
+					proposal().entity("e1", "Konrad Nyberg", "person").entity("e2", "Gunilla Nyberg", "person")
+							.fact(fact("e1", "spouse_of", "e2", "husband", null, "1970", null, null, null, null)));
+			remember(e, "Konrad died in 2021.",
+					proposal().entity("e1", "Konrad Nyberg", "person").event("ev1", "died", "2021", "e1"));
+			assertEquals(
+					List.of("Gunilla Nyberg is Mattias Sandell's mother", "Konrad Nyberg is Mattias Sandell's father"),
+					renderings(e, "parent_of"), "a father stays a father");
+			Fact marriage = e.facts().factsOf(e.entities().byRef("Konrad Nyberg").orElseThrow().id()).stream()
+					.filter(f -> "spouse_of".equals(f.predicate())).findFirst().orElseThrow();
+			assertEquals("2021-01-01", marriage.validEnd(), "the marriage ended with him");
+			// A predicate of the store's own says it in its definition; without it, the deceased's relation ends with them.
+			remember(e, "Britt taught me the violin, and Sten coached me.", proposal()
+					.predicate(new PredicateDef("taught", "Subject taught object.", "person", "person", false, null,
+							false, null, "low", List.of("taught", "teacher"), null, List.of(), List.of(), null, null,
+							null, null, null, Boolean.TRUE))
+					.predicate(new PredicateDef("coaches", "Subject coaches object.", "person", "person", false, null,
+							false, null, "medium", List.of("coached", "coach"), null, List.of(), List.of()))
+					.entity("e1", "Britt Ek", "person").entity("e2", "Sten Alm", "person").fact("e1", "taught", "self")
+					.fact("e2", "coaches", "self"));
+			assertTrue(e.predicates().get("taught").orElseThrow().lasting());
+			assertFalse(e.predicates().get("coaches").orElseThrow().lasting());
+			remember(e, "Britt died in 2022, and so did Sten.",
+					proposal().entity("e1", "Britt Ek", "person").entity("e2", "Sten Alm", "person")
+							.event("ev1", "died", "2022", "e1").event("ev2", "died", "2022", "e2"));
+			assertEquals(List.of("Britt Ek taught Mattias Sandell"), renderings(e, "taught"),
+					"the deceased's own lasting fact stays");
+			assertEquals(List.of("Sten Alm coaches Mattias Sandell (until 2022)"),
+					e.facts().factsOf(e.entities().owner().id()).stream().filter(f -> "coaches".equals(f.predicate()))
+							.map(Fact::rendering).toList());
+			// Correctable, and logged.
+			e.correctPredicate("coaches", Map.of("lasting", true), "a coach stays a coach");
+			assertTrue(e.predicates().get("coaches").orElseThrow().lasting());
+		}
+	}
+
+	@Test
+	@Scenario("K39")
+	void aDeathClosesARelationStatedFromEitherSide() {
+		try (Engine e = TestHomes.engine("k39-either-side")) {
+			parents(e);
+			// The marriage stated with Konrad as the subject: Lena is the object, and her death still ends it.
+			remember(e, "Konrad married Lena in 2015.",
+					proposal().entity("e1", "Konrad Nyberg", "person").entity("e2", "Lena Berg", "person")
+							.fact(fact("e1", "spouse_of", "e2", "husband", null, "2015", null, null, null, null)));
+			remember(e, "Lena died in 2020.",
+					proposal().entity("e1", "Lena Berg", "person").event("ev1", "died", "2020", "e1"));
+			Fact marriage = e.facts().factsOf(e.entities().byRef("Lena Berg").orElseThrow().id()).stream()
+					.filter(f -> "spouse_of".equals(f.predicate())).findFirst().orElseThrow();
+			assertEquals("2020-01-01", marriage.validEnd(), "ended with her, whichever side stated it");
+			// Her gender is not on record (a husband role says nothing about her), so the role reads neutrally.
+			assertEquals(List.of("Lena Berg is Mattias Sandell's step-parent (since 2015)"),
+					renderings(e, "step_parent_of"), "and the lasting relation outlives it");
 		}
 	}
 

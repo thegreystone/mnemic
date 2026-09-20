@@ -49,27 +49,39 @@ import java.util.Set;
 public record Predicate(String name, String description, List<String> domain, List<String> range, boolean functional,
 		String functionalScope, boolean symmetric, String inverse, String volatility, List<String> lexicon,
 		String render, List<String> qualifiers, List<String> aliases, List<String> inverseLexicon, Long definedBy,
-		boolean seed, boolean inferred, boolean containment, List<String> groups) {
+		boolean seed, boolean inferred, boolean containment, List<String> groups, boolean lasting) {
 
-	/** {@code groups}: the groups this predicate belongs to (a question's "family" reaches every member). */
+	/**
+	 * {@code groups}: the groups this predicate belongs to (a question's "family" reaches every member).
+	 * {@code lasting}: a participant's death does not end the relation (a father stays a father), as against a marriage
+	 * or a job, which end with the person; distinct from volatility, which says whether a fact goes stale.
+	 */
 	public Predicate {
 		groups = groups == null ? List.of() : List.copyOf(groups);
 	}
 
-	/** A predicate in no group. */
+	/** A predicate in no group, not lasting. */
 	public Predicate(String name, String description, List<String> domain, List<String> range, boolean functional,
 			String functionalScope, boolean symmetric, String inverse, String volatility, List<String> lexicon,
 			String render, List<String> qualifiers, List<String> aliases, List<String> inverseLexicon, Long definedBy,
 			boolean seed, boolean inferred, boolean containment) {
 		this(name, description, domain, range, functional, functionalScope, symmetric, inverse, volatility, lexicon,
-				render, qualifiers, aliases, inverseLexicon, definedBy, seed, inferred, containment, List.of());
+				render, qualifiers, aliases, inverseLexicon, definedBy, seed, inferred, containment, List.of(), false);
 	}
 
 	/** The same predicate in these groups. */
 	public Predicate withGroups(List<String> newGroups) {
 		return new Predicate(name, description, domain, range, functional, functionalScope, symmetric, inverse,
 				volatility, lexicon, render, qualifiers, aliases, inverseLexicon, definedBy, seed, inferred,
-				containment, newGroups);
+				containment, newGroups, lasting);
+	}
+
+	/**
+	 * Whether facts under this predicate do not change with time (volatility low): they never go stale, and with
+	 * {@code as_of} they are known from the start, not from when they were observed.
+	 */
+	public boolean timeless() {
+		return "low".equals(volatility);
 	}
 
 	/**
@@ -95,9 +107,9 @@ public record Predicate(String name, String description, List<String> domain, Li
 		};
 	}
 
-	/** Whether facts under this predicate age at all: anything but low volatility. */
+	/** Whether facts under this predicate age at all: anything but timeless. */
 	public boolean ages() {
-		return !"low".equals(volatility);
+		return !timeless();
 	}
 
 	public static boolean sameQualifierFamily(String a, String b) {
@@ -186,7 +198,7 @@ public record Predicate(String name, String description, List<String> domain, Li
 		if (negatedTemplate != null && !negatedTemplate.isBlank()) {
 			return new Predicate(name, description, domain, range, functional, functionalScope, symmetric, inverse,
 					volatility, lexicon, negatedTemplate, qualifiers, aliases, inverseLexicon, definedBy, seed,
-					inferred, containment, groups).render(subject, object, scope, qualifier);
+					inferred, containment, groups, lasting).render(subject, object, scope, qualifier);
 		}
 		String full = render(subject, object, scope, qualifier);
 		if (lang != Lang.EN) {

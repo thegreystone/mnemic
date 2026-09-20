@@ -166,6 +166,7 @@ reasons over these properties rather than over the name:
 | `functional`            | consistency check — one current object per subject, or per (subject, `scope`) when `functional_scope` is `"scope"` |
 | `symmetric`             | the fact is stored once from either side and probed from both; a qualifier is matched by family (brother/sister/sibling) |
 | `volatility`            | the staleness annotation in recall and the `review` list: `high` facts are called *likely changed* after 180 days without confirmation, `medium` after 365, `low` never. It never touches confidence or ranking |
+| `lasting`               | a participant's death does not end the relation: the deceased's open facts under a lasting predicate stay open, and a derived row on a lasting predicate outlives a base fact a death ended (`inspect` names it under `outlived`). Kin by blood or by record are lasting; a marriage, a job, a home are not |
 | `lexicon`               | query analysis — terms that name the predicate ("work", "employer" → `works_at`)                        |
 | `inverse_lexicon`       | terms that name the object side ("children" → `parent_of` with the spotted entity as subject); a definition cannot set it, only `correct` with `predicate` can |
 | `qualifiers`            | the vocabulary of `qualifier` values; a term in a query is a cue with that qualifier ("mother")            |
@@ -1006,10 +1007,10 @@ to know: stated, it is corroborated by the shared parent. A rule the user
 replaces through `correct` is kept across restarts; a seed predicate whose
 rules were never touched takes the seed's.
 
-Three more things follow from the rules. A relation that does not change
-with time (volatility low) outlives a base fact a death ended: a stepfather
-who died is a late stepfather, not a former one, while a divorce ends the
-relation and a coworker relation ends with the job, death or not. A
+Three more things follow from the rules. A lasting relation (`lasting` on
+the predicate) outlives a base fact a death ended: a stepfather who died is
+a late stepfather, not a former one, while a divorce ends the relation and a
+coworker relation ends with the job, death or not. A
 person's gender is a fact under the seed predicate `gender` (person →
 literal, functional; "Britt is female"), stated outright or through the
 `gender` shorthand on an entity entry; `attributes: {"handedness": "left"}`

@@ -256,6 +256,28 @@ public final class Deriver {
 			m.put("kind", rows.getFirst().str("kind"));
 			m.put("rule", rows.getFirst().lng("rule"));
 			m.put("base", rows.stream().map(r -> "f-" + r.lng("base_fact_id")).distinct().toList());
+			// A lasting row with no end whose base a death ended says so, so a reader sees why it is still current.
+			Fact row = tx.query("SELECT * FROM fact WHERE id = ?", factId).stream().map(Fact::from).findFirst()
+					.orElse(null);
+			if (row != null && "derived".equals(row.derivationKind()) && row.validEnd() == null
+					&& predicates.get(row.predicate()).map(Predicate::lasting).orElse(false)) {
+				Map<Long, List<String[]>> deaths = Graph.deaths(tx);
+				var outlived = new ArrayList<String>();
+				for (Row r : rows) {
+					long baseId = r.lng("base_fact_id");
+					Fact base = tx.query("SELECT * FROM fact WHERE id = ?", baseId).stream().map(Fact::from).findFirst()
+							.orElse(null);
+					boolean closed = tx.queryLong(
+							"SELECT COUNT(*) FROM supersession WHERE fact_id = ? AND kind = 'entity_ended'",
+							baseId) > 0;
+					if (base != null && Graph.byDeath(base, closed, deaths)) {
+						outlived.add(base.rendering() + " [" + base.ref() + "]");
+					}
+				}
+				if (!outlived.isEmpty()) {
+					m.put("outlived", outlived);
+				}
+			}
 			return m;
 		});
 	}
@@ -305,7 +327,7 @@ public final class Deriver {
 						continue; // an earlier, more specific rule holds
 					}
 					String value = rule.attribute() == null ? null : g.attribute(rule.attribute(), key.subject());
-					out.put(key, candidate(i, rule, e.getValue(), key, value, "low".equals(p.volatility())));
+					out.put(key, candidate(i, rule, e.getValue(), key, value, p.lasting()));
 				}
 			}
 		}
@@ -338,9 +360,9 @@ public final class Deriver {
 	 * The interval a set of paths supports: a path holds while all its facts hold; the pair holds while any path does.
 	 */
 	/**
-	 * {@code lasting}: the derived predicate does not change with time (volatility low), so a base fact a death ended
-	 * still carries it: a stepfather who died is a late stepfather, not a former one. A relation that does change
-	 * (coworkers) ends when its base does.
+	 * {@code lasting}: the derived predicate is one a death does not end, so a base fact a death ended still carries
+	 * it: a stepfather who died is a late stepfather, not a former one. A relation that is not (coworkers) ends when
+	 * its base does.
 	 */
 	private static Candidate candidate(int rule, Rule r, List<Path> paths, Key key, String value, boolean lasting) {
 		var base = new TreeSet<Long>();
@@ -622,15 +644,67 @@ public final class Deriver {
 		private final Map<Long, List<Edge>> forward = new HashMap<>();
 		private final Map<Long, List<Edge>> backward = new HashMap<>();
 
+		/** The fact was closed by a participant's death: a supersession of kind entity_ended on its ledger. */
 		private static final String BY_DEATH = "EXISTS (SELECT 1 FROM supersession s WHERE s.fact_id = fact.id "
 				+ "AND s.kind = 'entity_ended') AS by_death";
 
+		/** When each entity's record says it ended (died, dissolved): the date and its precision, per event. */
+		private static Map<Long, List<String[]>> deaths(Tx tx) {
+			var out = new HashMap<Long, List<String[]>>();
+			for (Row r : tx
+					.query("""
+							SELECT ep.entity_id AS entity_id, ev.valid_start AS at, ev.valid_start_precision AS precision
+							FROM event ev JOIN event_type et ON et.name = ev.type JOIN event_participant ep ON ep.event_id = ev.id
+							WHERE et.ends_entity = 1 AND ev.valid_start IS NOT NULL""")) {
+				out.computeIfAbsent(r.lng("entity_id"), k -> new ArrayList<>())
+						.add(new String[] {r.str("at"), r.str("precision")});
+			}
+			return out;
+		}
+
+		/**
+		 * Whether a death ended the fact: the death closed it (the ledger says so), or the caller wrote the end
+		 * themselves and it falls on the day a participant's record says they died ("married Lars until 2014-10-07"
+		 * beside "Lars died 2014-10-07" is a marriage death ended, however it was written). Dates are stored normalised
+		 * ("2021" as 2021-01-01 at year precision), so they match at the coarser precision of the two. An end an event
+		 * or a later fact explains keeps its explanation, and a derived row's end is its base's, not its own to
+		 * attribute.
+		 */
+		private static boolean byDeath(Fact f, boolean closedByDeath, Map<Long, List<String[]>> deaths) {
+			if (closedByDeath) {
+				return true;
+			}
+			if (f.validEnd() == null || !"stated".equals(f.endSource()) || "derived".equals(f.derivationKind())) {
+				return false;
+			}
+			for (Long who : new Long[] {f.subjectId(), f.objectId()}) {
+				for (String[] death : deaths.getOrDefault(who, List.of())) {
+					String precision = coarser(f.validEndPrecision(), death[1]);
+					if (Bounds.show(f.validEnd(), precision).equals(Bounds.show(death[0], precision))) {
+						return true;
+					}
+				}
+			}
+			return false;
+		}
+
+		private static final List<String> COARSE_TO_FINE = List.of("year", "month", "day");
+
+		/** The coarser of two precisions; anything unknown counts as day, which is what {@link Bounds#show} does. */
+		private static String coarser(String a, String b) {
+			int ia = COARSE_TO_FINE.indexOf(a);
+			int ib = COARSE_TO_FINE.indexOf(b);
+			return COARSE_TO_FINE.get(Math.min(ia < 0 ? 2 : ia, ib < 0 ? 2 : ib));
+		}
+
 		static Graph load(Tx tx, PredicateRegistry predicates) {
 			var g = new Graph();
+			Map<Long, List<String[]>> deaths = deaths(tx);
 			for (Row r : tx.query("SELECT fact.*, " + BY_DEATH + " FROM fact WHERE status = 'current' AND "
 					+ "object_id IS NOT NULL AND mode = 'asserted' AND derivation_kind <> 'derived'")) {
 				Fact f = Fact.from(r);
-				g.add(f, predicates.get(f.predicate()).map(Predicate::symmetric).orElse(false), r.lng("by_death") == 1);
+				g.add(f, predicates.get(f.predicate()).map(Predicate::symmetric).orElse(false),
+						byDeath(f, r.lng("by_death") == 1, deaths));
 			}
 			g.predicates = predicates;
 			g.loadStated(tx);
@@ -769,10 +843,12 @@ public final class Deriver {
 		/** Every current fact, derived ones too, except those under {@code except}: the graph a chain is checked on. */
 		static Graph load(Tx tx, PredicateRegistry predicates, String except) {
 			var g = new Graph();
+			Map<Long, List<String[]>> deaths = deaths(tx);
 			for (Row r : tx.query("SELECT fact.*, " + BY_DEATH + " FROM fact WHERE status = 'current' AND "
 					+ "object_id IS NOT NULL AND mode = 'asserted' AND predicate <> ?", except)) {
 				Fact f = Fact.from(r);
-				g.add(f, predicates.get(f.predicate()).map(Predicate::symmetric).orElse(false), r.lng("by_death") == 1);
+				g.add(f, predicates.get(f.predicate()).map(Predicate::symmetric).orElse(false),
+						byDeath(f, r.lng("by_death") == 1, deaths));
 			}
 			g.predicates = predicates;
 			g.loadStated(tx);

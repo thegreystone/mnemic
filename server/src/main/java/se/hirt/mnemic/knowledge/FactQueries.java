@@ -121,7 +121,7 @@ public final class FactQueries {
 		}
 		Predicate p = predicates.get(predicate).orElse(null);
 		boolean functional = p != null && p.functional();
-		boolean timeless = p != null && "low".equals(p.volatility());
+		boolean timeless = p != null && p.timeless();
 		boolean endedPredecessors = rows.stream().map(Fact::from).anyMatch(f -> f.ended() || f.validEnd() != null);
 		for (Row r : rows) {
 			Fact f = Fact.from(r);
@@ -165,7 +165,7 @@ public final class FactQueries {
 			Fact f = Fact.from(r);
 			boolean ok;
 			if (asOf != null) {
-				boolean timeless = predicates.get(f.predicate()).map(p -> "low".equals(p.volatility())).orElse(false);
+				boolean timeless = predicates.get(f.predicate()).map(Predicate::timeless).orElse(false);
 				ok = !"corrected".equals(f.status()) && f.mayHoldAt(asOf)
 						&& knownBy(f, r.str("obs_observed_at"), asOf, timeless);
 			} else {
@@ -201,7 +201,7 @@ public final class FactQueries {
 		if (p.functional()) {
 			return 0;
 		}
-		if ("low".equals(p.volatility()) && p.sameType()) {
+		if (p.timeless() && p.sameType()) {
 			return 1;
 		}
 		return 2;

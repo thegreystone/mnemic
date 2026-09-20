@@ -37,6 +37,11 @@ Rules:
   "lexicon": ["godparent", "godmother", "godfather"], "render": "{subject} is {object}'s {qualifier|godparent}",
   "qualifiers": ["godmother", "godfather"], "groups": ["family"]}`) or prefix it with `x:` (`x:consults_for`) to
   store it without structure.
+- `volatility` (`low` | `medium` | `high`) says how soon an unconfirmed fact is called likely changed; `low` facts never
+  are, and with `as_of` they are known from the start. `lasting` (true | false, default false) says a participant's
+  death does not end the relation: a father stays a father (`parent_of`, `sibling_of`, `born_in`, and the derived
+  kin are lasting), while a marriage, a job, or a home ends with the person. The two are told apart: a marriage
+  never goes stale (`low`) and still ends with the spouse (not lasting).
 - `groups` names the groups a predicate belongs to: words a question uses for several relations at once. The
   kinship predicates are in `family`; a group named for the first time registers itself with the words of its
   name as cue words, and `correct(group:pets, {description, lexicon, renders, groups})` says more, including

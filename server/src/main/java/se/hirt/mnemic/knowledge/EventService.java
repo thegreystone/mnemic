@@ -256,9 +256,15 @@ public final class EventService {
 			}
 			if (et.get().endsEntity()) {
 				tx.update("UPDATE entity SET existed_end = ? WHERE id = ?", b.start(), subject.id());
+				// The deceased's own open facts, and the symmetric ones they stand on either side of: a marriage
+				// stated from the other side ends with them too (K39). Another party's fact about them (an employment
+				// at a wound-up organization) is that party's own story and stays (S11). A lasting relation (a
+				// father stays a father) is not ended at all (K40).
 				for (Row r : tx.query("""
-						SELECT * FROM fact WHERE subject_id = ? AND status = 'current' AND valid_end IS NULL
-						AND ended = 0""", subject.id())) {
+						SELECT * FROM fact WHERE (subject_id = ? OR (object_id = ?
+						AND predicate IN (SELECT name FROM predicate WHERE symmetric = 1)))
+						AND predicate NOT IN (SELECT name FROM predicate WHERE lasting = 1)
+						AND status = 'current' AND valid_end IS NULL AND ended = 0""", subject.id(), subject.id())) {
 					Fact f = Fact.from(r);
 					if (startsAfter(f, b)) {
 						continue;
