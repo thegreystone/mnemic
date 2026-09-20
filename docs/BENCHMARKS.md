@@ -581,7 +581,16 @@ broken scenario). The repeat with the fixed parser (`usage-sonnet-2`): 20 of 20,
 by `remember` with a reading, the correction by `correct`, which the metric first counted against it), 15 of 20 questions recalled before the
 answer (the other five were answered from the conversation just had), 1.5 tool calls a step, no answer on a MISS.
 The 12 slips left are the model answering in plain prose instead of the JSON wrapper, which the harness reads
-and counts. One server finding came out of the trace and is fixed: `as_of: "2015"` was refused, and a year or
+and counts. Fable 5.1 as assistant and judge (`usage-fable`, 2026-09-21): 20 of 20, a `recall` before every one of the 20
+questions, no protocol slip at all, 1.4 tool calls a step, no answer on a MISS. Nineteen of twenty statements
+were written down; the twentieth ("the benchmark data lives under bench/data") it declined on purpose, calling it
+a repository convention rather than a memory, which is a defensible reading. Things seen only in this run: it
+answered the boat entity question the store raised (`resolve` in the same `remember`), and after registering
+`breed` and `prefers` from use it went back with `correct` on `pred:breed` (domain, range) and `pred:prefers` (a
+render template), which is the register-from-use loop working as meant. Cost: 115 requests, 116k input, 799k
+cache reads, 12k output, about $2.50.
+
+One server finding came out of the traces and is fixed: `as_of: "2015"` was refused, and a year or
 a month is now taken as the end of that span. Cost, with the system prompt cached: 126 requests, 141k input tokens,
 889k cache reads, 17k output, about $0.65.
 
