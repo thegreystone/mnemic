@@ -72,6 +72,8 @@ import java.util.Set;
 public final class RecallService {
 
 	private static final int CANDIDATES = 100;
+	/** The block's token budget when the caller gives none: room for a grouped verdict and a few observations. */
+	public static final int DEFAULT_MAX_TOKENS = 1500;
 	/** How long recall waits for a model that is loading from disk before answering without the channel. */
 	private static final long LOAD_WAIT_MS = Long.getLong("mnemic.semantic.load-wait-ms", 20_000L);
 	private static final int RRF_K = 60;
@@ -176,7 +178,7 @@ public final class RecallService {
 					+ "Example: {\"query\": \"where does Mattias work\"}");
 		}
 		if (maxTokens <= 0) {
-			throw MnemicException.invalidArgument("'max_tokens' must be positive, e.g. 800.");
+			throw MnemicException.invalidArgument("'max_tokens' must be positive, e.g. " + DEFAULT_MAX_TOKENS + ".");
 		}
 		Instant now = clock.instant();
 		Query q = Query.analyse(query, entities, predicates, types);

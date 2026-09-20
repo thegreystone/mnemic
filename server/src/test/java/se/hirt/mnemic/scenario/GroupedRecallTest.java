@@ -291,4 +291,22 @@ class GroupedRecallTest {
 					.anyMatch(m -> String.valueOf(m).contains("has_pet")), "a definition with groups is a definition");
 		}
 	}
+
+	@Test
+	@Scenario("J12")
+	void aSeedGroupClaimsASameNamedPredicateDefinedBeforeItUnlessTheUserRegroupedIt() {
+		Path home = TestHomes.fresh("j12-seed-claims");
+		try (Engine e = TestHomes.engine(home)) {
+			// A store from before groups existed, whose engaged_to the assistant had defined itself.
+			e.database().write(
+					tx -> tx.update("UPDATE predicate SET groups = '[]', seed = 0 WHERE name = ?", "engaged_to"));
+			// And one whose owner took spouse_of out of the group on purpose.
+			e.correctPredicate("spouse_of", Map.of("groups", List.of()), "not what I call family");
+		}
+		try (Engine e = TestHomes.engine(home)) {
+			List<String> members = e.predicates().membersOf("family").stream().map(Predicate::name).toList();
+			assertTrue(members.contains("engaged_to"), "claimed by name at start: " + members);
+			assertFalse(members.contains("spouse_of"), "the owner's choice stands: " + members);
+		}
+	}
 }

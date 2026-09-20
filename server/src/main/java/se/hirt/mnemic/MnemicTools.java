@@ -57,6 +57,7 @@ import se.hirt.mnemic.observation.Source;
 import se.hirt.mnemic.proposal.Proposal;
 import se.hirt.mnemic.protocol.MnemicException;
 import se.hirt.mnemic.recall.RecallResult;
+import se.hirt.mnemic.recall.RecallService;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -190,7 +191,8 @@ public class MnemicTools {
 		Optional<String> query,
 		@ToolArg(description = "Knowledge as it stood at this ISO date/instant: facts by their valid time, "
 				+ "observations by when they were observed")
-		Optional<String> as_of, @ToolArg(description = "Token budget for the returned block (default 800)")
+		Optional<String> as_of,
+		@ToolArg(description = "Token budget for the returned block (default " + RecallService.DEFAULT_MAX_TOKENS + ")")
 		Optional<Integer> max_tokens, @ToolArg(description = "Maximum number of items (default 10)")
 		Optional<Integer> limit,
 		@ToolArg(description = "Also return ended and superseded facts (default false); past tense in the "
@@ -198,10 +200,11 @@ public class MnemicTools {
 		Optional<Boolean> include_history) {
 		return ToolSupport.text("recall", () -> {
 			if (query.isEmpty() || query.get().isBlank()) {
-				return engine.briefing(max_tokens.orElse(800));
+				return engine.briefing(max_tokens.orElse(RecallService.DEFAULT_MAX_TOKENS));
 			}
 			RecallResult r = engine.recall().recall(query.get(), as_of.map(MnemicTools::instant).orElse(null),
-					max_tokens.orElse(800), limit.orElse(10), include_history.orElse(false));
+					max_tokens.orElse(RecallService.DEFAULT_MAX_TOKENS), limit.orElse(10),
+					include_history.orElse(false));
 			return r.text();
 		});
 	}

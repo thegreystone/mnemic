@@ -828,7 +828,7 @@ evidence of no.
 
 `recall` takes the natural-language `query` and, as hints, `as_of` (a date or
 instant: facts by their valid time, observations by when they were observed),
-`include_history`, `max_tokens` (default 800), and `limit` (default 10).
+`include_history`, `max_tokens` (default 1500), and `limit` (default 10).
 Mnemic works from the bare query string; there are no entity or predicate
 hints (see *Planned*), and the evaluation scenarios test the bare path.
 

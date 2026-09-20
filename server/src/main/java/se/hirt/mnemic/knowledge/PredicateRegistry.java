@@ -1442,8 +1442,10 @@ public final class PredicateRegistry {
 	}
 
 	/**
-	 * The seed groups exist in every store, and a seed predicate carries its seed group unless the user changed its
-	 * groups (a change on its log), so a store from before groups existed takes them at this start.
+	 * The seed groups exist in every store, and a predicate named as a seed member carries its seed group unless the
+	 * user changed its groups (a change on its log), so a store from before groups existed takes them at this start.
+	 * The name decides, not the seed flag: a store that defined engaged_to before the seed knew it holds the same
+	 * relation under the same name, and its owner can still take it out of the group by correction.
 	 */
 	private void seedGroupsIfMissing() {
 		load();
@@ -1465,7 +1467,7 @@ public final class PredicateRegistry {
 			}
 			for (String member : s.members()) {
 				Predicate p = load().get(member);
-				if (p == null || !p.seed() || p.groups().contains(s.name())) {
+				if (p == null || p.groups().contains(s.name())) {
 					continue;
 				}
 				boolean userSet = db.read(tx -> tx.queryLong(

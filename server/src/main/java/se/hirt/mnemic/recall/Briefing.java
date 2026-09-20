@@ -68,7 +68,8 @@ public final class Briefing {
 
 	public String render(int maxTokens) {
 		if (maxTokens <= 0) {
-			throw MnemicException.invalidArgument("'max_tokens' must be positive, e.g. 800.");
+			throw MnemicException
+					.invalidArgument("'max_tokens' must be positive, e.g. " + RecallService.DEFAULT_MAX_TOKENS + ".");
 		}
 		Instant now = clock.instant();
 		Entity owner = entities.owner();
