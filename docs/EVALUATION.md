@@ -1346,7 +1346,12 @@ groups it belongs to are corrected by `group:` name, logged, and shown by
 `inspect` with its members. A group may belong to several groups; a word
 for an outer group reaches every predicate under it, transitively; a group
 that would end up containing itself is refused. `inspect('registry')`
-lists the groups; a predicate's entry names its groups.
+lists the groups; a predicate's entry names its groups. At start, a seed
+group claims a predicate the store defined itself under a seed member's
+name (`engaged_to` from before the seed knew it) when its definition named
+no groups, no correction touched its groups, and its domain and range
+overlap the seed's; a correction that took a member out of the group
+stands, and so does a definition that put it elsewhere.
 
 ## K. Derived predicates
 

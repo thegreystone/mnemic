@@ -302,11 +302,21 @@ class GroupedRecallTest {
 					tx -> tx.update("UPDATE predicate SET groups = '[]', seed = 0 WHERE name = ?", "engaged_to"));
 			// And one whose owner took spouse_of out of the group on purpose.
 			e.correctPredicate("spouse_of", Map.of("groups", List.of()), "not what I call family");
+			// One the store defined with groups of its own, and one of another kind under a seed member's name.
+			e.database().write(tx -> tx.update("UPDATE predicate SET groups = '[\"romance\"]', seed = 0 WHERE name = ?",
+					"cousin_of"));
+			e.database()
+					.write(tx -> tx.update(
+							"UPDATE predicate SET groups = '[]', seed = 0, range = '[\"organization\"]' WHERE name = ?",
+							"partner_of"));
 		}
 		try (Engine e = TestHomes.engine(home)) {
 			List<String> members = e.predicates().membersOf("family").stream().map(Predicate::name).toList();
 			assertTrue(members.contains("engaged_to"), "claimed by name at start: " + members);
 			assertFalse(members.contains("spouse_of"), "the owner's choice stands: " + members);
+			assertFalse(members.contains("cousin_of"), "a definition that named its groups stands: " + members);
+			assertEquals(List.of("romance"), e.predicates().get("cousin_of").orElseThrow().groups());
+			assertFalse(members.contains("partner_of"), "a relation of another kind is not claimed: " + members);
 		}
 	}
 }

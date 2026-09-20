@@ -1442,13 +1442,19 @@ public final class PredicateRegistry {
 	}
 
 	/**
-	 * The seed groups exist in every store, and a predicate named as a seed member carries its seed group unless the
-	 * user changed its groups (a change on its log), so a store from before groups existed takes them at this start.
-	 * The name decides, not the seed flag: a store that defined engaged_to before the seed knew it holds the same
-	 * relation under the same name, and its owner can still take it out of the group by correction.
+	 * The seed groups exist in every store, and a predicate named as a seed member carries its seed group when
+	 * {@link #claimable} says so, so a store from before groups existed takes them at this start. A store that defined
+	 * engaged_to before the seed knew it holds the same relation under the same name; its owner can still take it out
+	 * of the group by correction, and a definition that named other groups is left as it is.
 	 */
 	private void seedGroupsIfMissing() {
 		load();
+		// The predicates whose groups the owner set by correction: one read, whatever the number of members.
+		var regrouped = new HashSet<String>();
+		for (Row r : db
+				.read(tx -> tx.query("SELECT DISTINCT predicate FROM predicate_change WHERE field = 'groups'"))) {
+			regrouped.add(r.str("predicate"));
+		}
 		for (SeedGroup s : seedGroups()) {
 			if (!groupCache.containsKey(s.name())) {
 				db.write(tx -> {
@@ -1467,12 +1473,7 @@ public final class PredicateRegistry {
 			}
 			for (String member : s.members()) {
 				Predicate p = load().get(member);
-				if (p == null || p.groups().contains(s.name())) {
-					continue;
-				}
-				boolean userSet = db.read(tx -> tx.queryLong(
-						"SELECT COUNT(*) FROM predicate_change WHERE predicate = ? AND field = 'groups'", member)) > 0;
-				if (userSet) {
+				if (p == null || p.groups().contains(s.name()) || !claimable(p, member, regrouped)) {
 					continue;
 				}
 				var groups = new ArrayList<>(p.groups());
@@ -1481,6 +1482,25 @@ public final class PredicateRegistry {
 				cache = null;
 			}
 		}
+	}
+
+	/**
+	 * Whether a seed group may claim the predicate under a seed member's name. A seed predicate: always. One the store
+	 * defined itself: only when nothing was said about its groups (none given in its definition, no correction on its
+	 * log) and its domain and range overlap the seed's, so a same-named relation of another kind (a partner_of between
+	 * people and companies) stays out. Unlike the seed rules and implications, which still require the seed flag
+	 * because they change what a predicate means, a group is a word a question uses to reach the predicate, and
+	 * reaching the store's own engaged_to by "family" is what its owner would expect.
+	 */
+	private boolean claimable(Predicate p, String member, Set<String> regrouped) {
+		if (p.seed()) {
+			return !regrouped.contains(member);
+		}
+		if (!p.groups().isEmpty() || regrouped.contains(member)) {
+			return false;
+		}
+		Predicate seed = seed().stream().filter(x -> x.name().equals(member)).findFirst().orElse(null);
+		return seed != null && overlaps(p.domain(), seed.domain()) && overlaps(p.range(), seed.range());
 	}
 
 	// ── seed ─────────────────────────────────────────────────────────────
