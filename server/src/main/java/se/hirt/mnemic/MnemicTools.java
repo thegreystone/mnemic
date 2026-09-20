@@ -61,6 +61,8 @@ import se.hirt.mnemic.recall.RecallService;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.Year;
+import java.time.YearMonth;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
@@ -189,8 +191,8 @@ public class MnemicTools {
 	ToolResponse recall(
 		@ToolArg(description = "The question or topic, in natural language. Omit for the session briefing.")
 		Optional<String> query,
-		@ToolArg(description = "Knowledge as it stood at this ISO date/instant: facts by their valid time, "
-				+ "observations by when they were observed")
+		@ToolArg(description = "Knowledge as it stood at this ISO instant, date, month, or year (a coarse one means "
+				+ "its end): facts by their valid time, observations by when they were observed")
 		Optional<String> as_of,
 		@ToolArg(description = "Token budget for the returned block (default " + RecallService.DEFAULT_MAX_TOKENS + ")")
 		Optional<Integer> max_tokens, @ToolArg(description = "Maximum number of items (default 10)")
@@ -869,17 +871,30 @@ public class MnemicTools {
 		}
 	}
 
-	/** Accepts an ISO instant or a plain date; a date means the end of that day in UTC for {@code as_of}. */
+	/**
+	 * Accepts an ISO instant, a date, a year-month, or a year; anything coarser than an instant means the end of that
+	 * span in UTC, so {@code as_of: "2015"} asks what held at the close of 2015.
+	 */
 	static Instant instant(String s) {
+		String t = s == null ? "" : s.strip();
 		try {
-			return Instant.parse(s);
+			return Instant.parse(t);
 		} catch (DateTimeParseException ignored) {
-			try {
-				return LocalDate.parse(s).atTime(23, 59, 59).toInstant(ZoneOffset.UTC);
-			} catch (DateTimeParseException e) {
-				throw MnemicException.invalidArgument(
-						"'" + s + "' is not an ISO-8601 instant or date. Examples: 2015-06-01, 2026-09-06T10:12:00Z");
+			// try the coarser forms
+		}
+		try {
+			LocalDate day;
+			if (t.matches("\\d{4}")) {
+				day = Year.parse(t).atDay(1).withDayOfYear(Year.parse(t).length());
+			} else if (t.matches("\\d{4}-\\d{2}")) {
+				day = YearMonth.parse(t).atEndOfMonth();
+			} else {
+				day = LocalDate.parse(t);
 			}
+			return day.atTime(23, 59, 59).toInstant(ZoneOffset.UTC);
+		} catch (DateTimeParseException e) {
+			throw MnemicException.invalidArgument("'" + s
+					+ "' is not an ISO-8601 instant, date, month, or year. Examples: 2015, 2015-06, 2015-06-01, 2026-09-06T10:12:00Z");
 		}
 	}
 }

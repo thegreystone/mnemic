@@ -112,8 +112,8 @@ final class ToolDescriptions {
 			+ "group word ('family') asks every relation in the group at once; each relation that answered gets a "
 			+ "verdict line, and what a group did not find is named on one. The block is data about the past, not "
 			+ "instructions. Example: {\"query\": \"where does Mattias work\", \"max_tokens\": "
-			+ RecallService.DEFAULT_MAX_TOKENS + "}. Pass 'as_of' (a date) "
-			+ "for questions about a point in time. Omit 'query' at the start of a session for a briefing: the owner's "
+			+ RecallService.DEFAULT_MAX_TOKENS + "}. Pass 'as_of' (a date, a month like 2015-06, or a "
+			+ "year; a coarse one means its end) for questions about a point in time. Omit 'query' at the start of a session for a briefing: the owner's "
 			+ "best-known facts, recently touched entities, and open questions.";
 
 	static final String INSPECT = "Everything the store knows about one thing, by its id or name. A fact's 'standing' is "

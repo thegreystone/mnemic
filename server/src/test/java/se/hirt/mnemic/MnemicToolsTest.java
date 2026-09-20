@@ -34,6 +34,7 @@ import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.Test;
 import se.hirt.mnemic.protocol.Json;
+import se.hirt.mnemic.protocol.MnemicException;
 
 import java.util.List;
 import java.util.Map;
@@ -41,6 +42,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** The tool surface inside the container: seven tools, one id scheme, structured errors. */
@@ -402,8 +404,10 @@ class MnemicToolsTest {
 
 	@SuppressWarnings("unchecked")
 	private static String firstFactId(ToolResponse stored) {
-		return (String) ((List<Map<String, Object>>) ((Map<?, ?>) result(stored).get("stored")).get("facts")).getFirst()
-				.get("id");
+		List<Map<String, Object>> facts = (List<Map<String, Object>>) ((Map<?, ?>) result(stored).get("stored"))
+				.get("facts");
+		assertFalse(facts.isEmpty(), "no fact stored: " + text(stored));
+		return (String) facts.getFirst().get("id");
 	}
 
 	private static String text(ToolResponse r) {
@@ -598,6 +602,27 @@ class MnemicToolsTest {
 		assertFalse(two.isError(), text(two));
 		assertEquals(List.of("acquaintance", "contacts"),
 				result(tools.inspect("pred:knows", Optional.empty(), NONE)).get("groups"));
+	}
+
+	@Test
+	void asOfTakesAYearOrAMonthAndMeansItsEnd() {
+		assertEquals("2015-12-31T23:59:59Z", MnemicTools.instant("2015").toString());
+		assertEquals("2016-02-29T23:59:59Z", MnemicTools.instant("2016-02").toString());
+		assertEquals("2015-06-01T23:59:59Z", MnemicTools.instant(" 2015-06-01 ").toString());
+		assertEquals("2026-09-06T10:12:00Z", MnemicTools.instant("2026-09-06T10:12:00Z").toString());
+		assertTrue(assertThrows(MnemicException.class, () -> MnemicTools.instant("March 2018")).getMessage()
+				.contains("2015-06"));
+		// Through the tool: a year is enough to ask about a point in the past.
+		remember(
+				"Pelle Wiklund worked at Tjörn Varv from 2010 to March 2018.", Map
+						.of("facts",
+								List.of(Map.of("subject", "Pelle Wiklund", "predicate", "works_at", "object",
+										"Tjörn Varv", "valid_time", Map.of("start", "2010", "end", "2018-03")))),
+				"as-of-year");
+		ToolResponse r = tools.recall(Optional.of("where does Pelle Wiklund work"), Optional.of("2015"),
+				Optional.empty(), Optional.empty(), Optional.empty());
+		assertFalse(r.isError(), text(r));
+		assertTrue(text(r).contains("as of 2015-12-31"), text(r));
 	}
 
 }

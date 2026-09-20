@@ -40,6 +40,8 @@ import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.LongAdder;
 
 /**
  * Anthropic's Messages API over {@code java.net.http}, no SDK: one POST, {@code x-api-key} and
@@ -52,8 +54,28 @@ public final class AnthropicHttpProvider implements ModelProvider {
 	private static final ObjectMapper MAPPER = new ObjectMapper();
 	private static final String VERSION = "2023-06-01";
 	private static final int MAX_ATTEMPTS = 8;
+	private static final Map<String, LongAdder> USAGE = new ConcurrentHashMap<>();
+	private static final List<String> USAGE_KEYS = List.of("input_tokens", "cache_creation_input_tokens",
+			"cache_read_input_tokens", "output_tokens");
 
 	public AnthropicHttpProvider() {
+	}
+
+	private static void tally(JsonNode usage) {
+		for (String key : USAGE_KEYS) {
+			USAGE.computeIfAbsent(key, k -> new LongAdder()).add(usage.path(key).asLong(0));
+		}
+		USAGE.computeIfAbsent("requests", k -> new LongAdder()).increment();
+	}
+
+	/** Tokens billed so far in this process, summed over every model: what a run cost, in the API's own terms. */
+	public static Map<String, Long> usage() {
+		var out = new LinkedHashMap<String, Long>();
+		out.put("requests", USAGE.getOrDefault("requests", new LongAdder()).sum());
+		for (String key : USAGE_KEYS) {
+			out.put(key, USAGE.getOrDefault(key, new LongAdder()).sum());
+		}
+		return out;
 	}
 
 	@Override
@@ -96,7 +118,10 @@ public final class AnthropicHttpProvider implements ModelProvider {
 			var payload = new LinkedHashMap<String, Object>();
 			payload.put("model", model);
 			payload.put("max_tokens", 4096);
-			payload.put("system", system);
+			// The system prompt is the same on every call of a run: a cache breakpoint on it makes each call after the
+			// first pay a tenth for it. Short prompts fall under the model's minimum and are simply not cached.
+			payload.put("system",
+					List.of(Map.of("type", "text", "text", system, "cache_control", Map.of("type", "ephemeral"))));
 			payload.put("messages", List.of(Map.of("role", "user", "content", user)));
 			String body = MAPPER.writeValueAsString(payload);
 			IOException last = null;
@@ -122,6 +147,7 @@ public final class AnthropicHttpProvider implements ModelProvider {
 					throw new IOException("Anthropic returned " + status + ": " + errorMessage(resp.body()));
 				}
 				JsonNode root = MAPPER.readTree(resp.body());
+				tally(root.path("usage"));
 				String stop = root.path("stop_reason").asText("");
 				if (stop.toLowerCase().contains("refusal")) {
 					throw new IOException("Model refused the request (stop_reason=refusal)");

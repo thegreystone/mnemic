@@ -92,6 +92,7 @@ public final class Bench {
 		case "show" -> show(opts);
 		case "rekey" -> rekey(opts);
 		case "bakeoff" -> Bakeoff.run(opts);
+		case "usage" -> Usage.run(opts);
 		default -> usage();
 		}
 	}
@@ -300,7 +301,7 @@ public final class Bench {
 	 * it from the system property. Models that think (gpt-oss) do not accept {@code none}; the default stays
 	 * {@code none} because it is what turns Qwen 3.5's thinking off.
 	 */
-	private static void reasoningEffort(Map<String, String> o) {
+	static void reasoningEffort(Map<String, String> o) {
 		if (o.containsKey("reasoning-effort")) {
 			System.setProperty("mnemic.reasoning_effort", o.get("reasoning-effort"));
 		}
@@ -545,7 +546,7 @@ public final class Bench {
 		return Engine.Options.of(home, "bench").withSoftLimit(Integer.MAX_VALUE).withOwner("the user");
 	}
 
-	private static String require(Map<String, String> o, String key) {
+	static String require(Map<String, String> o, String key) {
 		String v = o.get(key);
 		if (v == null) {
 			throw new IllegalArgumentException("--" + key + " is required");
@@ -577,6 +578,8 @@ public final class Bench {
 						bench judge   --run <dir> --judge provider:model [--api-key-env NAME]
 						bench metrics --run <dir>
 						bench compare --a <dir> --b <dir>
+						bench usage   --script usage/scenarios.json --server <runner.jar|binary> --assistant provider:model
+						              [--judge provider:model] [--api-key-env NAME] [--out <dir>] [--limit N] [--only id] [--embed on|off]
 						providers: anthropic:<model>  openai:<model>  lmstudio:<model>  ollama:<model>  openai-compatible:<model>@<url>""");
 	}
 }

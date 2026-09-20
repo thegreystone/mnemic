@@ -1,0 +1,117 @@
+{
+  "about": "Scripted conversations for the usage bench (bench usage). Each scenario is a fresh store for the fictional owner Mattias Sandell. A step either says something (the assistant should record what is worth keeping) or asks something with the answer a judge should accept; type is fact (default), update (the latest value wins), temporal (a point in time), or abstention (the right answer is that it is not known). Nothing here is a real person.",
+  "scenarios": [
+    {
+      "id": "family-basics",
+      "about": "Parents stated once, asked from each side, and a question the store cannot answer.",
+      "steps": [
+        {"say": "My father is Konrad Nyberg and my mother is Gunilla Nyberg."},
+        {"ask": "Who is my mother?", "expect": "Gunilla Nyberg"},
+        {"ask": "What is my father's name?", "expect": "Konrad Nyberg"},
+        {"ask": "Do I have a brother?", "expect": "Not known: nothing about a brother has been recorded.", "type": "abstention"}
+      ]
+    },
+    {
+      "id": "family-group",
+      "about": "Kin stated across several turns, then asked for as a whole with a group word.",
+      "steps": [
+        {"say": "My parents are Konrad and Gunilla Nyberg."},
+        {"say": "Oskar Nyberg is my brother."},
+        {"say": "My wife is Anna Lindqvist. Her brother is Erik Lindqvist."},
+        {"ask": "Tell me what you know about my family.", "expect": "Parents Konrad and Gunilla Nyberg, brother Oskar Nyberg, wife Anna Lindqvist (whose brother is Erik Lindqvist, Mattias's brother-in-law)."},
+        {"ask": "Who are my parents, and who is Anna's brother?", "expect": "Parents: Konrad and Gunilla Nyberg. Anna's brother: Erik Lindqvist."}
+      ]
+    },
+    {
+      "id": "job-over-time",
+      "about": "A job that changed: the current one, and the one at a point in the past.",
+      "steps": [
+        {"say": "I have worked at Initrode since 2010."},
+        {"say": "I left Initrode in March 2018 and joined Hooli the same month."},
+        {"ask": "Where do I work?", "expect": "Hooli", "type": "update"},
+        {"ask": "Where did I work in 2015?", "expect": "Initrode", "type": "temporal"},
+        {"ask": "When did I join Hooli?", "expect": "March 2018", "type": "temporal"}
+      ]
+    },
+    {
+      "id": "what-is-not-so",
+      "about": "A negation stated, and a question the negation does not cover.",
+      "steps": [
+        {"say": "I don't own a boat, and I never have."},
+        {"say": "I own a Volvo V60."},
+        {"ask": "Do I own a boat?", "expect": "No, you have said you do not own a boat."},
+        {"ask": "Do I own a summer house?", "expect": "Not known: nothing about a summer house has been recorded.", "type": "abstention"}
+      ]
+    },
+    {
+      "id": "correction",
+      "about": "A fact stated wrongly and corrected in the user's words.",
+      "steps": [
+        {"say": "I live in Zürich."},
+        {"say": "No, that was wrong: I live in Schübelbach, not Zürich."},
+        {"ask": "Where do I live?", "expect": "Schübelbach", "type": "update"}
+      ]
+    },
+    {
+      "id": "leaning-not-decision",
+      "about": "An intention is not a decision.",
+      "steps": [
+        {"say": "I'm leaning toward buying a Bambu Lab H2D to replace my old 3D printer, but I haven't decided."},
+        {"ask": "Have I decided which 3D printer to buy?", "expect": "No decision yet; you were leaning toward the Bambu Lab H2D."}
+      ]
+    },
+    {
+      "id": "decision",
+      "about": "A decision recorded in one conversation and asked about in the next.",
+      "steps": [
+        {"say": "For the Mnemic project we decided to use SQLite as the store, one file per data home."},
+        {"say": "Also, the benchmark data lives under bench/data."},
+        {"ask": "Which database did we decide on for Mnemic?", "expect": "SQLite"}
+      ]
+    },
+    {
+      "id": "death-and-kin",
+      "about": "A step-parent through a marriage that a death ended: the relation outlives the death.",
+      "steps": [
+        {"say": "My father Konrad Nyberg married Lena Berg in 2015."},
+        {"say": "Lena died in 2020."},
+        {"ask": "Who is my stepmother?", "expect": "Lena Berg, who died in 2020."},
+        {"ask": "Is Konrad still married to Lena?", "expect": "No, the marriage ended with Lena's death in 2020.", "type": "update"}
+      ]
+    },
+    {
+      "id": "own-vocabulary",
+      "about": "A relation the seed vocabulary lacks, stated and asked for.",
+      "steps": [
+        {"say": "Our dog is called Rufus, a border collie we got in 2022."},
+        {"say": "Our cat is called Misse."},
+        {"ask": "What pets do I have?", "expect": "A dog, Rufus (a border collie), and a cat, Misse."}
+      ]
+    },
+    {
+      "id": "other-people",
+      "about": "Facts about a colleague, and a question about him the store cannot answer.",
+      "steps": [
+        {"say": "My colleague Bo Berg works at Initrode and leads the platform team."},
+        {"ask": "Where does Bo Berg work?", "expect": "Initrode"},
+        {"ask": "Where does Bo Berg live?", "expect": "Not known: nothing about where Bo Berg lives has been recorded.", "type": "abstention"}
+      ]
+    },
+    {
+      "id": "several-relations",
+      "about": "One question naming two relations of two people.",
+      "steps": [
+        {"say": "My mother is Gunilla Nyberg. My wife Anna Lindqvist's mother is Marie Lindqvist."},
+        {"ask": "Who is my mother, and who is Anna's mother?", "expect": "Your mother is Gunilla Nyberg; Anna's mother is Marie Lindqvist."}
+      ]
+    },
+    {
+      "id": "preference",
+      "about": "A preference, and a question that turns on it.",
+      "steps": [
+        {"say": "I prefer to be reached on WhatsApp rather than email for anything urgent."},
+        {"ask": "How should someone reach me if it is urgent?", "expect": "On WhatsApp rather than email."}
+      ]
+    }
+  ]
+}

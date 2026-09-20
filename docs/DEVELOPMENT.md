@@ -129,6 +129,39 @@ Models are named `provider:model[@endpoint]` and resolved through the `ModelProv
 `API_KEY_OPENAI` or `OPENAI_API_KEY`, or from the variable named by `--api-key-env`; never from files in the
 repository. Local models need no key.
 
+## The usage bench
+
+`bench usage` measures something the retrieval bench cannot: whether an assistant that is handed the server's own
+tool descriptions and the memory protocol actually gets a memory in and out. A model plays the assistant over the
+scripted conversations in `bench/usage/scenarios.json` (the fictional owner Mattias Sandell; twelve scenarios,
+forty steps). Each scenario starts a real server over stdio on a fresh data home, exactly as a client would, and
+the assistant is told the tools the server publishes. At each step the model either calls a tool (`{"tool": ...,
+"arguments": {...}}`) or answers the user (`{"reply": ...}`); a judge grades the answers against the script's
+expected ones, abstention questions with the `_abs` rule of the retrieval bench.
+
+```text
+cd bench
+mvn -q exec:java -Dexec.args="usage --script usage/scenarios.json --server ../server/target/mnemic-server-0.3.1-SNAPSHOT-runner.jar --assistant lmstudio:proposer --judge lmstudio:proposer --out results/usage-qwen --reasoning-effort none"
+mvn -q exec:java -Dexec.args="usage --script usage/scenarios.json --server ../server/target/mnemic-server-0.3.1-SNAPSHOT-runner.jar --assistant anthropic:claude-sonnet-5 --judge anthropic:claude-sonnet-5 --out results/usage-sonnet"
+```
+
+Options: `--server` (the runner jar or the native binary), `--assistant MODEL`, `--judge MODEL|none`,
+`--api-key-env NAME`, `--limit N` (first N scenarios), `--only ID` (one scenario), `--embed on|off` (default
+off: the semantic channel is not what is measured), `--max-calls N` (tool calls allowed per step, default 8),
+`--reasoning-effort` as for `run`.
+
+The run writes `config.json`, `usage.jsonl` (one record per step: every call with its arguments and the head of
+its result, the reply, the recall verdict, the judge's verdict), and `summary.json`. The summary's numbers say how
+the tools were used, not only whether the answer was right: `remember_rate` (statements that led to a `remember`, or
+to a `correct` or `forget`, which is how "no, that was wrong" is written down) and `remembered_with_reading` (the
+`remember` carried a proposal, as the protocol asks), `recall_first_rate` (questions where a
+`recall` came before the answer), `accuracy`, `abstention_correct`, `wrong_answers_on_a_miss` (an answer given
+although the last recall said MISS: the number that should be zero), `tool_calls_per_step`, and
+`protocol_slips` (turns that did not follow the JSON protocol and were read leniently: a `{"recall": {...}}`
+shape, a missing closing brace, a reply whose JSON broke, or plain prose; the raw text of each is kept under
+`slipped` in the step's record). Anthropic runs also report
+`api_usage`, the tokens billed, with the system prompt cached across calls.
+
 Scripts: `bench/scripts/local-proposers.sh` downloads, loads, runs, and compares a list of LM Studio models on
 the pilot questions; `bench/scripts/stratified.sh` runs N questions of every type for one proposer and compares
 against the lexical baseline; `bench/scripts/stratified-embed.sh <proposer|none> <run> <without-run> <model-dir>

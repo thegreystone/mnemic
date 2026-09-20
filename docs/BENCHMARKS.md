@@ -556,3 +556,32 @@ the full-precision one on ARM (1.25 GB), for the multilingual result: Swedish re
 before. bge-m3 was the sample set's best by eighteen questions at 2.2 GB and 49 ms a sentence, and was not
 worth that for a personal store. A store made with the 107m re-embeds itself on the first start with the new
 model (the old model's vectors are dropped, the backfill remakes them).
+
+## The usage bench (2026-09-20)
+
+A second bench, `bench usage`, asks not whether the store holds the answer but whether an assistant given the
+server's tool descriptions and the memory protocol gets it in and out; the protocol and the numbers it reports
+are in [DEVELOPMENT.md](DEVELOPMENT.md#the-usage-bench). The script has twelve scenarios and forty steps under
+`bench/usage/scenarios.json`.
+
+Smoke run, local Qwen 3.5 9B at Q8 as assistant and judge, first two scenarios (`usage-qwen-smoke`): every
+statement was remembered with a reading and every question was preceded by a recall, and no answer was right.
+The model wrote `parent_of` the wrong way round (`self` as subject, the father as object), read the rendering
+that said so, and then spent its call budget on `correct` calls it could not form. That is a finding about the
+9B as an assistant, not about the store, and it is what the bench is for.
+
+First full run, Sonnet 5 as assistant and judge (`usage-sonnet`, 2026-09-21): 18 of 20 questions right, all three
+abstentions right, every scenario 100% but one. The one is `family-group`, 0 of 2, and that was the harness: the
+model's `remember` calls came back one closing brace short, the bench read them as replies, and the family facts
+were never stored. The parser now closes unbalanced brackets (counted as a slip), so the run is to be repeated.
+Tool use: 17 of 20 statements led to a `remember` with a reading (the three that did not were the two lost calls
+and a step the model merged into the next), 15 of 20 questions had a `recall` before the answer (the rest were
+answered from the conversation just had, which is fair), 1.7 tool calls a step, 2 answers on a MISS (both in the
+broken scenario). The repeat with the fixed parser (`usage-sonnet-2`): 20 of 20, every statement written down (nineteen
+by `remember` with a reading, the correction by `correct`, which the metric first counted against it), 15 of 20 questions recalled before the
+answer (the other five were answered from the conversation just had), 1.5 tool calls a step, no answer on a MISS.
+The 12 slips left are the model answering in plain prose instead of the JSON wrapper, which the harness reads
+and counts. One server finding came out of the trace and is fixed: `as_of: "2015"` was refused, and a year or
+a month is now taken as the end of that span. Cost, with the system prompt cached: 126 requests, 141k input tokens,
+889k cache reads, 17k output, about $0.65.
+
