@@ -30,6 +30,7 @@ package se.hirt.mnemic.recall;
 
 import se.hirt.mnemic.knowledge.Entity;
 import se.hirt.mnemic.knowledge.EntityService;
+import se.hirt.mnemic.knowledge.EntityService.Mention;
 import se.hirt.mnemic.knowledge.EntityTypeRegistry;
 import se.hirt.mnemic.knowledge.Lang;
 import se.hirt.mnemic.knowledge.Names;
@@ -68,7 +69,28 @@ import java.util.regex.Pattern;
  */
 public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<String> ownerTokens, List<String> terms,
 		Set<String> entityTokens, List<String> beyondEntities, boolean polar, boolean past, boolean forward,
-		Set<String> cueTokens, List<String> residual, List<String> named, String fts, List<String> kinds) {
+		Set<String> cueTokens, List<String> residual, List<String> named, String fts, List<String> kinds,
+		List<Bound> bound) {
+
+	/**
+	 * A cue the probe runs, read off the question's structure: {@code subjects} are the entities whose name stands
+	 * right before the cue word ("Anna's siblings"; every member when a family name spots several) or right after it
+	 * with "of" ("the siblings of Anna"), empty when the question does not say; {@code others} are the entities named
+	 * in the cue's stretch of the question, from its subject up to the next cue's, the subjects themselves left out;
+	 * {@code start} and {@code end} are the cue word's token positions. A word after "and" with no name of its own
+	 * shares the subject before it ("Anna's parents and siblings"); a word the question uses twice is bound at each
+	 * occurrence that has a subject.
+	 */
+	public record Bound(Cue cue, List<Entity> subjects, List<Entity> others, int start, int end) {
+		public boolean hasSubject() {
+			return !subjects.isEmpty();
+		}
+	}
+
+	/** Words that put the possessor after the cue word: "the father of Anna", "Vater von Anna". */
+	private static final Set<String> OF = Set.of("of", "von", "der", "des", "de", "du", "di");
+	/** Words that join two relations of one subject: "Anna's parents and siblings", "Eltern und Geschwister". */
+	private static final Set<String> AND = Set.of("and", "or", "und", "oder", "och", "eller");
 
 	private static final Set<String> POLAR = Set.of("does", "do", "did", "is", "are", "was", "were", "has", "have",
 			"had", "can", "could", "will", "would", "should");
@@ -107,13 +129,146 @@ public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<Strin
 		}
 		List<String> beyondEntities = terms.stream().filter(t -> !entityTokens.contains(t)).toList();
 		boolean polar = isPolar(text);
-		Set<String> cueTokens = cues.isEmpty() ? Set.of() : new HashSet<>(Names.tokens(cues.getFirst().term()));
+		List<Bound> bound = bind(text, cues, entities.mentions(text), spotted);
+		var cueTokens = new HashSet<String>();
+		for (Bound b : bound) {
+			cueTokens.addAll(Names.tokens(b.cue().term()));
+		}
 		List<String> residual = polar
 				? beyondEntities.stream().filter(t -> !cueTokens.contains(t) && !POLAR_FILLER.contains(t)).toList()
 				: List.of();
+		// A relation word names no thing, however it is written: "Familie" in "Mattias' Familie" is the cue, not a
+		// name the facts must mention.
+		List<String> named = namedThings(text, entityTokens, types).stream().filter(t -> !cueTokens.contains(t))
+				.toList();
 		return new Query(text, spotted, cues, ownerTokens, terms, entityTokens, beyondEntities, polar, isPast(text),
-				isForward(text), cueTokens, residual, namedThings(text, entityTokens, types),
-				ftsQuery(text, ownerTokens), kindsAskedFor(text, entityTokens, cueTokens, cues));
+				isForward(text), cueTokens, residual, named, ftsQuery(text, ownerTokens),
+				kindsAskedFor(text, entityTokens, cueTokens, cues), bound);
+	}
+
+	/**
+	 * The cues the probe runs, each at the place in the question it was found. Cues come longest term first; one is
+	 * taken when its word is not already taken by another cue's, except that the members of one group share their word
+	 * ("family" reaches every kinship predicate). Each is then bound to the entity the question puts it with, and given
+	 * the other entities of its stretch of the question.
+	 */
+	static List<Bound> bind(String text, List<Cue> cues, List<Mention> mentions, List<Entity> spotted) {
+		List<String> tokens = Names.tokens(text);
+		String[] takenBy = new String[tokens.size()]; // the group that took a token, "" for a predicate's own word
+		var placed = new ArrayList<Object[]>(); // cue, start, end
+		for (Cue c : cues) {
+			List<String> term = Names.tokens(c.term());
+			if (term.isEmpty()) {
+				continue;
+			}
+			String owner = c.group() == null ? "" : c.group();
+			for (int i = 0; i + term.size() <= tokens.size(); i++) {
+				if (!tokens.subList(i, i + term.size()).equals(term)) {
+					continue;
+				}
+				boolean free = true;
+				for (int k = i; k < i + term.size(); k++) {
+					if (takenBy[k] != null && (takenBy[k].isEmpty() || !takenBy[k].equals(owner))) {
+						free = false;
+						break;
+					}
+				}
+				if (!free) {
+					continue;
+				}
+				for (int k = i; k < i + term.size(); k++) {
+					takenBy[k] = owner;
+				}
+				placed.add(new Object[] {c, i, i + term.size()});
+			}
+		}
+		if (placed.isEmpty()) {
+			return List.of();
+		}
+		// The subjects of each cue, and where its stretch of the question begins: at the subject's name when it
+		// stands before the word, else at the word.
+		var subjects = new ArrayList<List<Entity>>();
+		var anchors = new int[placed.size()];
+		for (int p = 0; p < placed.size(); p++) {
+			int start = (int) placed.get(p)[1];
+			int end = (int) placed.get(p)[2];
+			var before = new ArrayList<Entity>();
+			var after = new ArrayList<Entity>();
+			int beforeStart = start;
+			for (Mention m : mentions) {
+				if (m.end() == start) {
+					before.add(m.entity());
+					beforeStart = m.start();
+				}
+				if (end < tokens.size() && OF.contains(tokens.get(end)) && m.start() == end + 1) {
+					after.add(m.entity());
+				}
+			}
+			subjects.add(List.copyOf(before.isEmpty() ? after : before));
+			anchors[p] = before.isEmpty() ? start : beforeStart;
+		}
+		// "Malin's parents and siblings": a word after "and" with no name of its own shares the subject of the cue
+		// right before it, when nothing but the "and" stands between them.
+		for (int p = 0; p < placed.size(); p++) {
+			int start = (int) placed.get(p)[1];
+			if (!subjects.get(p).isEmpty() || start < 2 || !AND.contains(tokens.get(start - 1))) {
+				continue;
+			}
+			for (int o = 0; o < placed.size(); o++) {
+				if ((int) placed.get(o)[2] == start - 1 && !subjects.get(o).isEmpty()) {
+					subjects.set(p, subjects.get(o));
+					break;
+				}
+			}
+		}
+		// A word the question uses twice is asked twice when each time it has a subject of its own; without one it
+		// is asked once, and not at all when the same relation is asked with a subject elsewhere.
+		var kept = new ArrayList<Integer>();
+		for (int p = 0; p < placed.size(); p++) {
+			if (!subjects.get(p).isEmpty()) {
+				kept.add(p);
+			}
+		}
+		for (int p = 0; p < placed.size(); p++) {
+			String name = ((Cue) placed.get(p)[0]).predicate().name();
+			if (subjects.get(p).isEmpty()
+					&& kept.stream().noneMatch(k -> ((Cue) placed.get(k)[0]).predicate().name().equals(name))) {
+				kept.add(p);
+			}
+		}
+		// Sorted by place in the question, the stretches partition it; the entities of each stretch, minus the cue's
+		// own subject, are what the cue's facts are asked to touch. The members of one group stand at the same word
+		// and share a stretch.
+		var stretches = new ArrayList<List<Integer>>();
+		var byPlace = new ArrayList<>(kept);
+		byPlace.sort((a, b) -> Integer.compare(anchors[a], anchors[b]));
+		for (int p : byPlace) {
+			if (!stretches.isEmpty() && anchors[stretches.getLast().getFirst()] == anchors[p]) {
+				stretches.getLast().add(p);
+			} else {
+				stretches.add(new ArrayList<>(List.of(p)));
+			}
+		}
+		var out = new ArrayList<Bound>();
+		for (int k = 0; k < stretches.size(); k++) {
+			List<Integer> stretch = stretches.get(k);
+			int from = k == 0 ? 0 : anchors[stretch.getFirst()];
+			int to = k + 1 < stretches.size() ? anchors[stretches.get(k + 1).getFirst()] : tokens.size();
+			var others = new ArrayList<Entity>();
+			for (Mention m : mentions) {
+				if (m.start() >= from && m.start() < to && others.stream().noneMatch(e -> e.id() == m.entity().id())) {
+					others.add(m.entity());
+				}
+			}
+			for (int p : stretch) {
+				List<Entity> subject = subjects.get(p);
+				var own = new ArrayList<>(others);
+				own.removeIf(e -> subject.stream().anyMatch(x -> x.id() == e.id()));
+				out.add(new Bound((Cue) placed.get(p)[0], subject, List.copyOf(own), (int) placed.get(p)[1],
+						(int) placed.get(p)[2]));
+			}
+		}
+		return List.copyOf(out);
 	}
 
 	/**

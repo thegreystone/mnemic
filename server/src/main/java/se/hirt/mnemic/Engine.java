@@ -704,6 +704,31 @@ public final class Engine implements AutoCloseable {
 		return out;
 	}
 
+	/**
+	 * Corrects a predicate group ({@code correct(group:family, {lexicon: [...]})}): its description, cue words, words
+	 * in another language, or the groups it belongs to. The change is logged with its reason.
+	 */
+	public Map<String, Object> correctGroup(String name, Map<String, Object> replacement, String reason) {
+		requireReplacement(replacement, "{\"lexicon\": [\"family\", \"relatives\"]} or {\"groups\": [\"family\"]}");
+		var before = knowledge.predicates().group(name).orElseThrow(() -> MnemicException.notFound("No group " + name));
+		var after = knowledge.predicates().updateGroup(before.name(), replacement, reason);
+		var out = new LinkedHashMap<String, Object>();
+		out.put("group", after.name());
+		out.put("before", groupMap(before));
+		out.put("after", groupMap(after));
+		out.put("members", knowledge.predicates().membersOf(after.name()).stream().map(Predicate::name).toList());
+		out.put("changes", knowledge.predicates().groupChanges(after.name()));
+		return out;
+	}
+
+	private static Map<String, Object> groupMap(PredicateRegistry.Group g) {
+		var m = new LinkedHashMap<String, Object>();
+		m.put("description", g.description());
+		m.put("lexicon", g.lexicon());
+		m.put("groups", g.groups());
+		return m;
+	}
+
 	private static Map<String, Object> eventTypeMap(EventTypeRegistry.EventType t) {
 		var m = new LinkedHashMap<String, Object>();
 		m.put("opens", t.opens());

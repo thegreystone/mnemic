@@ -74,20 +74,48 @@ final class StructuredProbe {
 		this.types = types;
 	}
 
+	/**
+	 * Every relation the question names is probed where the question puts it ("Mattias's parents and Anna's siblings":
+	 * parent_of for Mattias, sibling_of for Anna; "Mattias's family": every kinship predicate for Mattias). The first
+	 * relation in the question that answered is the primary verdict; the rest come along as {@code also}. A relation
+	 * the question tied to nobody and that found nothing is left out, since its word may not have meant the relation at
+	 * all; a member of a group stays, so the group's verdict can say what was not found under it.
+	 */
 	Structured probe(Query q, Instant asOf, Instant now, boolean includeHistory) {
 		if (q.spotted().isEmpty()) {
 			return new Structured("unresolved", null, null, null, null, List.of(), List.of(), List.of());
 		}
-		if (q.cues().isEmpty()) {
+		if (q.bound().isEmpty()) {
 			return entityOnly(q, asOf, now, includeHistory);
 		}
-		Cue cue = q.cues().getFirst();
-		Entity entity = q.spotted().getFirst();
+		// In the question's order: the verdict is the first relation the question names that answered.
+		List<Query.Bound> bound = q.bound().stream().sorted((a, b) -> Integer.compare(a.start(), b.start())).toList();
+		var verdicts = new ArrayList<Structured>();
+		for (Query.Bound b : bound) {
+			verdicts.add(probeOne(q, b, asOf, now, includeHistory));
+		}
+		Structured primary = verdicts.stream().filter(Structured::answered).findFirst().orElse(verdicts.getFirst());
+		var also = new ArrayList<Structured>();
+		for (int i = 0; i < verdicts.size(); i++) {
+			Structured v = verdicts.get(i);
+			if (v == primary || (!v.answered() && !bound.get(i).hasSubject() && v.group() == null)) {
+				continue;
+			}
+			also.add(v);
+		}
+		return primary.withAlso(also);
+	}
+
+	/** One relation, for the subject the question binds it to, or for every spotted entity when it binds none. */
+	private Structured probeOne(Query q, Query.Bound bound, Instant asOf, Instant now, boolean includeHistory) {
+		Cue cue = bound.cue();
+		List<Entity> subjects = bound.hasSubject() ? bound.subjects() : q.spotted();
+		Entity entity = subjects.getFirst();
 		var matched = new ArrayList<Fact>();
 		var near = new ArrayList<Fact>();
 		var future = new ArrayList<Fact>();
 		var notes = new ArrayList<String>();
-		for (Entity e : q.spotted()) {
+		for (Entity e : subjects) {
 			String direction = direction(cue, e, q.text());
 			// A past-tense yes/no question is answered by ended facts too.
 			for (Fact f : facts.probe(e.id(), cue.predicate().name(), asOf, now, includeHistory || q.past())) {
@@ -132,7 +160,7 @@ final class StructuredProbe {
 			}
 		}
 		// A fact held pending under this predicate (a conflict nobody has answered) contests the verdict: said.
-		for (Entity e : q.spotted()) {
+		for (Entity e : subjects) {
 			for (Fact p : facts.pending(e.id(), cue.predicate().name())) {
 				notes.add("pending on " + cue.predicate().name() + ", a conflict awaiting an answer: " + p.rendering()
 						+ " [" + p.ref() + "]");
@@ -141,37 +169,43 @@ final class StructuredProbe {
 		// The bounds on what the spotted subjects have under this predicate. A question that names a thing shows
 		// only the bounds that could cover it; a question about the whole predicate shows them all.
 		var bounds = new ArrayList<Fact>();
-		for (Entity e : q.spotted()) {
+		for (Entity e : subjects) {
 			bounds.addAll(facts.bounds(e.id(), cue.predicate().name(), now));
 		}
-		List<Entity> xs = q.others(entities.owner().id());
+		// The other things the question names beside this relation's subject; the owner is a possessive as often
+		// as not ("where is my raspberry pi") and narrows nothing.
+		long ownerId = entities.owner().id();
+		List<Entity> xs = bound.others().stream().filter(e -> e.id() != ownerId).toList();
 		if (!xs.isEmpty() || !q.residual().isEmpty()) {
-			bounds.removeIf(b -> !covers(b, xs, q.residual()));
+			bounds.removeIf(x -> !covers(x, xs, q.residual()));
 		}
 		Fact decidedBy = null;
 		String basis = null;
-		// A question is about the things it names: only facts touching each of them (directly, or through the
-		// place it lies in) answer it. "Does Mattias own a boat" is not answered by his apartments, and "how many
-		// Raspberry Pi 5 do I own" not by the Raspberry Pi 4.
+		// A question is about the things it names: only facts touching them (directly, or through the place it lies
+		// in) answer it. "Does Mattias own a boat" is not answered by his apartments, and "how many Raspberry Pi 5 do
+		// I own" not by the Raspberry Pi 4. A yes/no question holds for all of them at once; an open one lists them
+		// ("Mattias's parents Konrad and Gunilla"), and a fact touching any of them answers it.
 		if (!xs.isEmpty()) {
 			// Every thing named, where the members of one family ("raspberry pi": the Pi 4 and the Pi 5) count as
 			// one thing a fact about either touches.
 			var families = new LinkedHashMap<String, List<Entity>>();
-			for (Entity x : q.spotted()) {
+			for (Entity x : xs) {
 				families.computeIfAbsent(EntityService.familyKey(x.name()), k -> new ArrayList<>()).add(x);
 			}
-			// A yes/no question is about its subject too ("does Mattias work at Initrode" is not answered by
-			// Anna's job there); an open one names the owner as a possessive as often as not ("where is my
-			// raspberry pi"), so there only the other things must be touched.
-			long ownerId = entities.owner().id();
-			List<List<Entity>> required = families.values().stream()
-					.filter(g -> q.polar() || g.stream().noneMatch(x -> x.id() == ownerId)).toList();
-			java.util.function.Predicate<Fact> about = f -> required.stream()
-					.allMatch(g -> g.stream().anyMatch(x -> touches(f, x)));
+			List<List<Entity>> required = List.copyOf(families.values());
+			java.util.function.Predicate<Fact> about = f -> q.polar()
+					? required.stream().allMatch(g -> g.stream().anyMatch(x -> touches(f, x)))
+					: required.stream().anyMatch(g -> g.stream().anyMatch(x -> touches(f, x)));
 			var dropped = matched.stream().filter(f -> !about.test(f)).toList();
 			matched.removeAll(dropped);
 			near.addAll(0, dropped);
 			future.removeIf(f -> !about.test(f));
+			if (matched.isEmpty() && !dropped.isEmpty()) {
+				notes.add("the " + dropped.size() + " " + cue.predicate().name()
+						+ (dropped.size() == 1 ? " fact" : " facts") + " for " + entity.name() + " touch"
+						+ (dropped.size() == 1 ? "es" : "") + " none of "
+						+ String.join(", ", xs.stream().map(Entity::name).toList()) + " (listed as near-misses)");
+			}
 		}
 		if (q.polar()) {
 			if (xs.isEmpty() && !q.residual().isEmpty()) {
@@ -188,7 +222,7 @@ final class StructuredProbe {
 				}
 				// A functional predicate has one current value: the question named another, so the answer is no.
 				if (decidedBy == null && cue.predicate().functional()) {
-					for (Entity e : q.spotted()) {
+					for (Entity e : subjects) {
 						for (Fact f : facts.probe(e.id(), cue.predicate().name(), asOf, now, false)) {
 							if (f.subjectId() == e.id() && "current".equals(f.state(now))
 									&& xs.stream().noneMatch(x -> touches(f, x))) {
@@ -302,7 +336,7 @@ final class StructuredProbe {
 		// "nothing known".
 		var ended = new ArrayList<Fact>();
 		if (matched.isEmpty() && decidedBy == null && !includeHistory && asOf == null) {
-			for (Entity e : q.spotted()) {
+			for (Entity e : subjects) {
 				String direction = direction(cue, e, q.text());
 				for (Fact f : facts.probe(e.id(), cue.predicate().name(), null, now, true)) {
 					if (!"ended".equals(f.state(now)) || "pending".equals(f.status())
@@ -319,7 +353,7 @@ final class StructuredProbe {
 		List<Fact> chain = matched.isEmpty() ? List.of() : chain(matched, asOf, now);
 		return new Structured(state, entity.ref(), entity.name(), cue.predicate().name(), cue.qualifier(),
 				List.copyOf(matched), List.copyOf(near), chain, List.copyOf(bounds), decidedBy, basis,
-				List.copyOf(notes), List.copyOf(future), List.copyOf(ended));
+				List.copyOf(notes), List.copyOf(future), List.copyOf(ended)).withGroup(cue.group());
 	}
 
 	/** An entity without a predicate cue ("who is Bosse"): its facts are the channel. */

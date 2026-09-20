@@ -59,7 +59,24 @@ public record RecallResult(String query, Instant asOf, Structured structured, Li
 	 */
 	public record Structured(String state, String entity, String entityName, String predicate, String qualifier,
 			List<Fact> facts, List<Fact> nearMisses, List<Fact> chain, List<Fact> bounds, Fact decidedBy, String basis,
-			List<String> notes, List<Fact> future, List<Fact> ended) {
+			List<String> notes, List<Fact> future, List<Fact> ended, String group, List<Structured> also) {
+		/**
+		 * {@code group}: the group word that reached the predicate ("family"), null when the question named the
+		 * relation itself. {@code also}: the verdicts of the question's other relations ("Anna's siblings" beside
+		 * "Mattias's parents", or the other members of a group), each complete in itself; the primary verdict is the
+		 * first that answered.
+		 */
+		public Structured {
+			also = also == null ? List.of() : List.copyOf(also);
+		}
+
+		public Structured(String state, String entity, String entityName, String predicate, String qualifier,
+				List<Fact> facts, List<Fact> nearMisses, List<Fact> chain, List<Fact> bounds, Fact decidedBy,
+				String basis, List<String> notes, List<Fact> future, List<Fact> ended) {
+			this(state, entity, entityName, predicate, qualifier, facts, nearMisses, chain, bounds, decidedBy, basis,
+					notes, future, ended, null, List.of());
+		}
+
 		public Structured(String state, String entity, String entityName, String predicate, String qualifier,
 				List<Fact> facts, List<Fact> nearMisses, List<Fact> chain) {
 			this(state, entity, entityName, predicate, qualifier, facts, nearMisses, chain, List.of(), null, null,
@@ -74,9 +91,32 @@ public record RecallResult(String query, Instant asOf, Structured structured, Li
 			return "known_false".equals(state);
 		}
 
+		/** Whether this verdict answered: a fact matched, one is coming, or the question was decided false. */
+		public boolean answered() {
+			return matched() || knownFalse() || "future".equals(state);
+		}
+
 		public Structured withState(String newState) {
 			return new Structured(newState, entity, entityName, predicate, qualifier, facts, nearMisses, chain, bounds,
-					decidedBy, basis, notes, future, ended);
+					decidedBy, basis, notes, future, ended, group, also);
+		}
+
+		public Structured withGroup(String newGroup) {
+			return new Structured(state, entity, entityName, predicate, qualifier, facts, nearMisses, chain, bounds,
+					decidedBy, basis, notes, future, ended, newGroup, also);
+		}
+
+		public Structured withAlso(List<Structured> newAlso) {
+			return new Structured(state, entity, entityName, predicate, qualifier, facts, nearMisses, chain, bounds,
+					decidedBy, basis, notes, future, ended, group, newAlso);
+		}
+
+		/** This verdict and the others, primary first. */
+		public List<Structured> all() {
+			var out = new java.util.ArrayList<Structured>();
+			out.add(this);
+			out.addAll(also);
+			return out;
 		}
 	}
 

@@ -46,6 +46,7 @@ import se.hirt.mnemic.knowledge.FactQueries;
 import se.hirt.mnemic.knowledge.FactService.Applied;
 import se.hirt.mnemic.knowledge.FactService.Corrected;
 import se.hirt.mnemic.knowledge.Predicate;
+import se.hirt.mnemic.knowledge.PredicateRegistry;
 import se.hirt.mnemic.knowledge.Rule;
 import se.hirt.mnemic.knowledge.Question;
 import se.hirt.mnemic.knowledge.QuestionResolver.Resolve;
@@ -219,7 +220,7 @@ public class MnemicTools {
 			String r = ref == null ? "" : ref.trim();
 			if (r.isEmpty()) {
 				throw MnemicException.invalidArgument("'ref' is required: ent-12, a name, f-12, obs-12, evt-3, q-3, "
-						+ "pred:works_at, event:joined, type:place, or 'registry'.");
+						+ "pred:works_at, event:joined, type:place, group:family, or 'registry'.");
 			}
 			if (r.equalsIgnoreCase("registry")) {
 				return registry();
@@ -247,6 +248,9 @@ public class MnemicTools {
 			}
 			if (r.startsWith("type:")) {
 				return entityTypeEntry(r.substring(5));
+			}
+			if (r.startsWith("group:")) {
+				return groupEntry(r.substring(6));
 			}
 			Entity e = engine.entities().byRef(r).orElseThrow(() -> MnemicException
 					.notFound("No entity matches '" + r + "'. Try recall with the name to see what is known."));
@@ -284,12 +288,15 @@ public class MnemicTools {
 			if (t.startsWith("type:")) {
 				return engine.correctEntityType(t.substring(5), replacement, why);
 			}
+			if (t.startsWith("group:")) {
+				return engine.correctGroup(t.substring(6), replacement, why);
+			}
 			if (!t.isEmpty() && engine.predicates().get(t).isPresent()) {
 				return engine.correctPredicate(t, replacement, why);
 			}
 			throw MnemicException
 					.invalidArgument("'" + t + "' names nothing to correct; pass f-12, obs-51, ent-12, pred:parent_of, "
-							+ "event:purchased, or type:canton.");
+							+ "event:purchased, type:canton, or group:family.");
 		});
 	}
 
@@ -704,9 +711,33 @@ public class MnemicTools {
 	private Map<String, Object> registry() {
 		var out = new LinkedHashMap<String, Object>();
 		out.put("predicates", engine.predicates().all().stream().map(this::predicateMap).toList());
+		out.put("groups", engine.predicates().groups().stream().map(this::groupMap).toList());
 		out.put("event_types", engine.eventTypes().all().stream().map(MnemicTools::eventTypeMap).toList());
 		out.put("entity_types", engine.entityTypes().all().stream().map(MnemicTools::entityTypeMap).toList());
 		return out;
+	}
+
+	private Map<String, Object> groupEntry(String name) {
+		PredicateRegistry.Group g = engine.predicates().group(name)
+				.orElseThrow(() -> MnemicException.notFound("No group " + name));
+		var m = groupMap(g);
+		m.put("changes", engine.predicates().groupChanges(g.name()));
+		return m;
+	}
+
+	/** A group: its words, the groups it belongs to, and its members, the predicates in groups under it included. */
+	private Map<String, Object> groupMap(PredicateRegistry.Group g) {
+		var m = new LinkedHashMap<String, Object>();
+		m.put("id", "group:" + g.name());
+		m.put("name", g.name());
+		m.put("description", g.description());
+		m.put("lexicon", g.lexicon());
+		if (!g.groups().isEmpty()) {
+			m.put("groups", g.groups());
+		}
+		m.put("members", engine.predicates().membersOf(g.name()).stream().map(Predicate::name).toList());
+		m.put("origin", g.seed() ? "seed" : "defined");
+		return m;
 	}
 
 	private Map<String, Object> predicateEntry(String name) {
@@ -764,6 +795,9 @@ public class MnemicTools {
 			m.put("aliases", p.aliases());
 		}
 		m.put("lexicon", p.lexicon());
+		if (!p.groups().isEmpty()) {
+			m.put("groups", p.groups());
+		}
 		m.put("origin", p.seed() ? "seed" : p.isInferred() ? "inferred" : "defined");
 		if (p.definedBy() != null) {
 			m.put("defined_by", "obs-" + p.definedBy());

@@ -35,8 +35,12 @@ Rules:
 - If no registered predicate fits, either define one in `predicates`
   (`{"name": "godparent_of", "description": "...", "domain": "person", "range": "person", "functional": false,
   "lexicon": ["godparent", "godmother", "godfather"], "render": "{subject} is {object}'s {qualifier|godparent}",
-  "qualifiers": ["godmother", "godfather"]}`) or prefix it with `x:` (`x:consults_for`) to store it without
-  structure.
+  "qualifiers": ["godmother", "godfather"], "groups": ["family"]}`) or prefix it with `x:` (`x:consults_for`) to
+  store it without structure.
+- `groups` names the groups a predicate belongs to: words a question uses for several relations at once. The
+  kinship predicates are in `family`; a group named for the first time registers itself with the words of its
+  name as cue words, and `correct(group:pets, {description, lexicon, renders, groups})` says more, including
+  the groups it belongs to in turn. `inspect('registry')` lists them.
 - Dates: ISO only, `2018`, `2018-03`, `2018-03-05`. Resolve relative expressions ("twelve years ago", "last
   spring") against the observation date yourself and give the precision honestly (`year` for "in 2014",
   `unknown` for "sometime in the late nineties"). Never invent precision.

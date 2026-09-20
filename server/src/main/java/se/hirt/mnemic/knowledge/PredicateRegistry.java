@@ -71,7 +71,24 @@ public final class PredicateRegistry {
 	 * for an inverse term ("Mattias's children"), {@code any} otherwise, in which case the probe decides by the
 	 * entity's type against domain and range.
 	 */
-	public record Cue(Predicate predicate, String qualifier, String term, String direction) {
+	public record Cue(Predicate predicate, String qualifier, String term, String direction, String group) {
+		/** A cue on the predicate's own vocabulary. */
+		public Cue(Predicate predicate, String qualifier, String term, String direction) {
+			this(predicate, qualifier, term, direction, null);
+		}
+
+		/** Whether the cue reached the predicate through a group word ("family"), not its own vocabulary. */
+		public boolean viaGroup() {
+			return group != null;
+		}
+	}
+
+	/**
+	 * A group of predicates a question names with one word: "family" for the kinship predicates. Its cue words are the
+	 * words of its name until a description or correction adds more; in a store of another language the group's words
+	 * in that language join them.
+	 */
+	public record Group(String name, String description, List<String> lexicon, List<String> groups, boolean seed) {
 	}
 
 	private static final ObjectMapper JSON = new ObjectMapper();
@@ -100,6 +117,8 @@ public final class PredicateRegistry {
 	private final Map<String, float[]> vectors = new HashMap<>();
 	private String vectorModel;
 	private Map<String, Predicate> cache;
+	/** The groups, loaded with the cache. */
+	private Map<String, Group> groupCache = Map.of();
 	/** The rules of the derived predicates, loaded with the cache. */
 	private Map<String, List<Rule>> rules = Map.of();
 	/** What each predicate's terms imply about the subject's attributes, loaded with the cache. */
@@ -117,6 +136,7 @@ public final class PredicateRegistry {
 		this.embedding = embedding;
 		seedIfMissing();
 		seedRendersIfMissing();
+		seedGroupsIfMissing();
 		fillLexicons();
 	}
 
@@ -558,14 +578,15 @@ public final class PredicateRegistry {
 		return d.description() != null || d.domain() != null || d.range() != null || d.functional() != null
 				|| d.functionalScope() != null || d.symmetric() != null || d.inverse() != null || d.volatility() != null
 				|| !d.lexicon().isEmpty() || d.render() != null || !d.qualifiers().isEmpty() || !d.aliases().isEmpty()
-				|| !d.renders().isEmpty() || d.containment() != null;
+				|| !d.renders().isEmpty() || d.containment() != null || d.groups() != null;
 	}
 
 	static boolean bare(PredicateDef d) {
 		return d.description() == null && d.domain() == null && d.range() == null && d.functional() == null
 				&& d.functionalScope() == null && d.symmetric() == null && d.inverse() == null && d.volatility() == null
 				&& d.lexicon().isEmpty() && d.render() == null && d.qualifiers().isEmpty() && d.aliases().isEmpty()
-				&& d.renders().isEmpty() && d.definedAs() == null && d.implies() == null && d.containment() == null;
+				&& d.renders().isEmpty() && d.definedAs() == null && d.implies() == null && d.containment() == null
+				&& d.groups() == null;
 	}
 
 	// ── meaning ──────────────────────────────────────────────────────────
@@ -763,6 +784,27 @@ public final class PredicateRegistry {
 				out.put(p.name(), best);
 			}
 		}
+		// A group word ("family") cues every predicate under the group that the question did not cue by its own
+		// words; the group says nothing about the side, so the entity's type decides it.
+		var viaGroup = new HashSet<String>();
+		for (Group g : groupCache.values()) {
+			String term = null;
+			for (String t : g.lexicon()) {
+				if (q.contains(" " + String.join(" ", Names.tokens(t)) + " ")
+						&& (term == null || t.length() > term.length())) {
+					term = t;
+				}
+			}
+			if (term == null) {
+				continue;
+			}
+			for (Predicate p : membersOf(g.name())) {
+				if (!out.containsKey(p.name())) {
+					out.put(p.name(), new Cue(p, null, term, "any", g.name()));
+					viaGroup.add(p.name());
+				}
+			}
+		}
 		var cues = new ArrayList<>(out.values());
 		// Longest term first; at equal length a predicate's own vocabulary outranks a free qualifier in use, so
 		// "stepfather" reaches step_parent_of before a related_to[stepfather] somebody once stored.
@@ -773,6 +815,11 @@ public final class PredicateRegistry {
 			int byLength = Integer.compare(b.term().length(), a.term().length());
 			if (byLength != 0) {
 				return byLength;
+			}
+			int byGroup = Boolean.compare(viaGroup.contains(a.predicate().name()),
+					viaGroup.contains(b.predicate().name()));
+			if (byGroup != 0) {
+				return byGroup;
 			}
 			int byOwn = Boolean.compare(viaInverse.contains(a.predicate().name()),
 					viaInverse.contains(b.predicate().name()));
@@ -883,13 +930,16 @@ public final class PredicateRegistry {
 				: "{subject} " + name.replace('_', ' ') + " {object}";
 		// Without cue words the name supplies them: its words become the search terms.
 		List<String> lexicon = def.lexicon().isEmpty() ? Predicate.lexiconOf(name) : def.lexicon();
+		List<String> groups = def.groups() == null ? List.of() : groupNames(def.groups());
 		var p = new Predicate(name, def.description(), domain, range, Boolean.TRUE.equals(def.functional()),
 				def.functionalScope(), Boolean.TRUE.equals(def.symmetric()), def.inverse(),
 				def.volatility() == null ? "medium" : def.volatility(), lexicon, render, def.qualifiers(),
-				def.aliases(), List.of(), observationId, false, bare(def), Boolean.TRUE.equals(def.containment()));
+				def.aliases(), List.of(), observationId, false, bare(def), Boolean.TRUE.equals(def.containment()),
+				groups);
 		List<Rule> parsed = def.definedAs() == null ? List.of() : Rule.parse(def.definedAs());
 		validateRules(name, parsed);
 		Map<String, Map<String, String>> implied = parseImplies(name, def.implies());
+		registerGroupsFromUse(groups);
 		insert(p);
 		if (!parsed.isEmpty()) {
 			setRules(name, parsed);
@@ -945,6 +995,9 @@ public final class PredicateRegistry {
 		if (def.containment() != null) {
 			replacement.put("containment", def.containment());
 		}
+		if (def.groups() != null) {
+			replacement.put("groups", def.groups());
+		}
 		return update(p.name(), replacement, "defined after registration from use");
 	}
 
@@ -969,10 +1022,16 @@ public final class PredicateRegistry {
 		String newImplies = null;
 		boolean impliesChanged = false;
 		boolean containment = p.containment();
+		List<String> groups = p.groups();
 		var changes = new ArrayList<String[]>();
 		for (Map.Entry<String, Object> e : replacement.entrySet()) {
 			String old;
 			switch (e.getKey()) {
+			case "groups" -> {
+				old = json(groups);
+				groups = groupNames(strings(e.getValue()));
+				registerGroupsFromUse(groups);
+			}
 			case "defined_as" -> {
 				old = Rule.toJson(rulesOf(p.name()));
 				List<Rule> parsed = Rule.parse(e.getValue());
@@ -1045,7 +1104,7 @@ public final class PredicateRegistry {
 			}
 			default -> throw MnemicException.invalidArgument("Unknown predicate property '" + e.getKey()
 					+ "'; correctable: description, domain, range, render, renders, lexicon, inverse_lexicon, qualifiers, "
-					+ "functional, symmetric, volatility, defined_as, implies, containment.");
+					+ "functional, symmetric, volatility, defined_as, implies, containment, groups.");
 			}
 			changes.add(new String[] {e.getKey(), old,
 					"defined_as".equals(e.getKey()) ? rule
@@ -1067,14 +1126,15 @@ public final class PredicateRegistry {
 		final String d = description;
 		final List<String> dom = domain;
 		final List<String> rng = range;
+		final List<String> grp = groups;
 		db.write(tx -> {
 			tx.update(
 					"""
 							UPDATE predicate SET render = ?, lexicon = ?, qualifiers = ?, functional = ?, symmetric = ?, volatility = ?,
-							description = ?, inverse_lexicon = ?, domain = ?, range = ?, containment = ?, inferred = 0
+							description = ?, inverse_lexicon = ?, domain = ?, range = ?, containment = ?, groups = ?, inferred = 0
 							WHERE name = ?""",
 					r, json(l), json(q), f ? 1 : 0, sym ? 1 : 0, v, d, json(inv), json(dom), json(rng), cont ? 1 : 0,
-					p.name());
+					json(grp), p.name());
 			if (newRule != null) {
 				tx.update("UPDATE predicate SET rule = ? WHERE name = ?", newRule, p.name());
 			}
@@ -1164,6 +1224,261 @@ public final class PredicateRegistry {
 			}
 		}
 		return false;
+	}
+
+	// ── seed ─────────────────────────────────────────────────────────────
+
+	// ── groups ───────────────────────────────────────────────────────────
+
+	/** Every group, seed first. */
+	public synchronized List<Group> groups() {
+		load();
+		return List.copyOf(groupCache.values());
+	}
+
+	public synchronized Optional<Group> group(String name) {
+		load();
+		return name == null ? Optional.empty() : Optional.ofNullable(groupCache.get(groupName(name)));
+	}
+
+	/** The groups within a group, transitively, the group itself first; a cycle is never walked twice. */
+	public synchronized List<String> groupsUnder(String name) {
+		load();
+		var out = new ArrayList<String>();
+		var frontier = new ArrayDeque<String>();
+		frontier.add(groupName(name));
+		while (!frontier.isEmpty()) {
+			String g = frontier.poll();
+			if (out.contains(g)) {
+				continue;
+			}
+			out.add(g);
+			for (Group child : groupCache.values()) {
+				if (child.groups().contains(g)) {
+					frontier.add(child.name());
+				}
+			}
+		}
+		return out;
+	}
+
+	/**
+	 * The predicates in a group, including those in the groups within it: the stated relations first, the derived ones
+	 * after them, each in registry order, so that a group's verdict leads with what somebody said.
+	 */
+	public synchronized List<Predicate> membersOf(String name) {
+		List<String> under = groupsUnder(name);
+		var out = new ArrayList<Predicate>();
+		for (boolean derived : new boolean[] {false, true}) {
+			for (Predicate p : load().values()) {
+				if (p.groups().stream().anyMatch(under::contains) && rulesOf(p.name()).isEmpty() != derived) {
+					out.add(p);
+				}
+			}
+		}
+		return out;
+	}
+
+	static String groupName(String name) {
+		return name.trim().toLowerCase(Locale.ROOT).replace(' ', '_');
+	}
+
+	private static List<String> groupNames(List<String> names) {
+		var out = new ArrayList<String>();
+		for (String n : names) {
+			if (n == null || n.isBlank()) {
+				continue;
+			}
+			String g = groupName(n);
+			if (!out.contains(g)) {
+				out.add(g);
+			}
+		}
+		return out;
+	}
+
+	/** A group named for the first time registers itself, with the words of its name as its cue words. */
+	private void registerGroupsFromUse(List<String> names) {
+		load();
+		for (String n : names) {
+			if (!groupCache.containsKey(n)) {
+				db.write(tx -> tx.insert(
+						"INSERT INTO predicate_group(name, description, lexicon, groups, seed, created_at) VALUES (?,?,?,?,?,?)",
+						n, null, json(Predicate.lexiconOf(n)), "[]", 0, Instant.now().toString()));
+				cache = null;
+				load();
+			}
+		}
+	}
+
+	/**
+	 * Corrects a group: {@code description}, {@code lexicon} (its cue words), {@code renders} ({@code {"de":
+	 * {"lexicon": [...]}}}, the words in another language), and {@code groups} (the groups it belongs to; a group that
+	 * would contain itself is refused). Every change is logged.
+	 */
+	public synchronized Group updateGroup(String name, Map<String, Object> replacement, String reason) {
+		Group g = group(name).orElseThrow(() -> MnemicException.notFound("No group " + name));
+		String description = g.description();
+		List<String> lexicon = baseLexicon(g.name());
+		List<String> parents = g.groups();
+		var changes = new ArrayList<String[]>();
+		var renders = new LinkedHashMap<String, List<String>>();
+		for (Map.Entry<String, Object> e : replacement.entrySet()) {
+			String old;
+			switch (e.getKey()) {
+			case "description" -> {
+				old = description;
+				description = String.valueOf(e.getValue());
+			}
+			case "lexicon" -> {
+				old = json(lexicon);
+				lexicon = lower(strings(e.getValue()));
+			}
+			case "groups" -> {
+				old = json(parents);
+				parents = groupNames(strings(e.getValue()));
+				for (String parent : parents) {
+					if (parent.equals(g.name()) || groupsUnder(g.name()).contains(parent)) {
+						throw MnemicException.invalidArgument(
+								"group '" + g.name() + "' cannot belong to '" + parent + "': it would contain itself.");
+					}
+				}
+				registerGroupsFromUse(parents);
+			}
+			case "renders" -> {
+				if (!(e.getValue() instanceof Map<?, ?> byLanguage)) {
+					throw MnemicException.invalidArgument("'renders' takes an object keyed by language, e.g. "
+							+ "{\"de\": {\"lexicon\": [\"familie\", \"verwandte\"]}}.");
+				}
+				for (Map.Entry<?, ?> r : byLanguage.entrySet()) {
+					String language = language(String.valueOf(r.getKey()));
+					Object spec = r.getValue();
+					List<String> words = spec instanceof Map<?, ?> m ? lower(strings(m.get("lexicon")))
+							: lower(strings(spec));
+					renders.put(language, words);
+					changes.add(new String[] {"renders." + language, json(groupLexiconIn(g.name(), language)),
+							json(words)});
+				}
+				continue;
+			}
+			default -> throw MnemicException.invalidArgument(
+					"Unknown group property '" + e.getKey() + "'; correctable: description, lexicon, renders, groups.");
+			}
+			changes.add(new String[] {e.getKey(), old,
+					e.getValue() instanceof List<?> ? json(strings(e.getValue())) : String.valueOf(e.getValue())});
+		}
+		final String d = description;
+		final List<String> l = lexicon;
+		final List<String> p = parents;
+		db.write(tx -> {
+			tx.update("UPDATE predicate_group SET description = ?, lexicon = ?, groups = ? WHERE name = ?", d, json(l),
+					json(p), g.name());
+			for (Map.Entry<String, List<String>> r : renders.entrySet()) {
+				tx.update("INSERT OR REPLACE INTO predicate_group_render(name, language, lexicon) VALUES (?,?,?)",
+						g.name(), r.getKey(), json(r.getValue()));
+			}
+			for (String[] c : changes) {
+				tx.insert(
+						"INSERT INTO predicate_group_change(group_name, field, old_value, new_value, reason, changed_at) "
+								+ "VALUES (?,?,?,?,?,?)",
+						g.name(), c[0], c[1], c[2], reason, Instant.now().toString());
+			}
+			return null;
+		});
+		cache = null;
+		return group(g.name()).orElseThrow();
+	}
+
+	public List<Map<String, Object>> groupChanges(String name) {
+		return db.read(
+				tx -> tx.query("SELECT * FROM predicate_group_change WHERE group_name = ? ORDER BY id", groupName(name))
+						.stream().map(r -> {
+							var m = new LinkedHashMap<String, Object>();
+							m.put("field", r.str("field"));
+							m.put("old", r.str("old_value"));
+							m.put("new", r.str("new_value"));
+							m.put("reason", r.str("reason"));
+							m.put("changed_at", r.str("changed_at"));
+							return (Map<String, Object>) m;
+						}).toList());
+	}
+
+	/** A group's cue words as stored, without the language's merged in. */
+	private List<String> baseLexicon(String group) {
+		return db.read(tx -> tx.query("SELECT lexicon FROM predicate_group WHERE name = ?", group)).stream()
+				.map(r -> list(r.str("lexicon"))).findFirst().orElse(List.of());
+	}
+
+	/** A group's cue words in a language, empty when none were given. */
+	public List<String> groupLexiconIn(String group, String language) {
+		return db
+				.read(tx -> tx.query("SELECT lexicon FROM predicate_group_render WHERE name = ? AND language = ?",
+						groupName(group), language(language)))
+				.stream().map(r -> list(r.str("lexicon"))).findFirst().orElse(List.of());
+	}
+
+	private static List<String> lower(List<String> words) {
+		return words.stream().map(w -> w.trim().toLowerCase(Locale.ROOT)).filter(w -> !w.isEmpty()).distinct().toList();
+	}
+
+	/** One seed group: its description, cue words, words per other language, and seed members. */
+	private record SeedGroup(String name, String description, List<String> lexicon, Map<String, List<String>> renders,
+			List<String> members) {
+	}
+
+	/**
+	 * The seed groups (family K): "family" holds the kinship predicates, so that one word in a question reaches them
+	 * all. A store adds groups of its own through a predicate's definition or a correction.
+	 */
+	private static List<SeedGroup> seedGroups() {
+		return List.of(new SeedGroup("family",
+				"The kinship relations: parents, marriages and partnerships, siblings, and what is derived from them.",
+				List.of("family", "families", "relatives", "relative", "kin", "kinship"),
+				Map.of("de",
+						List.of("familie", "familien", "verwandte", "verwandten", "verwandtschaft", "angehörige",
+								"angehörigen")),
+				List.of("parent_of", "spouse_of", "partner_of", "engaged_to", "step_parent_of", "grandparent_of",
+						"aunt_uncle_of", "cousin_of", "in_law_of", "sibling_of")));
+	}
+
+	/**
+	 * The seed groups exist in every store, and a seed predicate carries its seed group unless the user changed its
+	 * groups (a change on its log), so a store from before groups existed takes them at this start.
+	 */
+	private void seedGroupsIfMissing() {
+		load();
+		for (SeedGroup s : seedGroups()) {
+			if (!groupCache.containsKey(s.name())) {
+				db.write(tx -> {
+					tx.insert(
+							"INSERT INTO predicate_group(name, description, lexicon, groups, seed, created_at) "
+									+ "VALUES (?,?,?,?,?,?)",
+							s.name(), s.description(), json(s.lexicon()), "[]", 1, Instant.now().toString());
+					for (Map.Entry<String, List<String>> r : s.renders().entrySet()) {
+						tx.insert(
+								"INSERT OR IGNORE INTO predicate_group_render(name, language, lexicon) VALUES (?,?,?)",
+								s.name(), r.getKey(), json(r.getValue()));
+					}
+					return null;
+				});
+				cache = null;
+			}
+			for (String member : s.members()) {
+				Predicate p = load().get(member);
+				if (p == null || !p.seed() || p.groups().contains(s.name())) {
+					continue;
+				}
+				boolean userSet = db.read(tx -> tx.queryLong(
+						"SELECT COUNT(*) FROM predicate_change WHERE predicate = ? AND field = 'groups'", member)) > 0;
+				if (userSet) {
+					continue;
+				}
+				var groups = new ArrayList<>(p.groups());
+				groups.add(s.name());
+				db.write(tx -> tx.update("UPDATE predicate SET groups = ? WHERE name = ?", json(groups), member));
+				cache = null;
+			}
+		}
 	}
 
 	// ── seed ─────────────────────────────────────────────────────────────
@@ -1526,15 +1841,42 @@ public final class PredicateRegistry {
 							new Predicate(p.name(), p.description(), p.domain(), p.range(), p.functional(),
 									p.functionalScope(), p.symmetric(), p.inverse(), p.volatility(), lexicon,
 									r.str("render"), p.qualifiers(), p.aliases(), inverse, p.definedBy(), p.seed(),
-									p.isInferred(), p.containment()));
+									p.isInferred(), p.containment(), p.groups()));
 					if (r.str("negated") != null) {
 						negated.put(p.name(), r.str("negated"));
 					}
 				}
 			}
 			cache = map;
+			groupCache = loadGroups();
 		}
 		return cache;
+	}
+
+	/** The groups with their cue words: the base ones, and the store's language's merged in. */
+	private Map<String, Group> loadGroups() {
+		var out = new LinkedHashMap<String, Group>();
+		for (Row r : db.read(tx -> tx.query("SELECT * FROM predicate_group ORDER BY seed DESC, name"))) {
+			out.put(r.str("name"), new Group(r.str("name"), r.str("description"), list(r.str("lexicon")),
+					list(r.str("groups")), r.lng("seed") == 1));
+		}
+		if (lang != Lang.EN) {
+			for (Row r : db
+					.read(tx -> tx.query("SELECT * FROM predicate_group_render WHERE language = ?", lang.code()))) {
+				Group g = out.get(r.str("name"));
+				if (g == null) {
+					continue;
+				}
+				var lexicon = new ArrayList<>(g.lexicon());
+				for (String t : list(r.str("lexicon"))) {
+					if (!lexicon.contains(t)) {
+						lexicon.add(t);
+					}
+				}
+				out.put(g.name(), new Group(g.name(), g.description(), lexicon, g.groups(), g.seed()));
+			}
+		}
+		return out;
 	}
 
 	private void insert(Predicate p) {
@@ -1546,12 +1888,12 @@ public final class PredicateRegistry {
 		tx.insert("""
 				INSERT INTO predicate(name, description, domain, range, functional, functional_scope, symmetric,
 				                      inverse, volatility, lexicon, render, qualifiers, aliases, inverse_lexicon,
-				                      defined_by, seed, inferred, created_at, containment)
-				VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", p.name(), p.description(), json(p.domain()),
+				                      defined_by, seed, inferred, created_at, containment, groups)
+				VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", p.name(), p.description(), json(p.domain()),
 				json(p.range()), p.functional() ? 1 : 0, p.functionalScope(), p.symmetric() ? 1 : 0, p.inverse(),
 				p.volatility(), json(p.lexicon()), p.render(), json(p.qualifiers()), json(p.aliases()),
 				json(p.inverseLexicon()), p.definedBy(), p.seed() ? 1 : 0, p.isInferred() ? 1 : 0,
-				Instant.now().toString(), p.containment() ? 1 : 0);
+				Instant.now().toString(), p.containment() ? 1 : 0, json(p.groups()));
 		return null;
 	}
 
@@ -1560,7 +1902,7 @@ public final class PredicateRegistry {
 				r.lng("functional") == 1, r.str("functional_scope"), r.lng("symmetric") == 1, r.str("inverse"),
 				r.str("volatility"), list(r.str("lexicon")), r.str("render"), list(r.str("qualifiers")),
 				list(r.str("aliases")), list(r.str("inverse_lexicon")), r.lngOrNull("defined_by"), r.lng("seed") == 1,
-				r.lng("inferred") == 1, r.lng("containment") == 1);
+				r.lng("inferred") == 1, r.lng("containment") == 1, list(r.str("groups")));
 	}
 
 	private List<String> types(String csv) {
