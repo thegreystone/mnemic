@@ -49,7 +49,28 @@ import java.util.Set;
 public record Predicate(String name, String description, List<String> domain, List<String> range, boolean functional,
 		String functionalScope, boolean symmetric, String inverse, String volatility, List<String> lexicon,
 		String render, List<String> qualifiers, List<String> aliases, List<String> inverseLexicon, Long definedBy,
-		boolean seed, boolean inferred, boolean containment) {
+		boolean seed, boolean inferred, boolean containment, List<String> groups) {
+
+	/** {@code groups}: the groups this predicate belongs to (a question's "family" reaches every member). */
+	public Predicate {
+		groups = groups == null ? List.of() : List.copyOf(groups);
+	}
+
+	/** A predicate in no group. */
+	public Predicate(String name, String description, List<String> domain, List<String> range, boolean functional,
+			String functionalScope, boolean symmetric, String inverse, String volatility, List<String> lexicon,
+			String render, List<String> qualifiers, List<String> aliases, List<String> inverseLexicon, Long definedBy,
+			boolean seed, boolean inferred, boolean containment) {
+		this(name, description, domain, range, functional, functionalScope, symmetric, inverse, volatility, lexicon,
+				render, qualifiers, aliases, inverseLexicon, definedBy, seed, inferred, containment, List.of());
+	}
+
+	/** The same predicate in these groups. */
+	public Predicate withGroups(List<String> newGroups) {
+		return new Predicate(name, description, domain, range, functional, functionalScope, symmetric, inverse,
+				volatility, lexicon, render, qualifiers, aliases, inverseLexicon, definedBy, seed, inferred,
+				containment, newGroups);
+	}
 
 	/**
 	 * Qualifiers that name the same relation from the two sides of it: brother and sister are one relation seen from a
@@ -165,7 +186,7 @@ public record Predicate(String name, String description, List<String> domain, Li
 		if (negatedTemplate != null && !negatedTemplate.isBlank()) {
 			return new Predicate(name, description, domain, range, functional, functionalScope, symmetric, inverse,
 					volatility, lexicon, negatedTemplate, qualifiers, aliases, inverseLexicon, definedBy, seed,
-					inferred, containment).render(subject, object, scope, qualifier);
+					inferred, containment, groups).render(subject, object, scope, qualifier);
 		}
 		String full = render(subject, object, scope, qualifier);
 		if (lang != Lang.EN) {

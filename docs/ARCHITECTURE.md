@@ -135,8 +135,10 @@ that arrived later, settles entity questions whose subject now exists, and folds
 
 ```text
 recall(query, as_of, budget)
-  Query.analyse           entities spotted, predicate cues, terms, yes/no and tense, the FTS expression
-  StructuredProbe.probe   entity × cue over valid time → matched | miss | future | known_false | entity | unresolved
+  Query.analyse           entities spotted, predicate cues (a group word cues every member), each cue bound to the
+                          name before it ("Anna's siblings"), terms, yes/no and tense, the FTS expression
+  StructuredProbe.probe   subject × cue over valid time → matched | miss | future | known_false | entity | unresolved,
+                          one verdict per cue: the first that answered is primary, the rest come along as "also"
   channels                structured, keys (fact and event renderings), lexical (observation text), semantic, upcoming
   fuse                    reciprocal rank fusion over observations; the structured and upcoming channels weigh double
   budget                  hits within the token budget, facts first when the text does not fit

@@ -173,7 +173,8 @@ You talk to the assistant; it talks to Mnemic. Things you can say:
 
 Behind that are seven tools: `remember`, `recall`, `inspect`, `correct`, `forget`, `consolidate`, and `status`. Each
 one tells the assistant when to use it and when not to, and everything the store holds has one kind of id (`obs-12`,
-`f-12`, `ent-12`, `evt-3`, `q-3`, `pred:works_at`, `event:joined`, `type:place`) that `inspect` and `correct` take.
+`f-12`, `ent-12`, `evt-3`, `q-3`, `pred:works_at`, `event:joined`, `type:place`, `group:family`) that `inspect` and
+`correct` take.
 
 The text of an observation is the source of truth, kept word for word; everything else is derived from the reading the
 assistant attached to it. When a reading was wrong, the assistant reads the observation again with `remember` and the

@@ -920,6 +920,68 @@ Expect: the verdict matches the current fact alone and carries a note
 "pending on works_at, a conflict awaiting an answer: … [f-N]", so a caller
 knows the answer is contested rather than settled.
 
+### F21. A matched verdict carries its facts
+
+```text
+remember(text: "Oskar is my brother and Klara is my sister.", ...)
+recall(query: "who are Mattias's siblings", max_tokens: 120)
+```
+
+Expect: the verdict line lists both facts with their ids ("matched Mattias
+Sandell · sibling_of → 2 facts: Oskar Nyberg is Mattias Sandell's brother
+[f-1]; ..."), whatever the budget leaves for the observations. A fact that
+matched is the answer; it never depends on its home observation fitting.
+Past twelve facts the line counts the rest.
+
+### F22. A question with several relations is answered relation by relation
+
+```text
+remember(text: "My parents are Konrad and Gunilla.", ...)
+remember(text: "My wife Anna's brother is Erik.", ...)
+recall(query: "Mattias's parents and Anna's siblings")
+```
+
+Expect: each relation word is bound to the name before it ("Anna's
+siblings") or after it with "of" ("the siblings of Anna"): `parent_of` is
+probed for Mattias and `sibling_of` for Anna, never the other way round. A
+word after "and" with no name of its own shares the subject before it
+("Anna's parents and siblings"), and a word used twice is asked once per
+subject ("Anna's parents and Konrad's parents").
+The first relation in the question that answered is the verdict; the
+others follow on `also:` lines, each with its subject, predicate, and
+facts. A relation the
+question tied to nobody and that found nothing is left out. Asked in the
+other order, the verdict follows the question.
+
+### F23. Names in an open question are candidates, not conditions
+
+```text
+recall(query: "Mattias's parents Konrad and Gunilla")
+recall(query: "Mattias's siblings Konrad")
+```
+
+Expect: the first matches both parents: an open question that lists names
+is answered by a fact touching any of them (a yes/no question still needs
+all). The second is a MISS whose note says the sibling facts touch none of
+Konrad and lists them as near-misses; the block never says no such fact
+exists while facts under the predicate exist for the subject.
+
+### F24. A group word asks every relation in the group
+
+```text
+recall(query: "Mattias's family")
+recall(query: "Mattias' Familie")            (a German store)
+```
+
+Expect: "family" (and the store's language's words for it) cues every
+predicate in the seed group `family`: parents, marriages and partnerships,
+siblings, and the derived relations. The verdict is the first member that
+answered, stated relations before derived ones, marked "(via family)"; the other matched members follow on
+`also:` lines; the members under which nothing was found are named once,
+together ("also: nothing under family for Mattias Sandell: partner_of,
+..."). A relation named by its own word beside the group word is probed
+once, by its own word.
+
 ## G. Consolidation
 
 ### G1. Spec version upgrade re-derives
@@ -1262,6 +1324,29 @@ uses: 3, observations: [...] }]`; nothing changes until a description is
 supplied through `correct` or a later definition.
 
 ---
+
+### J12. Predicates form groups, and groups nest
+
+```text
+remember(text: "Our dog is called Rufus.",
+         proposal: { predicates: [{ name: "has_pet", domain: "person", range: "thing", groups: ["pets"] }],
+                     facts: [ has_pet(self, Rufus) ] })
+recall(query: "Mattias's pets")
+correct(group:pets, { lexicon: ["pets", "pet", "animals"] })
+correct(group:pets, { groups: ["household"] })
+correct(pred:owns, { groups: ["household"] })
+recall(query: "Mattias's household")
+correct(group:household, { groups: ["pets"] })
+```
+
+Expect: a group named in a definition registers itself with the words of
+its name as cue words, and the question reaches the predicate through it.
+Its description, words, words in another language (`renders`), and the
+groups it belongs to are corrected by `group:` name, logged, and shown by
+`inspect` with its members. A group may belong to several groups; a word
+for an outer group reaches every predicate under it, transitively; a group
+that would end up containing itself is refused. `inspect('registry')`
+lists the groups; a predicate's entry names its groups.
 
 ## K. Derived predicates
 

@@ -43,9 +43,12 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -184,13 +187,51 @@ final class RecallRenderer {
 		return s.entity() != null && s.entity().startsWith("ent-") ? Long.parseLong(s.entity().substring(4)) : -1;
 	}
 
+	/** How many of a verdict's facts its line lists; the rest are counted. */
+	static final int MAX_VERDICT_FACTS = 12;
+
+	/** The facts a verdict's line lists: what matched, up to {@link #MAX_VERDICT_FACTS}. */
+	static List<Fact> verdictFacts(Structured s) {
+		return s.matched() ? s.facts().subList(0, Math.min(s.facts().size(), MAX_VERDICT_FACTS)) : List.of();
+	}
+
+	/**
+	 * The primary verdict, then the others: each relation the question named on its own line, and the members of a
+	 * group under which nothing was found on one line together, so a reader sees what was asked and not found without a
+	 * line per predicate.
+	 */
 	private static void verdict(StringBuilder sb, Structured s, List<Event> events, Instant now, boolean polar) {
-		String key = s.entityName() + " · " + s.predicate() + (s.qualifier() != null ? "[" + s.qualifier() + "]" : "");
-		sb.append("structured: ");
+		verdictLine(sb, "structured: ", s, events, now, polar);
+		var nothingUnder = new LinkedHashMap<String, List<String>>(); // "group for entity" → predicates
+		for (Structured v : s.also()) {
+			if (v.group() != null && !v.answered()) {
+				nothingUnder.computeIfAbsent(v.group() + " for " + v.entityName(), k -> new ArrayList<>())
+						.add(v.predicate());
+				continue;
+			}
+			verdictLine(sb, "also: ", v, List.of(), now, polar);
+		}
+		for (Map.Entry<String, List<String>> e : nothingUnder.entrySet()) {
+			sb.append("also: nothing under ").append(e.getKey()).append(": ").append(String.join(", ", e.getValue()))
+					.append('\n');
+		}
+	}
+
+	private static void verdictLine(
+		StringBuilder sb, String prefix, Structured s, List<Event> events, Instant now, boolean polar) {
+		String key = s.entityName() + " · " + s.predicate() + (s.qualifier() != null ? "[" + s.qualifier() + "]" : "")
+				+ (s.group() != null ? " (via " + s.group() + ")" : "");
+		sb.append(prefix);
 		switch (s.state()) {
 		case "matched" -> {
 			sb.append("matched ").append(key).append(" → ").append(s.facts().size())
 					.append(s.facts().size() == 1 ? " fact" : " facts");
+			List<Fact> listed = verdictFacts(s);
+			sb.append(": ")
+					.append(String.join("; ", listed.stream().map(f -> f.rendering() + " [" + f.ref() + "]").toList()));
+			if (listed.size() < s.facts().size()) {
+				sb.append("; and ").append(s.facts().size() - listed.size()).append(" more");
+			}
 			if (polar) {
 				sb.append(POLAR_NOTE);
 			}
@@ -244,7 +285,12 @@ final class RecallRenderer {
 		case "events" -> {
 			if (s.predicate() != null && s.facts().isEmpty()) {
 				sb.append("no ").append(s.predicate()).append(s.qualifier() != null ? "[" + s.qualifier() + "]" : "")
-						.append(" fact for ").append(s.entityName()).append("; the ");
+						.append(" fact for ").append(s.entityName());
+				if (!s.nearMisses().isEmpty()) {
+					sb.append(" answers the question (").append(s.nearMisses().size())
+							.append(s.nearMisses().size() == 1 ? " near-miss" : " near-misses").append(" below)");
+				}
+				sb.append("; the ");
 			} else {
 				sb.append("events for ").append(s.entityName()).append(": the ");
 			}

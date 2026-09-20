@@ -701,8 +701,24 @@ public final class EntityService {
 	 * single token that is the unique first name of a person. First-person references resolve to the owner.
 	 */
 	public List<Entity> spot(String query) {
-		List<String> tokens = Names.tokens(query);
 		var found = new LinkedHashMap<Long, Entity>();
+		for (Mention m : mentions(query)) {
+			found.putIfAbsent(m.entity().id(), m.entity());
+		}
+		return new ArrayList<>(found.values());
+	}
+
+	/** An entity mentioned in a query, at the token positions {@code [start, end)} of {@link Names#tokens}. */
+	public record Mention(Entity entity, int start, int end) {
+	}
+
+	/**
+	 * The mentions behind {@link #spot}: each entity with where its name stands in the query's tokens, longest names
+	 * first, so a question's structure ("Anna's siblings") can be read off the positions.
+	 */
+	public List<Mention> mentions(String query) {
+		List<String> tokens = Names.tokens(query);
+		var found = new ArrayList<Mention>();
 		boolean[] used = new boolean[tokens.size()];
 		for (int n = Math.min(MAX_NGRAM, tokens.size()); n >= 1; n--) {
 			for (int i = 0; i + n <= tokens.size(); i++) {
@@ -711,7 +727,7 @@ public final class EntityService {
 				}
 				String gram = String.join(" ", tokens.subList(i, i + n));
 				if (SELF.contains(gram)) {
-					found.putIfAbsent(owner.id(), owner);
+					found.add(new Mention(owner, i, i + n));
 					mark(used, i, n);
 					continue;
 				}
@@ -735,13 +751,13 @@ public final class EntityService {
 				}
 				if (!hits.isEmpty()) {
 					for (Entity e : hits) {
-						found.putIfAbsent(e.id(), e);
+						found.add(new Mention(e, i, i + n));
 					}
 					mark(used, i, n);
 				}
 			}
 		}
-		return new ArrayList<>(found.values());
+		return found;
 	}
 
 	/** A version or model number: "5", "4b", "v2", "mk3". */

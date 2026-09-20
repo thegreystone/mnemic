@@ -196,7 +196,7 @@ public final class RecallService {
 		semanticChannel(q, asOf, now, includeHistory, ch);
 		upcomingChannel(q, asOf, now, ch);
 		Ranking ranking = fuse(ch);
-		List<Hit> hits = budget(ranking, ch, q, maxTokens, limit, includeHistory);
+		List<Hit> hits = budget(ranking, ch, q, s, maxTokens, limit, includeHistory);
 		String text = renderer.render(query, asOf, now, s, ch.events, hits, ranking.order.size(), ranking.used,
 				maxTokens, ranking.truncated, q.polar());
 		return new RecallResult(query, asOf, s, List.copyOf(ch.events), List.copyOf(hits), ranking.order.size(),
@@ -207,7 +207,7 @@ public final class RecallService {
 		long ownerId = entities.owner().id();
 		boolean functionalCue = s.predicate() != null
 				&& predicates.get(s.predicate()).map(Predicate::functional).orElse(false);
-		String cueDirection = q.cues().isEmpty() || s.predicate() == null ? "any" : q.cues().getFirst().direction();
+		String cueDirection = directionOf(q, s.predicate());
 		boolean cueIsTheQuestion = !q.cues().isEmpty() && s.predicate() != null && !"entity".equals(s.state())
 				&& q.beyondEntities().stream().allMatch(q.cueTokens()::contains);
 		boolean narrowed = q.polar() && (!q.residual().isEmpty() || !q.others(ownerId).isEmpty());
@@ -216,8 +216,27 @@ public final class RecallService {
 		return new Gates(cueDirection, answerCue, ownerOnly);
 	}
 
-	/** Channel 1: the structured verdict's facts rank their observations and anchor them. */
-	private void structuredChannel(Structured s, Query q, Gates g, Channels ch) {
+	/** The side of the relation the question's cue on {@code predicate} names, {@code any} when it names none. */
+	private static String directionOf(Query q, String predicate) {
+		if (predicate == null) {
+			return "any";
+		}
+		for (Query.Bound b : q.bound()) {
+			if (b.cue().predicate().name().equals(predicate)) {
+				return b.cue().direction();
+			}
+		}
+		return "any";
+	}
+
+	/** Channel 1: the structured verdicts' facts rank their observations and anchor them, the primary one first. */
+	private void structuredChannel(Structured primary, Query q, Gates g, Channels ch) {
+		for (Structured s : primary.all()) {
+			structuredVerdict(s, q, g, ch);
+		}
+	}
+
+	private void structuredVerdict(Structured s, Query q, Gates g, Channels ch) {
 		Set<Long> others = new HashSet<>();
 		for (Entity e : q.others(entities.owner().id())) {
 			others.add(e.id());
@@ -275,8 +294,8 @@ public final class RecallService {
 			}
 			// The keys obey the direction the verdict applied: under "Mattias's father" a rendering with Mattias on
 			// the wrong side, or about someone else's mother, is out.
-			if (f.predicate().equals(s.predicate()) && !"any".equals(g.cueDirection())
-					&& !rightWay(f, q, g.cueDirection())) {
+			String direction = directionOf(q, f.predicate());
+			if (!"any".equals(direction) && !rightWay(f, q, direction)) {
 				continue;
 			}
 			ch.rankAndAnchor(ch.keys, f, facts.observationsOf(f.id()));
@@ -509,8 +528,15 @@ public final class RecallService {
 	 * before it is dropped: the fact is the answer, the prose is the evidence. A retired observation was wrong or
 	 * superseded; history shows it, flagged, recall does not.
 	 */
-	private List<Hit> budget(Ranking r, Channels ch, Query q, int maxTokens, int limit, boolean includeHistory) {
+	private List<Hit> budget(
+		Ranking r, Channels ch, Query q, Structured s, int maxTokens, int limit, boolean includeHistory) {
 		var hits = new ArrayList<Hit>();
+		// The verdicts carry their facts, which the block shows before any observation: they are paid for first.
+		for (Structured v : s.all()) {
+			for (Fact f : RecallRenderer.verdictFacts(v)) {
+				r.used += tokens.estimate(f.rendering()) + 8;
+			}
+		}
 		for (Long id : r.order) {
 			if (hits.size() >= limit) {
 				r.truncated = true;
