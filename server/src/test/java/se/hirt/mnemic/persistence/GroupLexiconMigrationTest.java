@@ -74,7 +74,7 @@ class GroupLexiconMigrationTest {
 							+ "('coaches', 'lasting', 'false', 'true', 'a coach stays a coach', 't')");
 		}
 		try (Engine e = TestHomes.engine(home)) {
-			assertEquals(32, e.database().schemaVersion());
+			assertEquals(33, e.database().schemaVersion());
 			PredicateRegistry.Group pets = e.predicates().group("pets").orElseThrow();
 			assertEquals(List.of("pets", "pet", "haustiere"), pets.lexicon(), "merged, once each, in order");
 			assertTrue(e.database()

@@ -146,7 +146,8 @@ recall(query, as_of, budget)
 ```
 
 Every channel produces observation ids; facts anchor the observations they came from (`fact_source`), so a fact
-restated in a later conversation reaches that conversation too. `as_of` is applied inside each channel: facts by
+restated in a later conversation reaches that conversation too, and events cite every observation that stated or
+dated them (`event_source`), so forgetting one leaves the event with the others. `as_of` is applied inside each channel: facts by
 their valid time (`FactQueries.probe`, `knownBy`), observations by when they were observed. The gates in
 `RecallService.gates` keep the owner's own facts from ranking under a cue that names dozens of them; the reasons and
 the measurements behind each gate are on the methods.

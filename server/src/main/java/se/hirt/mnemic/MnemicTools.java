@@ -697,6 +697,7 @@ public class MnemicTools {
 				.map(id -> Map.of("id", "ent-" + id, "name", engine.entities().nameOf(id))).toList());
 		m.put("valid_start", ev.validStart());
 		m.put("observation", "obs-" + ev.observationId());
+		m.put("observations", engine.events().observationsOf(ev.id()).stream().map(o -> "obs-" + o).toList());
 		return m;
 	}
 

@@ -657,4 +657,45 @@ class KinshipTest {
 		}
 	}
 
+	@Test
+	@Scenario("K41")
+	void aFactRememberedAfterAParticipantsEndIsClosedAgainstIt() {
+		try (Engine e = TestHomes.engine("k41-late-fact")) {
+			parents(e);
+			remember(e, "Lena died on 4 March 2020.",
+					proposal().entity("e1", "Lena Berg", "person").event("ev1", "died", "2020-03-04", "e1"));
+			RememberOutcome married = remember(e, "Konrad married Lena in 2015.",
+					proposal().entity("e1", "Lena Berg", "person").entity("e2", "Konrad Nyberg", "person")
+							.fact(fact("e1", "spouse_of", "e2", "wife", null, "2015", null, null, null, null)));
+			Fact marriage = e.facts().factsOf(e.entities().byRef("Lena Berg").orElseThrow().id()).stream()
+					.filter(f -> "spouse_of".equals(f.predicate())).findFirst().orElseThrow();
+			assertEquals("2020-03-04", marriage.validEnd(), "ended with her, though she died first: " + marriage);
+			assertTrue(
+					married.applied().superseded().stream()
+							.anyMatch(m -> "spouse_of".equals(m.get("predicate"))
+									&& String.valueOf(m.get("event")).startsWith("evt-")),
+					married.applied().superseded().toString());
+			assertEquals(List.of("Lena Berg is Mattias Sandell's stepmother (since 2015)"),
+					renderings(e, "step_parent_of"), "and the lasting relation outlives it");
+			// The other side, a lasting fact, and one begun after the end.
+			remember(e, "Konrad reports to Lena.", proposal().entity("e1", "Konrad Nyberg", "person")
+					.entity("e2", "Lena Berg", "person").fact("e1", "reports_to", "e2"));
+			remember(e, "Astrid is Lena's mother.",
+					proposal().entity("e1", "Astrid Berg", "person").entity("e2", "Lena Berg", "person")
+							.fact(fact("e1", "parent_of", "e2", "mother", null, null, null, null, null, null)));
+			remember(e, "Lena's papers have been kept at the archive since 2021.",
+					proposal().entity("e1", "Lena Berg", "person").entity("e2", "the archive", "place")
+							.fact(fact("e1", "lives_in", "e2", null, null, "2021", null, null, null, null)));
+			List<Fact> hers = e.facts().factsOf(e.entities().byRef("Lena Berg").orElseThrow().id());
+			assertEquals("2020-03-04",
+					hers.stream().filter(f -> "reports_to".equals(f.predicate())).findFirst().orElseThrow().validEnd(),
+					"one does not report to the dead");
+			assertNull(
+					hers.stream().filter(f -> "parent_of".equals(f.predicate())).findFirst().orElseThrow().validEnd(),
+					"a mother stays a mother");
+			assertNull(hers.stream().filter(f -> "lives_in".equals(f.predicate())).findFirst().orElseThrow().validEnd(),
+					"begun after the end: not hers to end");
+		}
+	}
+
 }

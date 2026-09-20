@@ -333,7 +333,9 @@ public final class RecallService {
 			if (Query.matchedTerms(ev.rendering(), q.terms()) < needed) {
 				continue;
 			}
-			Channels.rank(ch.keys, ev.observationId());
+			for (long o : events.observationsOf(ev.id())) {
+				Channels.rank(ch.keys, o);
+			}
 			if (ch.events.size() < MAX_EVENTS) {
 				ch.events.add(ev);
 				// An event answers the question only when it matches a term beyond the entities' own names: "born"
@@ -403,7 +405,9 @@ public final class RecallService {
 		}
 		var ranked = new ArrayList<Long>();
 		for (Event ev : cued) {
-			Channels.rank(ranked, ev.observationId());
+			for (long o : events.observationsOf(ev.id())) {
+				Channels.rank(ranked, o);
+			}
 		}
 		for (Long id : ch.structured) {
 			Channels.rank(ranked, id);

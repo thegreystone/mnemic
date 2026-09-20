@@ -1939,6 +1939,22 @@ Expect: both engines count two observations; A finds "second" and B finds
 
 ---
 
+### K41. A fact remembered after a participant's end is closed against it
+
+```text
+remember(text: "Lena died on 4 March 2020.", proposal: { events: [ died(Lena) 2020-03-04 ] })
+remember(text: "Konrad married Lena in 2015.", proposal: { facts: [ spouse_of(Lena, Konrad, wife) 2015 ] })
+remember(text: "Konrad reports to Lena.", proposal: { facts: [ reports_to(Konrad, Lena) ] })
+```
+
+Expect: the death was on record first, and the facts said afterwards end
+with it all the same, as they would have had the death come later: the
+marriage and the reporting line end at 2020-03-04, closed by the death
+event (`superseded` in the reply names it), and the lasting step-parent
+relation derived from the marriage stays current as in K21. A lasting fact
+said afterwards ("Astrid is Lena's mother") stays open, and so does one that
+began after the end.
+
 ## Q. Negation and closure
 
 Decided with the K family after two probes against a real store and the
@@ -2938,3 +2954,20 @@ stopword alone is not a family.
 Expect: with `as_of`, only events dated on or before it are returned; an
 event with no date is neither before nor after, so it stays out, and comes
 back without `as_of`.
+### T25. An event cites every observation that stated it, and survives the loss of one
+
+```text
+remember(text: "Lars has passed away.", proposal: { events: [ died(Lars) ] })
+remember(text: "Lars died on 7 October 2014.", proposal: { events: [ died(Lars) 2014-10-07 ] })
+inspect(evt-N)
+forget(obs-A)
+```
+
+Expect: the two statements are one event (J10), and `inspect` names both
+observations behind it, the first as its home. The date arriving with the
+second gives a day to what the undated death had already ended. Forgetting the first leaves
+the event, re-homed to the second, with its date. Forgetting the second
+instead leaves the event with the first, undated again: what the dated
+death had closed is closed still, without a day (T18). A rebuild finds the
+sources again from the observations.
+

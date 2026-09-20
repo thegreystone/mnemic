@@ -104,7 +104,7 @@ class MnemicToolsTest {
 		ToolResponse status = tools.status();
 		assertFalse(status.isError(), text(status));
 		Map<String, Object> result = result(status);
-		assertEquals(32, ((Number) result.get("schema_version")).intValue());
+		assertEquals(33, ((Number) result.get("schema_version")).intValue());
 		assertTrue(result.containsKey("pending_proposals"));
 		assertTrue(result.get("model_providers").toString().contains("openai-compatible"), result.toString());
 		// Every recall channel reports whether it answers; the test profile keeps the semantic one off and says so.
@@ -527,6 +527,27 @@ class MnemicToolsTest {
 		assertFalse(gone.isError(), text(gone));
 		assertEquals(true, result(gone).get("removed"), text(gone));
 		assertTrue(tools.inspect(lone, Optional.empty(), NONE).isError(), "gone for good");
+	}
+
+	@Test
+	void anEventNamesTheObservationsBehindIt() {
+		ToolResponse first = remember("Sven Alm retired.",
+				Map.of("entities", List.of(Map.of("ref", "e1", "name", "Sven Alm", "type", "person")), "events",
+						List.of(Map.of("ref", "ev1", "type", "retired", "participants", List.of("e1")))),
+				"tools-event-source-1");
+		assertFalse(first.isError(), text(first));
+		ToolResponse second = remember("Sven Alm retired in 2020.",
+				Map.of("entities", List.of(Map.of("ref", "e1", "name", "Sven Alm", "type", "person")), "events",
+						List.of(Map.of("ref", "ev1", "type", "retired", "participants", List.of("e1"), "valid_time",
+								Map.of("start", "2020")))),
+				"tools-event-source-2");
+		assertFalse(second.isError(), text(second));
+		@SuppressWarnings("unchecked")
+		String evt = (String) ((List<Map<String, Object>>) ((Map<?, ?>) result(second).get("stored")).get("events"))
+				.getFirst().get("id");
+		Map<String, Object> shown = result(tools.inspect(evt, Optional.empty(), NONE));
+		assertEquals(2, ((List<?>) shown.get("observations")).size(), shown.toString());
+		assertEquals(shown.get("observation"), ((List<?>) shown.get("observations")).getFirst(), "its home first");
 	}
 
 	@Test

@@ -180,13 +180,19 @@ public final class EventService {
 		if (same.isPresent()) {
 			Event e = same.get();
 			boolean dating = e.validStart() == null && b.start() != null;
-			if (dating) {
-				db.write(tx -> tx.update(
-						"""
-								UPDATE event SET valid_start = ?, valid_start_precision = ?, valid_end = ?, valid_end_precision = ?,
-								                 rendering = ? WHERE id = ?""",
-						b.start(), b.startPrecision(), b.end(), b.endPrecision(), rendering, e.id()));
-			}
+			db.write(tx -> {
+				if (dating) {
+					tx.update(
+							"""
+									UPDATE event SET valid_start = ?, valid_start_precision = ?, valid_end = ?, valid_end_precision = ?,
+									                 rendering = ? WHERE id = ?""",
+							b.start(), b.startPrecision(), b.end(), b.endPrecision(), rendering, e.id());
+				}
+				// This observation stated it too: it is a source, and the one that dated it when it did.
+				tx.update("INSERT OR IGNORE INTO event_source(event_id, observation_id, kind) VALUES (?,?,?)", e.id(),
+						obs.id(), dating ? "dated" : "restated");
+				return null;
+			});
 			return new Stored(e.id(), dating);
 		}
 		long id = db.write(tx -> {
@@ -199,9 +205,63 @@ public final class EventService {
 				tx.update("INSERT OR IGNORE INTO event_participant(event_id, entity_id, position) VALUES (?,?,?)", eid,
 						participants.get(i).id(), i);
 			}
+			tx.update("INSERT INTO event_source(event_id, observation_id, kind) VALUES (?,?,'stated')", eid, obs.id());
 			return eid;
 		});
 		return new Stored(id, true);
+	}
+
+	/** The observations behind an event: its home first, then every other that stated or dated it. */
+	public List<Long> observationsOf(long eventId) {
+		return db.read(tx -> observationsOf(tx, eventId));
+	}
+
+	static List<Long> observationsOf(Tx tx, long eventId) {
+		var out = new ArrayList<Long>();
+		tx.queryOne("SELECT observation_id FROM event WHERE id = ?", eventId)
+				.ifPresent(r -> out.add(r.lng("observation_id")));
+		for (Row r : tx.query("SELECT observation_id FROM event_source WHERE event_id = ? ORDER BY observation_id",
+				eventId)) {
+			if (!out.contains(r.lng("observation_id"))) {
+				out.add(r.lng("observation_id"));
+			}
+		}
+		return out;
+	}
+
+	/**
+	 * The dated event that ended an entity (its death, its dissolution), if its record says it ended: the event's
+	 * effects set {@code existed_end} to the event's day when they ran, and that is what is read here.
+	 */
+	static Optional<Event> endingOf(Tx tx, long entityId) {
+		List<Event> found = events(tx, tx.query("""
+				SELECT ev.* FROM event ev JOIN event_type et ON et.name = ev.type
+				JOIN event_participant ep ON ep.event_id = ev.id JOIN entity en ON en.id = ep.entity_id
+				WHERE ep.entity_id = ? AND et.ends_entity = 1 AND ev.valid_start IS NOT NULL
+				AND en.existed_end = ev.valid_start ORDER BY ev.id LIMIT 1""", entityId));
+		return found.isEmpty() ? Optional.empty() : Optional.of(found.getFirst());
+	}
+
+	/** Takes an event's date back, when the observation that supplied it is gone; the rendering follows. */
+	void undate(Tx tx, long eventId) {
+		tx.update("UPDATE event SET valid_start = NULL, valid_start_precision = NULL, valid_end = NULL, "
+				+ "valid_end_precision = NULL WHERE id = ?", eventId);
+		rerender(tx, tx.query("SELECT * FROM event WHERE id = ?", eventId));
+	}
+
+	/**
+	 * Closes a fact against the end of one of its participants and reports it; when nothing ever said whether the
+	 * relation is lasting, the report says the closure assumed not, and what keeps such facts open.
+	 */
+	Map<String, Object> closeAgainstEnding(Tx tx, Fact f, long eventId, String type, Bounds b, long observationId) {
+		ledger.close(tx, f, null, "entity_ended", type + " " + Bounds.show(b.start(), b.startPrecision()), eventId,
+				observationId, b.start(), b.startPrecision(), "current");
+		Map<String, Object> out = closedOut(f, eventId, b);
+		if (!ledger.lastingStated(f.predicate())) {
+			out.put("note", "closed as not lasting, which nothing said; correct(\"pred:" + f.predicate()
+					+ "\", {\"lasting\": true}) keeps such facts open past the end of a participant");
+		}
+		return out;
 	}
 
 	private Optional<Event> sameEvent(String type, List<Entity> participants, String start) {
@@ -266,16 +326,21 @@ public final class EventService {
 					if (ledger.lasting(f.predicate()) || startsAfter(f, b)) {
 						continue;
 					}
-					ledger.close(tx, f, null, "entity_ended", type + " " + Bounds.show(b.start(), b.startPrecision()),
-							eventId, obs.id(), b.start(), b.startPrecision(), "current");
-					// Nothing said whether the relation outlives the person: the closure says it assumed not, and
-					// what to do if it should have.
-					Map<String, Object> out = closedOut(f, eventId, b);
-					if (!ledger.lastingStated(f.predicate())) {
-						out.put("note", "closed as not lasting, which nothing said; correct(\"pred:" + f.predicate()
-								+ "\", {\"lasting\": true}) keeps such facts open past the end of a participant");
+					superseded.add(closeAgainstEnding(tx, f, eventId, type, b, obs.id()));
+				}
+				// The date arriving later (an undated death now dated, J10): what this event ended without a day
+				// gets the day.
+				if (b.start() != null) {
+					for (Row r : tx.query("""
+							SELECT DISTINCT f.* FROM fact f JOIN supersession s ON s.fact_id = f.id
+							WHERE s.event_id = ? AND s.kind = 'entity_ended' AND f.status = 'current'
+							AND f.ended = 1 AND f.valid_end IS NULL""", eventId)) {
+						Fact f = Fact.from(r);
+						ledger.close(tx, f, null, "entity_ended",
+								"dated: " + type + " " + Bounds.show(b.start(), b.startPrecision()), eventId, obs.id(),
+								b.start(), b.startPrecision(), "current");
+						superseded.add(closedOut(f, eventId, b));
 					}
-					superseded.add(out);
 				}
 			}
 			return null;

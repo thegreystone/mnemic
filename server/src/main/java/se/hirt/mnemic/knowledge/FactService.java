@@ -831,6 +831,24 @@ public final class FactService {
 					a.obs.observedAt().toString(), Instant.now().toString(), c.row().startSource(), c.row().endSource(),
 					op.mode());
 			FactLedger.link(tx, id, a.obs.id(), "stated");
+			// A participant whose record had already ended when this was said (a death on record): the fact ends
+			// with them, as it would have had the death come later, unless the relation is lasting or the fact
+			// began after the end (K41).
+			if (!c.pending() && c.row().end() == null && !c.rowEnded() && !ledger.lasting(op.predicate().name())) {
+				for (Entity who : op.object() == null ? List.of(op.subject()) : List.of(op.subject(), op.object())) {
+					Optional<Event> ending = EventService.endingOf(tx, who.id());
+					if (ending.isEmpty()
+							|| (c.row().start() != null && c.row().start().compareTo(ending.get().validStart()) > 0)) {
+						continue;
+					}
+					Fact fresh = Fact.from(tx.queryOne("SELECT * FROM fact WHERE id = ?", id).orElseThrow());
+					Bounds at = new Bounds(ending.get().validStart(), ending.get().validStartPrecision(), null, null,
+							null, null);
+					a.superseded.add(events.closeAgainstEnding(tx, fresh, ending.get().id(), ending.get().type(), at,
+							a.obs.id()));
+					break;
+				}
+			}
 			for (long[] ask : c.asks()) {
 				if (ask[2] < 0) {
 					ask[2] = id; // the restriction being stored is the one the containment serves
@@ -1561,6 +1579,7 @@ public final class FactService {
 	 * created in place, for a re-seed of the same text; forgetting for privacy removes those nothing else references.
 	 */
 	public Removed forgetDerived(long observationId, boolean keepEntities) {
+		var undated = new ArrayList<Long>();
 		Removed removed = db.write(tx -> {
 			tx.update("""
 					INSERT OR IGNORE INTO forgotten_link(observation_id, entity_id)
@@ -1587,6 +1606,28 @@ public final class FactService {
 					facts.add(Map.of("id", f.ref(), "rendering", f.rendering(), "status", f.status()));
 				}
 			}
+			// An event this observation stated beside others survives there: re-homed when this was its home, and
+			// undated again when this was the observation that dated it (its closures are redone without the date
+			// once the transaction is through).
+			for (Row src : tx.query("SELECT event_id, kind FROM event_source WHERE observation_id = ?",
+					observationId)) {
+				long evId = src.lng("event_id");
+				List<Long> others = tx
+						.query("SELECT observation_id FROM event_source WHERE event_id = ? "
+								+ "AND observation_id <> ? ORDER BY observation_id", evId, observationId)
+						.stream().map(r -> r.lng("observation_id")).toList();
+				if (others.isEmpty()) {
+					continue;
+				}
+				tx.update("DELETE FROM event_source WHERE event_id = ? AND observation_id = ?", evId, observationId);
+				tx.update("UPDATE event SET observation_id = ? WHERE id = ? AND observation_id = ?", others.getFirst(),
+						evId, observationId);
+				if ("dated".equals(src.str("kind"))) {
+					reopen(tx, List.of(), List.of(evId));
+					this.events.undate(tx, evId);
+					undated.add(evId);
+				}
+			}
 			var events = new ArrayList<Map<String, Object>>();
 			var goneEvents = new ArrayList<Long>();
 			for (Event ev : EventService.events(tx,
@@ -1610,9 +1651,23 @@ public final class FactService {
 			}
 			tx.update("DELETE FROM fact_source WHERE observation_id = ?", observationId);
 			tx.update("DELETE FROM fact WHERE observation_id = ?", observationId);
+			tx.update("DELETE FROM event_source WHERE observation_id = ?", observationId);
 			tx.update("DELETE FROM event WHERE observation_id = ?", observationId);
 			return new Removed(facts, events, reopened);
 		});
+		// An event that lost its date still ends what an undated one ends (T18), just without a day.
+		for (long evId : undated) {
+			events.get(evId).ifPresent(ev -> {
+				Optional<Observation> home = db
+						.read(tx -> tx.queryOne("SELECT * FROM observation WHERE id = ?", ev.observationId()))
+						.map(Observation::from);
+				List<Entity> participants = ev.participants().stream().map(id -> entities.get(id).orElse(null))
+						.filter(Objects::nonNull).toList();
+				if (home.isPresent() && participants.size() == ev.participants().size()) {
+					events.applyEffects(ev.id(), ev.type(), participants, Bounds.NONE, home.get(), new ArrayList<>());
+				}
+			});
+		}
 		if (!keepEntities) {
 			entities.removeOrphansCreatedBy(observationId);
 		}

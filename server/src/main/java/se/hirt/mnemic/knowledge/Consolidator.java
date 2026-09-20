@@ -430,6 +430,10 @@ public final class Consolidator {
 				db.write(tx -> {
 					tx.update("UPDATE fact SET event_id = ? WHERE event_id = ?", keep.id(), drop.id());
 					tx.update("UPDATE supersession SET event_id = ? WHERE event_id = ?", keep.id(), drop.id());
+					tx.update(
+							"INSERT OR IGNORE INTO event_source(event_id, observation_id, kind) "
+									+ "SELECT ?, observation_id, kind FROM event_source WHERE event_id = ?",
+							keep.id(), drop.id());
 					tx.update("DELETE FROM event_participant WHERE event_id = ?", drop.id());
 					tx.update("DELETE FROM event WHERE id = ?", drop.id());
 					return null;
