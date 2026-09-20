@@ -257,20 +257,19 @@ public final class Deriver {
 			m.put("rule", rows.getFirst().lng("rule"));
 			m.put("base", rows.stream().map(r -> "f-" + r.lng("base_fact_id")).distinct().toList());
 			// A lasting row with no end whose base a death ended says so, so a reader sees why it is still current.
-			Fact row = tx.query("SELECT * FROM fact WHERE id = ?", factId).stream().map(Fact::from).findFirst()
-					.orElse(null);
+			Fact row = tx.queryOne("SELECT * FROM fact WHERE id = ?", factId).map(Fact::from).orElse(null);
 			if (row != null && "derived".equals(row.derivationKind()) && row.validEnd() == null
 					&& predicates.get(row.predicate()).map(Predicate::lasting).orElse(false)) {
 				Map<Long, List<String[]>> deaths = Graph.deaths(tx);
 				var outlived = new ArrayList<String>();
 				for (Row r : rows) {
-					long baseId = r.lng("base_fact_id");
-					Fact base = tx.query("SELECT * FROM fact WHERE id = ?", baseId).stream().map(Fact::from).findFirst()
-							.orElse(null);
-					boolean closed = tx.queryLong(
-							"SELECT COUNT(*) FROM supersession WHERE fact_id = ? AND kind = 'entity_ended'",
-							baseId) > 0;
-					if (base != null && Graph.byDeath(base, closed, deaths)) {
+					Optional<Row> found = tx.queryOne(
+							"SELECT fact.*, " + Graph.BY_DEATH + " FROM fact WHERE fact.id = ?", r.lng("base_fact_id"));
+					if (found.isEmpty()) {
+						continue;
+					}
+					Fact base = Fact.from(found.get());
+					if (Graph.byDeath(base, found.get().lng("by_death") == 1, deaths)) {
 						outlived.add(base.rendering() + " [" + base.ref() + "]");
 					}
 				}
@@ -648,14 +647,18 @@ public final class Deriver {
 		private static final String BY_DEATH = "EXISTS (SELECT 1 FROM supersession s WHERE s.fact_id = fact.id "
 				+ "AND s.kind = 'entity_ended') AS by_death";
 
-		/** When each entity's record says it ended (died, dissolved): the date and its precision, per event. */
+		/**
+		 * When each entity's record says it ended (died, dissolved): the date and its precision, per event. The one an
+		 * event ended is the participant whose record ends on the event's day (the event's effects set that when they
+		 * ran), never someone who was merely there, whatever order the participants were stored in.
+		 */
 		private static Map<Long, List<String[]>> deaths(Tx tx) {
 			var out = new HashMap<Long, List<String[]>>();
-			for (Row r : tx
-					.query("""
-							SELECT ep.entity_id AS entity_id, ev.valid_start AS at, ev.valid_start_precision AS precision
-							FROM event ev JOIN event_type et ON et.name = ev.type JOIN event_participant ep ON ep.event_id = ev.id
-							WHERE et.ends_entity = 1 AND ev.valid_start IS NOT NULL""")) {
+			for (Row r : tx.query("""
+					SELECT ep.entity_id AS entity_id, ev.valid_start AS at, ev.valid_start_precision AS precision
+					FROM event ev JOIN event_type et ON et.name = ev.type
+					JOIN event_participant ep ON ep.event_id = ev.id JOIN entity en ON en.id = ep.entity_id
+					WHERE et.ends_entity = 1 AND ev.valid_start IS NOT NULL AND en.existed_end = ev.valid_start""")) {
 				out.computeIfAbsent(r.lng("entity_id"), k -> new ArrayList<>())
 						.add(new String[] {r.str("at"), r.str("precision")});
 			}

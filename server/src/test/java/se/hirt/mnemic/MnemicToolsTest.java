@@ -104,7 +104,7 @@ class MnemicToolsTest {
 		ToolResponse status = tools.status();
 		assertFalse(status.isError(), text(status));
 		Map<String, Object> result = result(status);
-		assertEquals(30, ((Number) result.get("schema_version")).intValue());
+		assertEquals(32, ((Number) result.get("schema_version")).intValue());
 		assertTrue(result.containsKey("pending_proposals"));
 		assertTrue(result.get("model_providers").toString().contains("openai-compatible"), result.toString());
 		// Every recall channel reports whether it answers; the test profile keeps the semantic one off and says so.
@@ -528,4 +528,55 @@ class MnemicToolsTest {
 		assertEquals(true, result(gone).get("removed"), text(gone));
 		assertTrue(tools.inspect(lone, Optional.empty(), NONE).isError(), "gone for good");
 	}
+
+	@Test
+	void groupsAndLastingGoThroughTheTools() {
+		Map<String, Object> registry = result(tools.inspect("registry", Optional.empty(), NONE));
+		String groups = registry.get("groups").toString();
+		assertTrue(groups.contains("id=group:family") && groups.contains("parent_of"), groups);
+		ToolResponse family = tools.inspect("group:family", Optional.empty(), NONE);
+		assertFalse(family.isError(), text(family));
+		assertTrue(result(family).get("members").toString().contains("sibling_of"), text(family));
+		ToolResponse c = tools.correct("group:family",
+				Map.of("lexicon", List.of("family", "families", "relatives", "kin", "clan")), Optional.of("clan too"));
+		assertFalse(c.isError(), text(c));
+		assertTrue(text(tools.inspect("group:family", Optional.empty(), NONE)).contains("clan"));
+		assertTrue(tools.inspect("group:nope", Optional.empty(), NONE).isError());
+		assertTrue(tools.correct("group:nope", Map.of("lexicon", List.of("x")), NONE).isError());
+		// A predicate's groups and its lasting flag are correctable by the same id scheme, and shown.
+		ToolResponse p = tools.correct("pred:knows", Map.of("lasting", true, "groups", List.of("acquaintance")),
+				Optional.of("a friend stays a friend"));
+		assertFalse(p.isError(), text(p));
+		Map<String, Object> knows = result(tools.inspect("pred:knows", Optional.empty(), NONE));
+		assertEquals(true, knows.get("lasting"));
+		assertEquals(false, result(tools.inspect("pred:spouse_of", Optional.empty(), NONE)).get("lasting"),
+				"said either way, so a client can tell not lasting from not known");
+		assertFalse(result(tools.inspect("pred:spouse_of", Optional.empty(), NONE)).containsKey("lasting_assumed"),
+				"the seed decided");
+		assertFalse(knows.containsKey("lasting_assumed"), "a correction decided");
+		// A definition that says nothing about lasting is answered with what was assumed, and inspect shows it.
+		ToolResponse coached = remember("Sten Alm coaches me.",
+				Map.of("predicates",
+						List.of(Map.of("name", "coached_by_tool", "domain", "person", "range", "person", "lexicon",
+								List.of("coached by"))),
+						"entities", List.of(Map.of("ref", "e1", "name", "Sten Alm", "type", "person")), "facts",
+						List.of(Map.of("subject", "self", "predicate", "coached_by_tool", "object", "e1"))),
+				"tools-lasting-assumed");
+		assertFalse(coached.isError(), text(coached));
+		String definitions = String.valueOf(result(coached).get("definitions"));
+		assertTrue(definitions.contains("coached_by_tool") && definitions.contains("lasting=false")
+				&& definitions.contains("correct(\"pred:coached_by_tool\", {\"lasting\": true})"), definitions);
+		Map<String, Object> coachedBy = result(tools.inspect("pred:coached_by_tool", Optional.empty(), NONE));
+		assertEquals(false, coachedBy.get("lasting"));
+		assertEquals(true, coachedBy.get("lasting_assumed"));
+		assertEquals(List.of("acquaintance"), knows.get("groups"));
+		assertFalse(tools.inspect("group:acquaintance", Optional.empty(), NONE).isError(),
+				"registered from its first mention");
+		// A comma-separated string is a list too, as everywhere else in correct.
+		ToolResponse two = tools.correct("pred:knows", Map.of("groups", "acquaintance, contacts"), NONE);
+		assertFalse(two.isError(), text(two));
+		assertEquals(List.of("acquaintance", "contacts"),
+				result(tools.inspect("pred:knows", Optional.empty(), NONE)).get("groups"));
+	}
+
 }

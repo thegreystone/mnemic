@@ -767,6 +767,14 @@ public final class FactService {
 			a.defined("predicate", p.name(), "inferred", inferred);
 			a.warnings.add("Predicate '" + f.predicate() + "' was registered from this use with everything inferred "
 					+ "from its name (see definitions); state what you know in 'predicates' or through correct.");
+		} else if ("registered".equals(res.how()) && def != null && def.lasting() == null) {
+			// A definition that said nothing about lasting: the store assumed, and says what, once, where the
+			// definition is answered.
+			Predicate p = res.predicate();
+			var assumed = new LinkedHashMap<String, Object>();
+			assumed.put("assumed", Map.of("lasting", p.lasting()));
+			assumed.put("correct", "correct(\"pred:" + p.name() + "\", {\"lasting\": " + !p.lasting() + "})");
+			a.defined("predicate", p.name(), "registered", assumed);
 		}
 		if (res.asks()) {
 			a.ask(asks.predicate(a.obs, f, res.candidate(), res.how(), def, FactQuestions.heldProposal(a.p, f, def)));

@@ -946,8 +946,11 @@ Expect: each relation word is bound to the name before it ("Anna's
 siblings") or after it with "of" ("the siblings of Anna"): `parent_of` is
 probed for Mattias and `sibling_of` for Anna, never the other way round. A
 word after "and" with no name of its own shares the subject before it
-("Anna's parents and siblings"), and a word used twice is asked once per
-subject ("Anna's parents and Konrad's parents").
+("Anna's parents and siblings", and down a list: "Anna's parents,
+siblings and cousins"), and a word used twice is asked once per subject
+("Anna's parents and Konrad's parents"). The `bounds:` line carries the
+negations, restrictions, and closures of every relation asked, not only
+the first.
 The first relation in the question that answered is the verdict; the
 others follow on `also:` lines, each with its subject, predicate, and
 facts. A relation the
@@ -1341,10 +1344,12 @@ correct(group:household, { groups: ["pets"] })
 ```
 
 Expect: a group named in a definition registers itself with the words of
-its name as cue words, and the question reaches the predicate through it.
-Its description, words, words in another language (`renders`), and the
-groups it belongs to are corrected by `group:` name, logged, and shown by
-`inspect` with its members. A group may belong to several groups; a word
+its name as cue words (a one-word name gives the word and its lemma; a name
+of several words gives the phrase, so "close family" does not answer to
+"family"), and the question reaches the predicate through it.
+Its description, words (in any language; matching is blind to it), and
+the groups it belongs to are corrected by `group:` name, logged, and shown
+by `inspect` with its members. A group may belong to several groups; a word
 for an outer group reaches every predicate under it, transitively; a group
 that would end up containing itself is refused. `inspect('registry')`
 lists the groups; a predicate's entry names its groups. At start, a seed
@@ -1353,6 +1358,21 @@ name (`engaged_to` from before the seed knew it) when its definition named
 no groups, no correction touched its groups, and its domain and range
 overlap the seed's; a correction that took a member out of the group
 stands, and so does a definition that put it elsewhere.
+
+### J13. A definition names the words for the object's side
+
+```text
+remember(text: "Dr Ek treats Bo.",
+         proposal: { predicates: [{ name: "treated_by", domain: "person", range: "person",
+                                    lexicon: ["treated by", "patient"], inverse_lexicon: ["doctor", "physician"] }],
+                     facts: [ treated_by(Bo, Dr Ek) ] })
+recall(query: "Bo's doctor")
+```
+
+Expect: a `lexicon` word names the relation from the subject's side, so
+"Bo's doctor" would otherwise look for facts with Bo as the doctor. The
+definition sets `inverse_lexicon`, as `correct` could before, and the
+question reaches the fact with Bo as the patient. The verdict lists it.
 
 ## K. Derived predicates
 
@@ -1832,7 +1852,9 @@ Expect: the marriage was written with the death day as its end rather than
 closed by the death event, and the lasting relation outlives it all the
 same: "Lena is Mattias's stepmother (since 2015)" stays current (K21). The
 dates match at the coarser precision of the two ("until 2021" beside a
-death on 2021-05-09). Only an end the caller wrote themselves is read
+death on 2021-05-09; at year precision an end in the year of a death is
+read as the death, which is what the words say). The one who died is the
+event's first participant; anyone else named on it was there. Only an end the caller wrote themselves is read
 this way: an end an event explains keeps its explanation, so a divorce in
 the year of a death stays a divorce ("2016 – 2019"), and the marriage
 facts themselves keep the ends they were given.
@@ -1845,11 +1867,10 @@ remember(text: "Lena died in 2020.", proposal: { events: [ died(Lena) 2020 ] })
 ```
 
 Expect: the marriage ends with Lena although she is the fact's object, not
-its subject: a death closes the deceased's own open facts and the symmetric
-ones they stand on either side of, and the lasting step-parent relation
-outlives it as in K21. Another party's fact about the deceased (an
-employment at an organization that was wound up) is that party's own story
-and stays, as S11 says.
+its subject: the end of an entity closes every open fact it stands in, on
+either side (`reports_to`, `treated_by`, an employment at a wound-up
+organization alike), unless the predicate is lasting; the lasting
+step-parent relation outlives it as in K21.
 
 ### K40. A death does not end the deceased's lasting facts
 
@@ -1861,7 +1882,17 @@ remember(text: "Konrad died in 2021.", proposal: { events: [ died(Konrad) 2021 ]
 Expect: the marriage ends at 2021, and "Konrad is Mattias's father" stays
 current with no end: `parent_of` is lasting, a father stays a father. A
 predicate defined with `lasting: true` behaves the same; one defined without
-it ends with the person, as a job or a home does. `lasting` is told apart
+it ends with the person, as a job or a home does, unless its object is a
+literal: an attribute ("Konrad's blood type is A") is lasting by default.
+A definition that says nothing about `lasting` is answered with what was
+assumed (`definitions`, under `inferred`: `assumed`, with the correction that changes it),
+and a fact an ending closes under such a predicate carries a `note` saying
+it was closed as not lasting and how to keep such facts open; a stated or
+seeded predicate carries neither, and `inspect` shows `lasting_assumed` on
+one nobody decided. Changing `lasting` by
+correction re-derives at once, so the derived rows gain or lose their ends.
+At start a seed's flag reaches a predicate the store defined itself under
+the seed's name and kind, as groups do, unless a correction set it. `lasting` is told apart
 from `volatility`: a marriage never goes stale and still ends with the
 spouse.
 
@@ -2330,8 +2361,10 @@ type opens `owns` for the chosen Anna.
 
 Expect: with `wound_up` defined with `ends_entity`, the event
 `wound_up(Nordvik AB)` dated 2023 ends "Nordvik AB is located in
-Stockholm" at 2023 and sets the organization's `existed_end`; the owner's
-`works_at Nordvik AB` is not the organization's own fact and stays.
+Stockholm" at 2023, ends the owner's `works_at Nordvik AB` at 2023 as well
+(an employment at an organization that was wound up ended with it), and
+sets the organization's `existed_end`. Only a lasting relation would stay
+(K40).
 
 ### S12. Consolidate honours a corrected event type
 

@@ -49,12 +49,15 @@ import java.util.Set;
 public record Predicate(String name, String description, List<String> domain, List<String> range, boolean functional,
 		String functionalScope, boolean symmetric, String inverse, String volatility, List<String> lexicon,
 		String render, List<String> qualifiers, List<String> aliases, List<String> inverseLexicon, Long definedBy,
-		boolean seed, boolean inferred, boolean containment, List<String> groups, boolean lasting) {
+		boolean seed, boolean inferred, boolean containment, List<String> groups, boolean lasting,
+		boolean lastingStated) {
 
 	/**
 	 * {@code groups}: the groups this predicate belongs to (a question's "family" reaches every member).
-	 * {@code lasting}: a participant's death does not end the relation (a father stays a father), as against a marriage
-	 * or a job, which end with the person; distinct from volatility, which says whether a fact goes stale.
+	 * {@code lasting}: the end of a participant does not end the relation (a father stays a father), as against a
+	 * marriage or a job, which end with the person; distinct from volatility, which says whether a fact goes stale.
+	 * {@code lastingStated}: somebody said so (the seed, a definition, a correction); otherwise the store assumed it
+	 * and says so where the assumption acts.
 	 */
 	public Predicate {
 		groups = groups == null ? List.of() : List.copyOf(groups);
@@ -66,14 +69,25 @@ public record Predicate(String name, String description, List<String> domain, Li
 			String render, List<String> qualifiers, List<String> aliases, List<String> inverseLexicon, Long definedBy,
 			boolean seed, boolean inferred, boolean containment) {
 		this(name, description, domain, range, functional, functionalScope, symmetric, inverse, volatility, lexicon,
-				render, qualifiers, aliases, inverseLexicon, definedBy, seed, inferred, containment, List.of(), false);
+				render, qualifiers, aliases, inverseLexicon, definedBy, seed, inferred, containment, List.of(), false,
+				false);
+	}
+
+	/** A predicate whose lasting flag was assumed, not stated. */
+	public Predicate(String name, String description, List<String> domain, List<String> range, boolean functional,
+			String functionalScope, boolean symmetric, String inverse, String volatility, List<String> lexicon,
+			String render, List<String> qualifiers, List<String> aliases, List<String> inverseLexicon, Long definedBy,
+			boolean seed, boolean inferred, boolean containment, List<String> groups, boolean lasting) {
+		this(name, description, domain, range, functional, functionalScope, symmetric, inverse, volatility, lexicon,
+				render, qualifiers, aliases, inverseLexicon, definedBy, seed, inferred, containment, groups, lasting,
+				false);
 	}
 
 	/** The same predicate in these groups. */
 	public Predicate withGroups(List<String> newGroups) {
 		return new Predicate(name, description, domain, range, functional, functionalScope, symmetric, inverse,
 				volatility, lexicon, render, qualifiers, aliases, inverseLexicon, definedBy, seed, inferred,
-				containment, newGroups, lasting);
+				containment, newGroups, lasting, lastingStated);
 	}
 
 	/**
@@ -198,7 +212,7 @@ public record Predicate(String name, String description, List<String> domain, Li
 		if (negatedTemplate != null && !negatedTemplate.isBlank()) {
 			return new Predicate(name, description, domain, range, functional, functionalScope, symmetric, inverse,
 					volatility, lexicon, negatedTemplate, qualifiers, aliases, inverseLexicon, definedBy, seed,
-					inferred, containment, groups, lasting).render(subject, object, scope, qualifier);
+					inferred, containment, groups, lasting, lastingStated).render(subject, object, scope, qualifier);
 		}
 		String full = render(subject, object, scope, qualifier);
 		if (lang != Lang.EN) {

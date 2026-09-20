@@ -277,13 +277,12 @@ class VocabularyTest {
 							.eventType(new EventTypeDef("wound_up", "Subject organization was wound up.", List.of(),
 									List.of(), List.of(), true, List.of("wound up", "liquidated")))
 							.entity("e1", "Nordvik AB", "organization").event("ev1", "wound_up", "2023", "e1"));
-			assertEquals(1, o.applied().superseded().size(), o.applied().toString());
-			assertEquals("Nordvik AB is located in Stockholm", o.applied().superseded().getFirst().get("rendering"));
+			assertEquals(2, o.applied().superseded().size(), o.applied().toString());
 			Entity nordvik = e.entities().byRef("Nordvik AB").orElseThrow();
 			List<String> now = e.facts().factsOf(nordvik.id()).stream().map(Fact::rendering).toList();
 			assertTrue(now.contains("Nordvik AB is located in Stockholm (until 2023)"), now.toString());
-			assertTrue(now.contains("Mattias Sandell works at Nordvik AB"),
-					"the owner's fact is not the organization's own");
+			assertTrue(now.contains("Mattias Sandell works at Nordvik AB (until 2023)"),
+					"an employment at a wound-up organization ended with it: " + now);
 		}
 	}
 

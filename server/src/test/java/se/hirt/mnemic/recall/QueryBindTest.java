@@ -186,4 +186,64 @@ class QueryBindTest {
 		assertEquals(List.of(pi4, pi5), bound.getFirst().subjects());
 		assertEquals(List.of(MATTIAS), bound.getFirst().others());
 	}
+
+	@Test
+	void aWordInsideAnEntityNameIsNotACue() {
+		String text = "where is Family Office AB";
+		Entity office = new Entity(9, "Family Office AB", "organization", null, null);
+		List<Bound> bound = Query.bind(text, List.of(new Cue(PARENT_OF, null, "family", "any", "family")),
+				List.of(new Mention(office, 2, 5)), List.of(office));
+		assertTrue(bound.isEmpty(), "the word is the name's: " + bound);
+	}
+
+	@Test
+	void theOwnerIsAPossessorToo() {
+		String text = "my family";
+		List<Bound> bound = Query.bind(text, List.of(new Cue(PARENT_OF, null, "family", "any", "family")),
+				List.of(new Mention(MATTIAS, 0, 1)), List.of(MATTIAS));
+		assertEquals(List.of(MATTIAS), bound.getFirst().subjects());
+	}
+
+	@Test
+	void aTermOfSeveralWordsBinds() {
+		String text = "Anna's twin brother";
+		List<Bound> bound = Query.bind(text, List.of(new Cue(SIBLING_OF, "twin brother", "twin brother", "any")),
+				mentions(text, ANNA), List.of(ANNA));
+		assertEquals(1, bound.size());
+		assertEquals(List.of(ANNA), bound.getFirst().subjects());
+		assertEquals(1, bound.getFirst().start());
+		assertEquals(3, bound.getFirst().end());
+	}
+
+	@Test
+	void oneNameMayPossessTwoWords() {
+		String text = "Anna's parents and Anna's siblings";
+		List<Cue> cues = List.of(new Cue(SIBLING_OF, null, "siblings", "any"),
+				new Cue(PARENT_OF, null, "parents", "subject"));
+		List<Bound> bound = Query.bind(text, cues, mentions(text, ANNA), List.of(ANNA));
+		assertEquals(2, bound.size());
+		assertTrue(bound.stream().allMatch(b -> b.subjects().equals(List.of(ANNA))), bound.toString());
+		assertTrue(bound.stream().allMatch(b -> b.others().isEmpty()), "she is nobody's constraint: " + bound);
+	}
+
+	@Test
+	void aWordAtTheStartBindsThroughOf() {
+		String text = "family of Anna";
+		List<Bound> bound = Query.bind(text, List.of(new Cue(PARENT_OF, null, "family", "any", "family")),
+				mentions(text, ANNA), List.of(ANNA));
+		assertEquals(List.of(ANNA), bound.getFirst().subjects());
+		assertEquals(0, bound.getFirst().start());
+	}
+
+	@Test
+	void aListOfRelationWordsSharesItsSubjectDownTheList() {
+		String text = "Anna's parents, siblings and cousins";
+		List<Cue> cues = List.of(new Cue(SIBLING_OF, null, "siblings", "any"),
+				new Cue(PARENT_OF, null, "parents", "subject"),
+				new Cue(predicate("cousin_of"), null, "cousins", "any"));
+		List<Bound> bound = Query.bind(text, cues, mentions(text, ANNA), List.of(ANNA));
+		assertEquals(3, bound.size());
+		assertTrue(bound.stream().allMatch(b -> b.subjects().equals(List.of(ANNA))), "all Anna's: " + bound);
+	}
+
 }

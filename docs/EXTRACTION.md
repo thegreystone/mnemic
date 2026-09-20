@@ -166,9 +166,9 @@ reasons over these properties rather than over the name:
 | `functional`            | consistency check — one current object per subject, or per (subject, `scope`) when `functional_scope` is `"scope"` |
 | `symmetric`             | the fact is stored once from either side and probed from both; a qualifier is matched by family (brother/sister/sibling) |
 | `volatility`            | the staleness annotation in recall and the `review` list: `high` facts are called *likely changed* after 180 days without confirmation, `medium` after 365, `low` never. It never touches confidence or ranking |
-| `lasting`               | a participant's death does not end the relation: the deceased's open facts under a lasting predicate stay open, and a derived row on a lasting predicate outlives a base fact a death ended (`inspect` names it under `outlived`). Kin by blood or by record are lasting; a marriage, a job, a home are not |
+| `lasting`               | the end of a participant (a death, a dissolved organization) does not end the relation: the open facts the ended entity stands in stay open under a lasting predicate, and a derived row on a lasting predicate outlives a base fact such an end closed (`inspect` names it under `outlived`). Kin by blood or by record and literal-valued attributes are lasting by default; a marriage, a job, a home are not. Left unsaid, the store assumes and says so where the assumption acts: in the definition's reply and on a closed fact, with the correction that changes it |
 | `lexicon`               | query analysis — terms that name the predicate ("work", "employer" → `works_at`)                        |
-| `inverse_lexicon`       | terms that name the object side ("children" → `parent_of` with the spotted entity as subject); a definition cannot set it, only `correct` with `predicate` can |
+| `inverse_lexicon`       | terms that name the object side ("children" → `parent_of` with the spotted entity as subject); set in a definition or by `correct` |
 | `qualifiers`            | the vocabulary of `qualifier` values; a term in a query is a cue with that qualifier ("mother")            |
 | `render`                | the template indexed for lexical and semantic recall: `{subject}`, `{object}`, `{scope}`, `{qualifier\|default}`, and `[[ … ]]` segments that vanish when a placeholder inside them is empty |
 | `aliases`               | predicate resolution — other names that mean the same thing                                               |
@@ -790,7 +790,14 @@ cue), or `unresolved`, then the channels that had their say, then `via:`
 (the `located_in` chain from the matched facts' objects, up to two hops, so
 "which canton" is answered from structure), `bounds:` (the negations,
 restrictions, and closures on the subject under the predicate), and
-`events:`. When the probe resolved an entity and a predicate but found **no
+`events:`. A matched verdict lists its facts with their ids, up to twelve,
+and counts the rest: a fact that matched is the answer, whatever the budget
+leaves for the observations. A question that names several relations, each
+with its subject ("Mattias's parents and Anna's siblings"), gets one verdict
+per relation: the first in the question that answered leads, the others
+follow on `also:` lines. A group word ("family") asks every predicate in the
+group at once; the members under which nothing was found are named together
+on one line. When the probe resolved an entity and a predicate but found **no
 fact**, the block says so explicitly:
 
 ```text

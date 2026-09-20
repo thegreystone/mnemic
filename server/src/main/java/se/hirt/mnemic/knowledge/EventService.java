@@ -256,22 +256,26 @@ public final class EventService {
 			}
 			if (et.get().endsEntity()) {
 				tx.update("UPDATE entity SET existed_end = ? WHERE id = ?", b.start(), subject.id());
-				// The deceased's own open facts, and the symmetric ones they stand on either side of: a marriage
-				// stated from the other side ends with them too (K39). Another party's fact about them (an employment
-				// at a wound-up organization) is that party's own story and stays (S11). A lasting relation (a
-				// father stays a father) is not ended at all (K40).
+				// Every open fact the ended entity stands in, on either side: a marriage stated from the other side,
+				// an employment at an organization that was wound up (S11, K39). A lasting relation (a father stays a
+				// father, an attribute stays true) is not ended at all (K40).
 				for (Row r : tx.query("""
-						SELECT * FROM fact WHERE (subject_id = ? OR (object_id = ?
-						AND predicate IN (SELECT name FROM predicate WHERE symmetric = 1)))
-						AND predicate NOT IN (SELECT name FROM predicate WHERE lasting = 1)
+						SELECT * FROM fact WHERE (subject_id = ? OR object_id = ?)
 						AND status = 'current' AND valid_end IS NULL AND ended = 0""", subject.id(), subject.id())) {
 					Fact f = Fact.from(r);
-					if (startsAfter(f, b)) {
+					if (ledger.lasting(f.predicate()) || startsAfter(f, b)) {
 						continue;
 					}
 					ledger.close(tx, f, null, "entity_ended", type + " " + Bounds.show(b.start(), b.startPrecision()),
 							eventId, obs.id(), b.start(), b.startPrecision(), "current");
-					superseded.add(closedOut(f, eventId, b));
+					// Nothing said whether the relation outlives the person: the closure says it assumed not, and
+					// what to do if it should have.
+					Map<String, Object> out = closedOut(f, eventId, b);
+					if (!ledger.lastingStated(f.predicate())) {
+						out.put("note", "closed as not lasting, which nothing said; correct(\"pred:" + f.predicate()
+								+ "\", {\"lasting\": true}) keeps such facts open past the end of a participant");
+					}
+					superseded.add(out);
 				}
 			}
 			return null;

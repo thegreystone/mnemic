@@ -647,7 +647,9 @@ public final class Engine implements AutoCloseable {
 		if (replacement.containsKey("implies")) {
 			out.put("implies", knowledge.predicates().impliesOf(name));
 		}
-		if (replacement.containsKey("defined_as") || replacement.containsKey("implies")) {
+		// The derivations rest on the rules, the implications, and whether the relation outlives a death.
+		if (replacement.containsKey("defined_as") || replacement.containsKey("implies")
+				|| replacement.containsKey("lasting")) {
 			out.put("derived", derive().toMap());
 		}
 		return out;
@@ -714,19 +716,11 @@ public final class Engine implements AutoCloseable {
 		var after = knowledge.predicates().updateGroup(before.name(), replacement, reason);
 		var out = new LinkedHashMap<String, Object>();
 		out.put("group", after.name());
-		out.put("before", groupMap(before));
-		out.put("after", groupMap(after));
+		out.put("before", before.toMap());
+		out.put("after", after.toMap());
 		out.put("members", knowledge.predicates().membersOf(after.name()).stream().map(Predicate::name).toList());
 		out.put("changes", knowledge.predicates().groupChanges(after.name()));
 		return out;
-	}
-
-	private static Map<String, Object> groupMap(PredicateRegistry.Group g) {
-		var m = new LinkedHashMap<String, Object>();
-		m.put("description", g.description());
-		m.put("lexicon", g.lexicon());
-		m.put("groups", g.groups());
-		return m;
 	}
 
 	private static Map<String, Object> eventTypeMap(EventTypeRegistry.EventType t) {

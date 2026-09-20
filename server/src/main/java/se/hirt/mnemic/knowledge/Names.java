@@ -68,11 +68,24 @@ public final class Names {
 	/** Normalised word tokens, possessive {@code 's} removed. */
 	public static List<String> tokens(String s) {
 		var out = new ArrayList<String>();
-		var m = TOKEN.matcher(norm(s).replace("'s ", " ").replace("’s ", " ").replaceAll("['’]s$", ""));
+		var m = tokenMatcher(s);
 		while (m.find()) {
 			out.add(m.group());
 		}
 		return out;
+	}
+
+	/**
+	 * The matcher behind {@link #tokens}, over the same normalised text, so a caller can read where each token stands
+	 * and what lies between two of them (a comma, say); the offsets are into {@link #tokenised}.
+	 */
+	public static java.util.regex.Matcher tokenMatcher(String s) {
+		return TOKEN.matcher(tokenised(s));
+	}
+
+	/** The text as {@link #tokens} reads it: normalised, possessives removed, punctuation still in place. */
+	public static String tokenised(String s) {
+		return norm(s).replace("'s ", " ").replace("’s ", " ").replaceAll("['’]s$", "");
 	}
 
 	/** Content tokens: {@link #tokens} minus stopwords and single letters. */

@@ -159,7 +159,7 @@ questions, within the budget.
 | Class | Role |
 |---|---|
 | `EntityService` | entities and aliases: the owner, the resolution ladder, query-time spotting, merges |
-| `PredicateRegistry` | the seed vocabulary, caller definitions, resolution of proposed names, cues, corrections |
+| `PredicateRegistry` | the seed vocabulary, caller definitions, resolution of proposed names, cues (a group word cues every member), predicate groups, the lasting flag, corrections |
 | `EventTypeRegistry` | which event types open, close, supersede, or end an entity; caller definitions, corrections |
 | `EntityTypeRegistry` | the kinds of entity: synonyms, type words, nesting (a country is a place); caller definitions, corrections |
 | `Vocabulary` | what the registries share: JSON list columns, list-valued corrections, the change log (package-private) |
@@ -219,6 +219,9 @@ data home. `VectorStore` keeps vectors beside their rows and searches by scan; s
   (LM Studio, Ollama, OpenAI) providers.
 - **A predicate**: a definition in a proposal, or a seed entry in `PredicateRegistry.seed()`; German templates in
   `RENDERS_DE`.
+- **A predicate group**: `groups` in a predicate's definition or `correct(pred:x, {groups})` registers the group
+  from its first mention; `correct(group:x, {description, lexicon, groups})` says more; a seed group is an
+  entry in `PredicateRegistry.seedGroups()`, refreshed at start unless the owner regrouped a member.
 - **An event type or an entity type**: a definition in a proposal (`event_types`, `entity_types`), corrected
   through `correct`; or a seed entry in the registry's `seed()`. The three registries read their table once at
   start into hash maps and write through on every registration and correction, so the next start sees what this

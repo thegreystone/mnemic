@@ -38,6 +38,7 @@ import se.hirt.mnemic.TestHomes;
 import se.hirt.mnemic.knowledge.Fact;
 import se.hirt.mnemic.recall.RecallResult;
 
+import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -362,8 +363,15 @@ class KinshipTest {
 			Fact marriage = e.facts().factsOf(e.entities().byRef("Konrad Nyberg").orElseThrow().id()).stream()
 					.filter(f -> "spouse_of".equals(f.predicate())).findFirst().orElseThrow();
 			assertEquals("2021-01-01", marriage.validEnd(), "the marriage ended with him");
+			// A rebuild replays the log through the same rules.
+			e.rebuild();
+			assertEquals(
+					List.of("Gunilla Nyberg is Mattias Sandell's mother", "Konrad Nyberg is Mattias Sandell's father"),
+					renderings(e, "parent_of"), "replayed: a father stays a father");
+			assertEquals("2021-01-01", e.facts().factsOf(e.entities().byRef("Konrad Nyberg").orElseThrow().id())
+					.stream().filter(f -> "spouse_of".equals(f.predicate())).findFirst().orElseThrow().validEnd());
 			// A predicate of the store's own says it in its definition; without it, the deceased's relation ends with them.
-			remember(e, "Britt taught me the violin, and Sten coached me.", proposal()
+			RememberOutcome defs = remember(e, "Britt taught me the violin, and Sten coached me.", proposal()
 					.predicate(new PredicateDef("taught", "Subject taught object.", "person", "person", false, null,
 							false, null, "low", List.of("taught", "teacher"), null, List.of(), List.of(), null, null,
 							null, null, null, Boolean.TRUE))
@@ -373,7 +381,17 @@ class KinshipTest {
 					.fact("e2", "coaches", "self"));
 			assertTrue(e.predicates().get("taught").orElseThrow().lasting());
 			assertFalse(e.predicates().get("coaches").orElseThrow().lasting());
-			remember(e, "Britt died in 2022, and so did Sten.",
+			// The definition that said nothing about lasting is answered with what was assumed; the other is not.
+			List<Map<String, Object>> definitions = defs.applied().definitions();
+			assertTrue(
+					definitions.stream()
+							.anyMatch(d -> "coaches".equals(d.get("name"))
+									&& String.valueOf(d.get("inferred")).contains("assumed={lasting=false}")),
+					definitions.toString());
+			assertTrue(definitions.stream().noneMatch(d -> "taught".equals(d.get("name"))), definitions.toString());
+			assertTrue(e.predicates().get("taught").orElseThrow().lastingStated());
+			assertFalse(e.predicates().get("coaches").orElseThrow().lastingStated());
+			RememberOutcome deaths = remember(e, "Britt died in 2022, and so did Sten.",
 					proposal().entity("e1", "Britt Ek", "person").entity("e2", "Sten Alm", "person")
 							.event("ev1", "died", "2022", "e1").event("ev2", "died", "2022", "e2"));
 			assertEquals(List.of("Britt Ek taught Mattias Sandell"), renderings(e, "taught"),
@@ -381,9 +399,33 @@ class KinshipTest {
 			assertEquals(List.of("Sten Alm coaches Mattias Sandell (until 2022)"),
 					e.facts().factsOf(e.entities().owner().id()).stream().filter(f -> "coaches".equals(f.predicate()))
 							.map(Fact::rendering).toList());
-			// Correctable, and logged.
+			// The closure under the assumed predicate says so, with the way to change it; the seed's does not.
+			assertTrue(
+					deaths.applied().superseded().stream()
+							.anyMatch(m -> "coaches".equals(m.get("predicate")) && String.valueOf(m.get("note"))
+									.contains("correct(\"pred:coaches\", {\"lasting\": true})")),
+					deaths.applied().superseded().toString());
+			assertTrue(
+					deaths.applied().superseded().stream()
+							.noneMatch(m -> !"coaches".equals(m.get("predicate")) && m.containsKey("note")),
+					deaths.applied().superseded().toString());
+			// Correctable, and logged; from then on it is stated.
 			e.correctPredicate("coaches", Map.of("lasting", true), "a coach stays a coach");
 			assertTrue(e.predicates().get("coaches").orElseThrow().lasting());
+			assertTrue(e.predicates().get("coaches").orElseThrow().lastingStated());
+			// An attribute (a literal-valued predicate) is lasting unless the definition says otherwise.
+			remember(e, "Britt's blood type was A.",
+					proposal()
+							.predicate(new PredicateDef("blood_type_of", null, "person", "literal", true, null, false,
+									null, "low", List.of("blood type"), null, List.of(), List.of()))
+							.entity("e1", "Britt Ek", "person").fact("e1", "blood_type_of", "A"));
+			assertTrue(e.predicates().get("blood_type_of").orElseThrow().lasting(), "an attribute by default");
+			remember(e, "Britt died in 2023.",
+					proposal().entity("e1", "Britt Ek", "person").event("ev1", "died", "2023", "e1"));
+			assertTrue(
+					e.facts().factsOf(e.entities().byRef("Britt Ek").orElseThrow().id()).stream()
+							.filter(f -> "blood_type_of".equals(f.predicate())).allMatch(f -> f.validEnd() == null),
+					"her blood type did not change");
 		}
 	}
 
@@ -404,6 +446,14 @@ class KinshipTest {
 			// Her gender is not on record (a husband role says nothing about her), so the role reads neutrally.
 			assertEquals(List.of("Lena Berg is Mattias Sandell's step-parent (since 2015)"),
 					renderings(e, "step_parent_of"), "and the lasting relation outlives it");
+			// Not only symmetric ones: any open fact the deceased stands in, unless the predicate is lasting.
+			remember(e, "Konrad reports to Sven.", proposal().entity("e1", "Konrad Nyberg", "person")
+					.entity("e2", "Sven Alm", "person").fact("e1", "reports_to", "e2"));
+			remember(e, "Sven died in 2022.",
+					proposal().entity("e1", "Sven Alm", "person").event("ev1", "died", "2022", "e1"));
+			Fact reports = e.facts().factsOf(e.entities().byRef("Konrad Nyberg").orElseThrow().id()).stream()
+					.filter(f -> "reports_to".equals(f.predicate())).findFirst().orElseThrow();
+			assertEquals("2022-01-01", reports.validEnd(), "one does not report to the dead");
 		}
 	}
 
@@ -536,4 +586,75 @@ class KinshipTest {
 					.noneMatch(m -> "gender".equals(m.get("predicate"))), "nothing left to define");
 		}
 	}
+
+	@Test
+	@Scenario("K40")
+	void aLastingSymmetricRelationSurvivesADeathAndACorrectionStandsAcrossRestarts() {
+		Path home = TestHomes.fresh("k40-symmetric");
+		try (Engine e = TestHomes.engine(home)) {
+			remember(e, "Oskar is my brother.", proposal().entity("e1", "Oskar Nyberg", "person")
+					.fact(fact("e1", "sibling_of", "self", "brother", null, null, null, null, null, null)));
+			remember(e, "Oskar died in 2020.",
+					proposal().entity("e1", "Oskar Nyberg", "person").event("ev1", "died", "2020", "e1"));
+			assertEquals(List.of("Oskar Nyberg is Mattias Sandell's brother"), renderings(e, "sibling_of"),
+					"a brother stays a brother, whichever side he was stated from");
+			// The owner may decide otherwise for a seed predicate, and the seed does not undo it at the next start.
+			e.correctPredicate("parent_of", Map.of("lasting", false), "I want ends on record");
+			// A store that defined born_in itself before the seed knew it holds the same relation: claimed at start.
+			e.database().write(tx -> tx.update("UPDATE predicate SET seed = 0, lasting = 0 WHERE name = ?", "born_in"));
+		}
+		try (Engine e = TestHomes.engine(home)) {
+			assertFalse(e.predicates().get("parent_of").orElseThrow().lasting(), "the correction stands");
+			assertTrue(e.predicates().get("sibling_of").orElseThrow().lasting(), "the others keep the seed's flag");
+			assertTrue(e.predicates().get("born_in").orElseThrow().lasting(), "claimed by name and kind");
+		}
+	}
+
+	@Test
+	@Scenario("K40")
+	void changingLastingByCorrectionReDerives() {
+		try (Engine e = TestHomes.engine("k40-rederive")) {
+			parents(e);
+			remember(e, "Konrad married Lena in 2015.",
+					proposal().entity("e1", "Lena Berg", "person").entity("e2", "Konrad Nyberg", "person")
+							.fact(fact("e1", "spouse_of", "e2", "wife", null, "2015", null, null, null, null)));
+			remember(e, "Lena died in 2020.",
+					proposal().entity("e1", "Lena Berg", "person").event("ev1", "died", "2020", "e1"));
+			assertEquals(List.of("Lena Berg is Mattias Sandell's stepmother (since 2015)"),
+					renderings(e, "step_parent_of"));
+			Map<String, Object> ended = e.correctPredicate("step_parent_of", Map.of("lasting", false),
+					"a step-parent is a former one after a death");
+			assertTrue(ended.containsKey("derived"), "the correction re-derives: " + ended);
+			assertEquals(List.of("Lena Berg is Mattias Sandell's stepmother (2015 \u2013 2020)"),
+					renderings(e, "step_parent_of"));
+			e.correctPredicate("step_parent_of", Map.of("lasting", true), "no, a late stepmother is a stepmother");
+			assertEquals(List.of("Lena Berg is Mattias Sandell's stepmother (since 2015)"),
+					renderings(e, "step_parent_of"));
+		}
+	}
+
+	@Test
+	@Scenario("K38")
+	void onlyTheFirstParticipantOfADeathDied() {
+		try (Engine e = TestHomes.engine("k38-witness")) {
+			parents(e);
+			remember(e, "Lena died on 4 March 2020, Konrad at her side.", proposal().entity("e1", "Lena Berg", "person")
+					.entity("e2", "Konrad Nyberg", "person").event("ev1", "died", "2020-03-04", "e1", "e2"));
+			remember(e, "Konrad was married to Vera from 2016 until 4 March 2020.",
+					proposal().entity("e1", "Vera Holm", "person").entity("e2", "Konrad Nyberg", "person")
+							.fact(fact("e1", "spouse_of", "e2", "wife", null, "2016", "2020-03-04", null, null, null)));
+			assertTrue(
+					renderings(e, "step_parent_of")
+							.contains("Vera Holm is Mattias Sandell's stepmother (2016 \u2013 2020-03-04)"),
+					"Konrad did not die that day, he was there: " + renderings(e, "step_parent_of"));
+			// A store from before participants kept their order: the one whose record ended is still the one.
+			e.database().write(tx -> tx.update("UPDATE event_participant SET position = NULL"));
+			e.deriver().derive();
+			assertTrue(
+					renderings(e, "step_parent_of")
+							.contains("Vera Holm is Mattias Sandell's stepmother (2016 – 2020-03-04)"),
+					renderings(e, "step_parent_of").toString());
+		}
+	}
+
 }

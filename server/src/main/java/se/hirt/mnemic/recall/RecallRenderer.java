@@ -137,9 +137,10 @@ final class RecallRenderer {
 					String.join("; ", s.chain().stream().map(f -> f.rendering() + " [" + f.ref() + "]").toList()))
 					.append('\n');
 		}
-		if (!s.bounds().isEmpty()) {
-			sb.append("bounds: ").append(
-					String.join("; ", s.bounds().stream().map(f -> f.rendering() + " [" + f.ref() + "]").toList()))
+		List<Fact> bounds = s.all().stream().flatMap(v -> v.bounds().stream()).distinct().toList();
+		if (!bounds.isEmpty()) {
+			sb.append("bounds: ")
+					.append(String.join("; ", bounds.stream().map(f -> f.rendering() + " [" + f.ref() + "]").toList()))
 					.append('\n');
 		}
 		if (!events.isEmpty()) {

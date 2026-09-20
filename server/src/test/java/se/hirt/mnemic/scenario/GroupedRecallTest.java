@@ -254,15 +254,14 @@ class GroupedRecallTest {
 			assertEquals("pets", r.structured().group(), r.text());
 			assertEquals("has_pet", r.structured().predicate());
 			// More words, a description, and words in another language, all logged.
-			Map<String, Object> corrected = e.correctGroup("pets",
-					Map.of("lexicon", List.of("pets", "pet", "animals"), "description", "The animals of the house.",
-							"renders", Map.of("de", Map.of("lexicon", List.of("haustiere", "tiere")))),
+			Map<String, Object> corrected = e.correctGroup("pets", Map.of("lexicon",
+					List.of("pets", "pet", "animals", "haustiere"), "description", "The animals of the house."),
 					"more words");
 			assertEquals(List.of("has_pet"), corrected.get("members"));
 			assertEquals("pets", recall(e, "Mattias's animals").structured().group());
-			assertEquals(List.of("haustiere", "tiere"), e.predicates().groupLexiconIn("pets", "de"));
+			assertEquals("pets", recall(e, "Mattias's haustiere").structured().group(), "any language, one list");
 			List<?> changes = (List<?>) corrected.get("changes");
-			assertEquals(3, changes.size(), changes.toString());
+			assertEquals(2, changes.size(), changes.toString());
 			// Groups nest: a word for the outer group reaches the inner group's predicates, and a seed predicate
 			// joins a group by correction.
 			e.correctGroup("pets", Map.of("groups", List.of("household")), "pets are part of the household");
@@ -319,4 +318,167 @@ class GroupedRecallTest {
 			assertFalse(members.contains("partner_of"), "a relation of another kind is not claimed: " + members);
 		}
 	}
+
+	@Test
+	@Scenario("F24")
+	void aGroupWordInsideAnEntityNameAsksNothingAboutTheGroup() {
+		try (Engine e = TestHomes.engine("f24-name-not-cue")) {
+			family(e);
+			remember(e, "I work at Family Office AB.",
+					proposal().entity("e1", "Family Office AB", "organization").fact("self", "works_at", "e1"));
+			RecallResult r = recall(e, "where is Family Office AB");
+			assertNull(r.structured().group(), "the word is the organization's name: " + r.text());
+			assertTrue(r.structured().also().isEmpty(), r.text());
+			assertFalse(r.text().contains("nothing under family"), r.text());
+			// A group left with no members cues nothing.
+			remember(e, "Our dog is Rufus.",
+					proposal().predicate(new PredicateDef("has_pet", null, "person", "thing", false, null, false, null,
+							null, List.of(), null, List.of(), List.of(), null, null, null, null, List.of("pets")))
+							.entity("e1", "Rufus", "thing").fact("self", "has_pet", "e1"));
+			assertEquals("pets", recall(e, "Mattias's pets").structured().group());
+			e.correctPredicate("has_pet", Map.of("groups", List.of()), "not a pet after all");
+			RecallResult none = recall(e, "Mattias's pets");
+			assertNull(none.structured().group(), none.text());
+			assertEquals("entity", none.structured().state(), "no relation word left: " + none.text());
+		}
+	}
+
+	@Test
+	@Scenario("J12")
+	void aGroupCannotContainItselfThroughOthers() {
+		try (Engine e = TestHomes.engine("j12-cycle")) {
+			remember(e, "Our dog is Rufus.",
+					proposal().predicate(new PredicateDef("has_pet", null, "person", "thing", false, null, false, null,
+							null, List.of(), null, List.of(), List.of(), null, null, null, null, List.of("pets")))
+							.entity("e1", "Rufus", "thing").fact("self", "has_pet", "e1"));
+			e.correctGroup("pets", Map.of("groups", List.of("household")), "part of the household");
+			e.correctGroup("household", Map.of("groups", List.of("home")), "part of the home");
+			assertEquals(List.of("has_pet"), e.predicates().membersOf("home").stream().map(Predicate::name).toList(),
+					"two levels down");
+			MnemicException cycle = assertThrows(MnemicException.class,
+					() -> e.correctGroup("home", Map.of("groups", List.of("pets")), "loop"));
+			assertTrue(cycle.getMessage().contains("would contain itself"), cycle.getMessage());
+			assertThrows(MnemicException.class, () -> e.correctGroup("nope", Map.of("lexicon", List.of("x")), "?"),
+					"an unknown group is not corrected into being");
+		}
+	}
+
+	@Test
+	@Scenario("F22")
+	void oneRelationAskedFromBothSidesAnswersBoth() {
+		try (Engine e = TestHomes.engine("f22-both-sides")) {
+			family(e);
+			// parent_of twice: "children" puts Konrad on the parent side, "parents" puts Mattias on the child side.
+			RecallResult r = recall(e, "Konrad's children and Mattias's parents");
+			List<Structured> parentOf = r.structured().all().stream().filter(v -> "parent_of".equals(v.predicate()))
+					.toList();
+			assertEquals(2, parentOf.size(), r.text());
+			Structured children = parentOf.stream().filter(v -> "Konrad Nyberg".equals(v.entityName())).findFirst()
+					.orElseThrow(() -> new AssertionError(r.text()));
+			Structured parents = parentOf.stream().filter(v -> "Mattias Sandell".equals(v.entityName())).findFirst()
+					.orElseThrow(() -> new AssertionError(r.text()));
+			assertEquals(List.of("Konrad Nyberg is Mattias Sandell's father"), renderings(children));
+			assertEquals(2, parents.facts().size(), r.text());
+			assertTrue(r.text().contains("Gunilla Nyberg is Mattias Sandell's mother"),
+					"the keys are not filtered " + "to one side when the question names both: " + r.text());
+		}
+	}
+
+	@Test
+	@Scenario("F21")
+	void aVerdictLargerThanTheBudgetStillRenders() {
+		try (Engine e = TestHomes.engine("f21-over-budget")) {
+			family(e);
+			RecallResult r = e.recall().recall("Mattias's family", null, 60, 10);
+			assertTrue(r.text().startsWith("recall: "), r.text());
+			assertTrue(r.text().contains("structured: matched Mattias Sandell · parent_of (via family)"), r.text());
+			assertTrue(r.hits().isEmpty(), "nothing else fits: " + r.text());
+			assertTrue(r.tokensUsed() > 60, "the verdict is charged even past the budget: " + r.tokensUsed());
+			assertTrue(r.truncated());
+		}
+	}
+
+	@Test
+	@Scenario("F24")
+	void aPredicateWordThatIsAlsoAGroupWordIsAskedByItsOwnWordBesideTheGroup() {
+		try (Engine e = TestHomes.engine("f24-word-clash")) {
+			family(e);
+			remember(e, "Dr Ek is our family doctor.",
+					proposal().predicate(new PredicateDef("family_doctor_of", "Subject is the family doctor of object.",
+							"person", "person", false, null, false, null, "medium", List.of("family doctor", "family"),
+							"{subject} is {object}'s family doctor", List.of(), List.of()))
+							.entity("e1", "Dr Ek", "person").fact("e1", "family_doctor_of", "self"));
+			RecallResult r = recall(e, "Mattias's family");
+			List<String> answered = r.structured().all().stream().filter(Structured::answered)
+					.map(Structured::predicate).toList();
+			assertTrue(answered.contains("family_doctor_of"), "its own word: " + r.text());
+			assertTrue(answered.contains("parent_of") && answered.contains("sibling_of"), "and the group: " + r.text());
+			assertEquals(1, r.structured().all().stream().filter(v -> "family_doctor_of".equals(v.predicate())).count(),
+					"once, not again through the group");
+		}
+	}
+
+	@Test
+	@Scenario("J12")
+	void aGroupOfSeveralWordsIsCuedByThePhrase() {
+		try (Engine e = TestHomes.engine("j12-phrase")) {
+			family(e);
+			remember(e, "My godmother is Britt.",
+					proposal()
+							.predicate(new PredicateDef("godparent_of", null, "person", "person", false, null, false,
+									null, null, List.of("godmother", "godfather", "godparent"), null, List.of(),
+									List.of(), null, null, null, null, List.of("close family")))
+							.entity("e1", "Britt Ek", "person").fact("e1", "godparent_of", "self"));
+			PredicateRegistry.Group close = e.predicates().group("close family").orElseThrow();
+			assertEquals("close_family", close.name());
+			assertEquals(List.of("close family"), close.lexicon(), "the phrase, not its words");
+			assertEquals("close_family", recall(e, "Mattias's close family").structured().group());
+			RecallResult family = recall(e, "Mattias's family");
+			assertTrue(family.structured().all().stream().noneMatch(v -> "close_family".equals(v.group())),
+					"\"family\" alone does not reach it: " + family.text());
+			// A group cannot belong to itself, directly either.
+			assertThrows(MnemicException.class,
+					() -> e.correctGroup("close family", Map.of("groups", List.of("close_family")), "loop"));
+		}
+	}
+
+	@Test
+	@Scenario("F22")
+	void aBoundOnASecondRelationIsShown() {
+		try (Engine e = TestHomes.engine("f22-second-bounds")) {
+			family(e);
+			remember(e, "Bo Berg is not my cousin.",
+					proposal().entity("e1", "Bo Berg", "person").fact(new se.hirt.mnemic.proposal.Proposal.FactRef(
+							"self", "cousin_of", "e1", null, null, null, null, null, null, null, Boolean.TRUE, null)));
+			RecallResult r = recall(e, "Mattias's parents and cousins");
+			assertEquals("parent_of", r.structured().predicate(), r.text());
+			Structured cousins = also(r, "cousin_of");
+			assertNotNull(cousins, r.text());
+			assertFalse(cousins.bounds().isEmpty(), "the negation is a bound on the second relation: " + r.text());
+			assertTrue(r.text().contains("bounds: ") && r.text().contains("Bo Berg"),
+					"and the block shows it: " + r.text());
+		}
+	}
+
+	@Test
+	@Scenario("J13")
+	void aDefinitionNamesTheWordsForTheObjectsSide() {
+		try (Engine e = TestHomes.engine("j13-inverse")) {
+			remember(e, "Dr Ek treats Bosse.", proposal()
+					.predicate(new PredicateDef("treated_by", "Subject is a patient of object.", "person", "person",
+							false, null, false, null, "medium", List.of("treated by", "patient"), null, List.of(),
+							List.of(), null, null, null, null, null, null, List.of("doctor", "physician")))
+					.entity("e1", "Bosse Berg", "person").entity("e2", "Dr Ek", "person")
+					.fact("e1", "treated_by", "e2"));
+			assertEquals(List.of("doctor", "physician"),
+					e.predicates().get("treated_by").orElseThrow().inverseLexicon());
+			RecallResult r = recall(e, "Bosse's doctor");
+			assertEquals("matched", r.structured().state(), r.text());
+			assertEquals("Bosse Berg", r.structured().entityName());
+			assertEquals(List.of("Bosse Berg treated by Dr Ek"), renderings(r.structured()));
+			RecallResult patient = recall(e, "Dr Ek's patient");
+			assertEquals("matched", patient.structured().state(), patient.text());
+		}
+	}
+
 }

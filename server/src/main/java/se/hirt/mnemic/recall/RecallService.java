@@ -231,6 +231,34 @@ public final class RecallService {
 		return "any";
 	}
 
+	/**
+	 * Whether a key under a cued predicate stands the way some cue on it asks: for each cue on the predicate, the fact
+	 * has that cue's subject (or, when the cue binds nobody, any spotted entity) on the side the cue names. A question
+	 * that names both sides ("Konrad's children and Mattias's parents") admits each side for its own subject and no
+	 * more.
+	 */
+	private static boolean keyStandsAsAsked(Fact f, Query q) {
+		boolean cued = false;
+		for (Query.Bound b : q.bound()) {
+			if (!b.cue().predicate().name().equals(f.predicate())) {
+				continue;
+			}
+			cued = true;
+			if ("any".equals(b.cue().direction())) {
+				return true;
+			}
+			List<Entity> subjects = b.hasSubject() ? b.subjects() : q.spotted();
+			for (Entity e : subjects) {
+				boolean isSubject = f.subjectId() == e.id();
+				boolean isObject = f.objectId() != null && f.objectId() == e.id();
+				if ("subject".equals(b.cue().direction()) ? isSubject : isObject) {
+					return true;
+				}
+			}
+		}
+		return !cued;
+	}
+
 	/** Channel 1: the structured verdicts' facts rank their observations and anchor them, the primary one first. */
 	private void structuredChannel(Structured primary, Query q, Gates g, Channels ch) {
 		for (Structured s : primary.all()) {
@@ -296,8 +324,7 @@ public final class RecallService {
 			}
 			// The keys obey the direction the verdict applied: under "Mattias's father" a rendering with Mattias on
 			// the wrong side, or about someone else's mother, is out.
-			String direction = directionOf(q, f.predicate());
-			if (!"any".equals(direction) && !rightWay(f, q, direction)) {
+			if (!keyStandsAsAsked(f, q)) {
 				continue;
 			}
 			ch.rankAndAnchor(ch.keys, f, facts.observationsOf(f.id()));
@@ -316,17 +343,6 @@ public final class RecallService {
 				}
 			}
 		}
-	}
-
-	private static boolean rightWay(Fact f, Query q, String cueDirection) {
-		for (Entity e : q.spotted()) {
-			boolean isSubject = f.subjectId() == e.id();
-			boolean isObject = f.objectId() != null && f.objectId() == e.id();
-			if ("subject".equals(cueDirection) ? isSubject : isObject) {
-				return true;
-			}
-		}
-		return false;
 	}
 
 	/**
@@ -534,6 +550,8 @@ public final class RecallService {
 		Ranking r, Channels ch, Query q, Structured s, int maxTokens, int limit, boolean includeHistory) {
 		var hits = new ArrayList<Hit>();
 		// The verdicts carry their facts, which the block shows before any observation: they are paid for first.
+		// Under a hit the same fact appears again, with its annotations (state, confidence, belief, when it was
+		// confirmed), which the verdict line does not carry.
 		for (Structured v : s.all()) {
 			for (Fact f : RecallRenderer.verdictFacts(v)) {
 				r.used += tokens.estimate(f.rendering()) + 8;

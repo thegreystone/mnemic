@@ -79,12 +79,29 @@ public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<Strin
 	 * in the cue's stretch of the question, from its subject up to the next cue's, the subjects themselves left out;
 	 * {@code start} and {@code end} are the cue word's token positions. A word after "and" with no name of its own
 	 * shares the subject before it ("Anna's parents and siblings"); a word the question uses twice is bound at each
-	 * occurrence that has a subject.
+	 * occurrence that has a subject; a word inside an entity's name is not a cue at all.
 	 */
 	public record Bound(Cue cue, List<Entity> subjects, List<Entity> others, int start, int end) {
 		public boolean hasSubject() {
 			return !subjects.isEmpty();
 		}
+	}
+
+	/**
+	 * Whether a comma stands between token {@code index - 1} and token {@code index} of the text: "parents, siblings"
+	 * lists two relations of one subject, "children born" does not. The tokens drop punctuation, so the text is read.
+	 */
+	static boolean commaBefore(String text, int index) {
+		String read = Names.tokenised(text);
+		Matcher m = Names.tokenMatcher(text);
+		int end = -1;
+		for (int i = 0; m.find(); i++) {
+			if (i == index) {
+				return end >= 0 && read.substring(end, m.start()).contains(",");
+			}
+			end = m.end();
+		}
+		return false;
 	}
 
 	/** Words that put the possessor after the cue word: "the father of Anna", "Vater von Anna". */
@@ -166,9 +183,20 @@ public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<Strin
 				if (!tokens.subList(i, i + term.size()).equals(term)) {
 					continue;
 				}
+				// A predicate's own word is taken once; the members of a group share theirs, and a group word may
+				// stand on a word a predicate also owns ("family" for the family doctor and for the kin alike).
 				boolean free = true;
 				for (int k = i; k < i + term.size(); k++) {
-					if (takenBy[k] != null && (takenBy[k].isEmpty() || !takenBy[k].equals(owner))) {
+					boolean blocked = takenBy[k] != null
+							&& (owner.isEmpty() || (!takenBy[k].isEmpty() && !takenBy[k].equals(owner)));
+					if (blocked) {
+						free = false;
+						break;
+					}
+				}
+				// A word inside an entity's name ("Family Office AB") is that name, not a relation asked about.
+				for (Mention m : mentions) {
+					if (m.start() <= i && m.end() >= i + term.size()) {
 						free = false;
 						break;
 					}
@@ -177,7 +205,9 @@ public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<Strin
 					continue;
 				}
 				for (int k = i; k < i + term.size(); k++) {
-					takenBy[k] = owner;
+					if (takenBy[k] == null || owner.isEmpty()) {
+						takenBy[k] = owner;
+					}
 				}
 				placed.add(new Object[] {c, i, i + term.size()});
 			}
@@ -207,15 +237,25 @@ public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<Strin
 			subjects.add(List.copyOf(before.isEmpty() ? after : before));
 			anchors[p] = before.isEmpty() ? start : beforeStart;
 		}
-		// "Malin's parents and siblings": a word after "and" with no name of its own shares the subject of the cue
-		// right before it, when nothing but the "and" stands between them.
+		// "Malin's parents and siblings", "Anna's parents, siblings and cousins": a word with no name of its own that
+		// follows another relation word after "and" or a comma shares that word's subject, down the whole list. In
+		// the question's order, so a subject passes along it. "Children born" is no list: nothing joins the two.
+		var byStart = new ArrayList<Integer>();
 		for (int p = 0; p < placed.size(); p++) {
+			byStart.add(p);
+		}
+		byStart.sort((a, b) -> Integer.compare((int) placed.get(a)[1], (int) placed.get(b)[1]));
+		for (int p : byStart) {
 			int start = (int) placed.get(p)[1];
-			if (!subjects.get(p).isEmpty() || start < 2 || !AND.contains(tokens.get(start - 1))) {
+			if (!subjects.get(p).isEmpty() || start < 1) {
+				continue;
+			}
+			int previousEnd = AND.contains(tokens.get(start - 1)) ? start - 1 : commaBefore(text, start) ? start : -1;
+			if (previousEnd < 0) {
 				continue;
 			}
 			for (int o = 0; o < placed.size(); o++) {
-				if ((int) placed.get(o)[2] == start - 1 && !subjects.get(o).isEmpty()) {
+				if ((int) placed.get(o)[2] == previousEnd && !subjects.get(o).isEmpty()) {
 					subjects.set(p, subjects.get(o));
 					break;
 				}

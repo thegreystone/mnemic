@@ -108,6 +108,16 @@ final class FactLedger {
 		return predicates.get(predicate).map(Predicate::symmetric).orElse(false);
 	}
 
+	/** Whether a participant's death leaves the relation standing. */
+	boolean lasting(String predicate) {
+		return predicates.get(predicate).map(Predicate::lasting).orElse(false);
+	}
+
+	/** Whether anybody said so, or the store assumed it. */
+	boolean lastingStated(String predicate) {
+		return predicates.get(predicate).map(Predicate::lastingStated).orElse(true);
+	}
+
 	/**
 	 * A fact functional per scope (a role at an organization) cannot outlive the subject's relation to that scope: when
 	 * {@code works_at(s, o)} ends, every open fact of {@code s} scoped to {@code o} ends with it, at the same date,

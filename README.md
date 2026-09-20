@@ -1,13 +1,19 @@
 # Mnemic
 
-A memory for your AI assistant that lasts. Tell your assistant something once, and every later conversation,
-in any tool that supports it, can build on it: who someone is, what you decided, where you worked in 2015,
-what has changed since. Everything stays in one file on your own machine.
+A persistent, local memory that all your AI assistants share. Tell one of them something once, and every later
+conversation, in Claude Code, Claude Desktop, or any other tool that speaks MCP, can build on it: who someone
+is, what you decided, where you worked in 2015, what has changed since. Everything stays in one file on your
+own machine.
 
 Mnemic is an MCP server, the open standard that assistants such as Claude Desktop and Claude Code use to reach
 tools. You do not talk to Mnemic. You talk to your assistant, and it remembers and recalls on your behalf.
 
 ## What it does for you
+
+**It is one memory for every assistant you use.** The assistant in your terminal, the one on your desktop, and
+the one in your editor each connect to the same Mnemic and the same file, so what you tell one of them the
+others know, and switching tools never means starting over. Nothing about the memory belongs to any one
+vendor: it is an MCP server, and any client that speaks MCP can use it.
 
 **It remembers what you said, in your words.** Every entry keeps the exact text, where it came from, and
 when. Nothing is paraphrased away. The structured reading the assistant makes of it, "Alice works at
@@ -58,16 +64,17 @@ assistant at the one it should use.
 Download the binary for your platform from the releases page, or build one yourself
 ([docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)):
 
-| Platform | File |
-|---|---|
-| Linux x86_64 | `mnemic-<version>-linux-x86_64` |
-| Linux ARM64 | `mnemic-<version>-linux-aarch64` |
-| macOS Apple silicon | `mnemic-<version>-macos-aarch64` |
-| Windows x86_64 | `mnemic-<version>-windows-x86_64.exe` |
-| any, with a JDK 25 | `mnemic-server-<version>-runner.jar` |
+| Platform            | File                                  |
+|---------------------|---------------------------------------|
+| Linux x86_64        | `mnemic-<version>-linux-x86_64`       |
+| Linux ARM64         | `mnemic-<version>-linux-aarch64`      |
+| macOS Apple silicon | `mnemic-<version>-macos-aarch64`      |
+| Windows x86_64      | `mnemic-<version>-windows-x86_64.exe` |
+| any, with a JDK 25  | `mnemic-server-<version>-runner.jar`  |
 
 **Claude Desktop users:** the simplest install is the MCP Bundle, `mnemic-<version>-macos-aarch64.mcpb` or
-`mnemic-<version>-windows-x86_64.mcpb`, from the same releases page; see [Claude Desktop](#claude-desktop-and-other-json-configured-clients).
+`mnemic-<version>-windows-x86_64.mcpb`, from the same releases page;
+see [Claude Desktop](#claude-desktop-and-other-json-configured-clients).
 
 Put the binary somewhere stable and, on Linux or macOS, make it executable. It starts in well under a second
 and needs nothing else installed. The macOS binary is signed and notarized, so Gatekeeper accepts it as
@@ -79,25 +86,31 @@ Mnemic keeps its memory in a **data home**, a folder holding `mnemic.db` and a l
 in your home directory. Keep the binary and the data home apart: one installed binary can serve several data
 homes, and each assistant only needs to know which one it is meant to use.
 
+**One memory, every assistant.** To share a memory, register the same binary with the same `MNEMIC_HOME` (and
+the same `MNEMIC_OWNER`) in each client; the sections below show the form each one takes. Two assistants may
+have the memory open at the same time: the file is SQLite in write-ahead mode, every change is one short
+transaction, and the language model for recall by meaning is downloaded once for the whole machine. To keep
+memories apart instead, give each assistant its own data home.
+
 ## Configure
 
 Everything is set through environment variables in the assistant's configuration. Three matter:
 
-| Variable | What it does |
-|---|---|
-| `MNEMIC_HOME` | The data home. Default: `~/.mnemic`. |
-| `MNEMIC_OWNER` | Your name, so that "I", "me", and "my" mean you. |
+| Variable          | What it does                                                                                                                                                                                            |
+|-------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `MNEMIC_HOME`     | The data home. Default: `~/.mnemic`.                                                                                                                                                                    |
+| `MNEMIC_OWNER`    | Your name, so that "I", "me", and "my" mean you.                                                                                                                                                        |
 | `MNEMIC_LANGUAGE` | The language facts are written in, `en` (default) or `de`. What you say is kept in whatever language you said it; the facts read from it are rendered in this one, and changing it re-renders them all. |
 
 Optional, for the other names you go by, so that a commit author, an issue mention, or a nickname is also
 you:
 
-| Variable | Example |
-|---|---|
+| Variable               | Example                                         |
+|------------------------|-------------------------------------------------|
 | `MNEMIC_OWNER_ALIASES` | `Ali,Example` (nicknames, or the surname alone) |
-| `MNEMIC_OWNER_EMAILS` | `alice@example.com,alice@work.example` |
-| `MNEMIC_OWNER_GITHUB` | `alice-example` |
-| `MNEMIC_OWNER_HANDLES` | `@alice_example` |
+| `MNEMIC_OWNER_EMAILS`  | `alice@example.com,alice@work.example`          |
+| `MNEMIC_OWNER_GITHUB`  | `alice-example`                                 |
+| `MNEMIC_OWNER_HANDLES` | `@alice_example`                                |
 
 If the memory will be used for code work, at least the GitHub handle and the addresses your commits carry are
 worth setting. `status` lists what is configured.
@@ -137,7 +150,16 @@ For other JSON-configured clients, or to point Claude Desktop at a binary you in
 ### The jar instead of a binary
 
 ```json
-{"command": "java", "args": ["-jar", "/opt/mnemic/mnemic-server-<version>-runner.jar"], "env": {"MNEMIC_OWNER": "Alice Example"}}
+{
+  "command": "java",
+  "args": [
+    "-jar",
+    "/opt/mnemic/mnemic-server-<version>-runner.jar"
+  ],
+  "env": {
+    "MNEMIC_OWNER": "Alice Example"
+  }
+}
 ```
 
 Restart the client and ask the assistant to check Mnemic's status. It should report the data home, the schema
@@ -231,12 +253,12 @@ lists every recall channel and whether it answers, the download per file with a 
 `ready`, or `failed` with the reason. The model runs inside Mnemic on the CPU, a few milliseconds per
 sentence; nothing you say is sent anywhere.
 
-| Variable | What it does |
-|---|---|
-| `MNEMIC_EMBED` | `auto` (default) or `off` to run without recall by meaning. |
-| `MNEMIC_MODELS_DIR` | Where fetched models live. Default: `~/.mnemic/models`. |
-| `MNEMIC_EMBED_MODEL_URL` | A mirror for the model download (a URL or a `file:` URL), for machines without internet access. The hash stays the same. |
-| `MNEMIC_ORT_LIBRARY`, `MNEMIC_EMBED_MODEL` | A library and a model folder you provide; no download. |
+| Variable                                   | What it does                                                                                                             |
+|--------------------------------------------|--------------------------------------------------------------------------------------------------------------------------|
+| `MNEMIC_EMBED`                             | `auto` (default) or `off` to run without recall by meaning.                                                              |
+| `MNEMIC_MODELS_DIR`                        | Where fetched models live. Default: `~/.mnemic/models`.                                                                  |
+| `MNEMIC_EMBED_MODEL_URL`                   | A mirror for the model download (a URL or a `file:` URL), for machines without internet access. The hash stays the same. |
+| `MNEMIC_ORT_LIBRARY`, `MNEMIC_EMBED_MODEL` | A library and a model folder you provide; no download.                                                                   |
 
 Measured on the LongMemEval benchmark, recall by meaning adds four to eight points of recall over words and
 structure alone, most of it on questions that draw on several conversations

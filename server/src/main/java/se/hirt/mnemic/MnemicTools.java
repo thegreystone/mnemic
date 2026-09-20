@@ -733,11 +733,7 @@ public class MnemicTools {
 		var m = new LinkedHashMap<String, Object>();
 		m.put("id", "group:" + g.name());
 		m.put("name", g.name());
-		m.put("description", g.description());
-		m.put("lexicon", g.lexicon());
-		if (!g.groups().isEmpty()) {
-			m.put("groups", g.groups());
-		}
+		m.putAll(g.toMap());
 		m.put("members", engine.predicates().membersOf(g.name()).stream().map(Predicate::name).toList());
 		m.put("origin", g.seed() ? "seed" : "defined");
 		return m;
@@ -790,8 +786,9 @@ public class MnemicTools {
 		}
 		m.put("symmetric", p.symmetric());
 		m.put("volatility", p.volatility());
-		if (p.lasting()) {
-			m.put("lasting", true);
+		m.put("lasting", p.lasting());
+		if (!p.lastingStated()) {
+			m.put("lasting_assumed", true);
 		}
 		if (!p.qualifiers().isEmpty()) {
 			m.put("qualifiers", p.qualifiers());

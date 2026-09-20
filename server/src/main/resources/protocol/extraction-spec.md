@@ -37,15 +37,22 @@ Rules:
   "lexicon": ["godparent", "godmother", "godfather"], "render": "{subject} is {object}'s {qualifier|godparent}",
   "qualifiers": ["godmother", "godfather"], "groups": ["family"]}`) or prefix it with `x:` (`x:consults_for`) to
   store it without structure.
+- `lexicon` words name the relation from the subject's side ("father" for `parent_of`, whose subject is the
+  parent), so "Anna's father" looks for facts with Anna as the object. Words for the other side go in
+  `inverse_lexicon` ("children" for `parent_of`; "doctor" for a `treated_by` whose subject is the patient).
+  Words are matched as written: give the plural forms too.
 - `volatility` (`low` | `medium` | `high`) says how soon an unconfirmed fact is called likely changed; `low` facts never
-  are, and with `as_of` they are known from the start. `lasting` (true | false, default false) says a participant's
-  death does not end the relation: a father stays a father (`parent_of`, `sibling_of`, `born_in`, and the derived
-  kin are lasting), while a marriage, a job, or a home ends with the person. The two are told apart: a marriage
-  never goes stale (`low`) and still ends with the spouse (not lasting).
+  are, and with `as_of` they are known from the start. `lasting` (true | false) says the end of a participant (a
+  death, a dissolved organization) does not end the relation: a father stays a father (`parent_of`, `sibling_of`,
+  `born_in`, `gender`, and the derived kin are lasting; so is any predicate whose object is a literal, an
+  attribute, unless you say otherwise), while a marriage, a job, or a home ends with the person. The two are told
+  apart: a marriage never goes stale (`low`) and still ends with the spouse (not lasting). Leave `lasting` out
+  and the store assumes it and says so: in the reply to the definition (`definitions`, under `inferred`: `assumed`), and on a fact
+  an ending closes (`superseded`, `note`), each with the correction that changes it.
 - `groups` names the groups a predicate belongs to: words a question uses for several relations at once. The
   kinship predicates are in `family`; a group named for the first time registers itself with the words of its
-  name as cue words, and `correct(group:pets, {description, lexicon, renders, groups})` says more, including
-  the groups it belongs to in turn. `inspect('registry')` lists them.
+  name as cue words, and `correct(group:pets, {description, lexicon, groups})` says more, including the groups
+  it belongs to in turn. `inspect('registry')` lists them.
 - Dates: ISO only, `2018`, `2018-03`, `2018-03-05`. Resolve relative expressions ("twelve years ago", "last
   spring") against the observation date yourself and give the precision honestly (`year` for "in 2014",
   `unknown` for "sometime in the late nineties"). Never invent precision.

@@ -441,7 +441,18 @@ Integer specVersion, List<EntityRef> entities, List<EventRef> events, List<FactR
 			String functionalScope, Boolean symmetric, String inverse, String volatility, List<String> lexicon,
 			String render, List<String> qualifiers, List<String> aliases, Map<String, Object> renders,
 			@JsonProperty("defined_as")
-			Object definedAs, Map<String, Object> implies, Boolean containment, List<String> groups, Boolean lasting) {
+			Object definedAs, Map<String, Object> implies, Boolean containment, List<String> groups, Boolean lasting,
+			@JsonProperty("inverse_lexicon")
+			List<String> inverseLexicon) {
+		public PredicateDef(String name, String description, String domain, String range, Boolean functional,
+				String functionalScope, Boolean symmetric, String inverse, String volatility, List<String> lexicon,
+				String render, List<String> qualifiers, List<String> aliases, Map<String, Object> renders,
+				Object definedAs, Map<String, Object> implies, Boolean containment, List<String> groups,
+				Boolean lasting) {
+			this(name, description, domain, range, functional, functionalScope, symmetric, inverse, volatility, lexicon,
+					render, qualifiers, aliases, renders, definedAs, implies, containment, groups, lasting, null);
+		}
+
 		public PredicateDef(String name, String description, String domain, String range, Boolean functional,
 				String functionalScope, Boolean symmetric, String inverse, String volatility, List<String> lexicon,
 				String render, List<String> qualifiers, List<String> aliases, Map<String, Object> renders,
@@ -491,14 +502,16 @@ Integer specVersion, List<EntityRef> entities, List<EventRef> events, List<FactR
 		/**
 		 * {@code renders}: per-language templates, {@code {"de": {"render": ..., "negated": ..., "lexicon": [...]}}}.
 		 * {@code groups}: the groups the predicate belongs to ("family"); null when the definition says nothing about
-		 * them, so that a partial definition leaves them alone. {@code lasting}: a participant's death does not end the
-		 * relation.
+		 * them, so that a partial definition leaves them alone. {@code lasting}: the end of a participant does not end
+		 * the relation; null leaves the default (true for a literal-valued attribute). {@code inverseLexicon}: the
+		 * words that name the relation from the object's side ("children" for parent_of).
 		 */
 		public PredicateDef {
 			renders = renders == null ? Map.of() : renders;
 			lexicon = lexicon == null ? List.of() : lexicon;
 			qualifiers = qualifiers == null ? List.of() : qualifiers;
 			aliases = aliases == null ? List.of() : aliases;
+			inverseLexicon = inverseLexicon == null ? List.of() : inverseLexicon;
 		}
 	}
 }
