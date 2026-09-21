@@ -390,14 +390,18 @@ public final class FactService {
 			if (p == null) {
 				continue;
 			}
-			for (var side : List.of(Map.entry(f.subject(), p.domain()), Map.entry(f.object(), p.range()))) {
-				if (side.getKey() == null || !FactQuestions.isRef(side.getKey(), er)) {
+			// A fact may lack its subject or object (a model's slip, skipped later with a warning): no pair is built
+			// from a null, which Map.entry refuses (a 9B proposer took down a LongMemEval question this way).
+			String[] ends = {f.subject(), f.object()};
+			List<List<String>> kinds = List.of(p.domain(), p.range());
+			for (int i = 0; i < 2; i++) {
+				if (ends[i] == null || !FactQuestions.isRef(ends[i], er)) {
 					continue;
 				}
-				if (side.getValue().contains("*") || side.getValue().contains("literal")) {
+				if (kinds.get(i).contains("*") || kinds.get(i).contains("literal")) {
 					return Set.of();
 				}
-				out.addAll(side.getValue());
+				out.addAll(kinds.get(i));
 			}
 		}
 		return out;

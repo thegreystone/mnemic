@@ -174,9 +174,15 @@ public final class Bench {
 						writeLine(retrieval, retrievalLine(q, ing, r, ingestNs, recallNs));
 					} catch (RuntimeException | IOException ex) {
 						// One bad question must not void the other 499: record it and move on.
+						// The first frames of our own code, so the record says where, not only what.
+						List<String> where = java.util.Arrays.stream(ex.getStackTrace())
+								.filter(fr -> fr.getClassName().startsWith("se.hirt.mnemic")).limit(4)
+								.map(fr -> fr.getClassName().substring(fr.getClassName().lastIndexOf('.') + 1) + "."
+										+ fr.getMethodName() + ":" + fr.getLineNumber())
+								.toList();
 						Files.writeString(out.resolve("errors.jsonl"),
-								LINE.writeValueAsString(Map.of("question_id", q.id(), "error", String.valueOf(ex)))
-										+ "\n",
+								LINE.writeValueAsString(
+										Map.of("question_id", q.id(), "error", String.valueOf(ex), "at", where)) + "\n",
 								StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
 						System.err.println("  error on " + q.id() + ": " + ex);
 						deleteTree(home);

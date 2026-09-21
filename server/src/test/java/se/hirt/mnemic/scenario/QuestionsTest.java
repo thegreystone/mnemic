@@ -141,6 +141,23 @@ class QuestionsTest {
 	}
 
 	@Test
+	void aFactWithoutItsObjectDoesNotTakeDownTheObservation() {
+		try (Engine e = engine("b2-no-object")) {
+			// A 9B proposer sent a fact with no object for an entity of a type the registry lacked; asking what kind
+			// of thing the entity is looked at the fact's ends and fell over the missing one (LongMemEval
+			// question 66f24dbb, 2026-09-21). The fact is skipped with a warning; the rest of the observation stands.
+			RememberOutcome o = remember(e, "Bo's new gadget, the Zephyr, ships next month.",
+					proposal().entity("g", "Zephyr", "gadget").entity("b", "Bo Berg", "person")
+							.fact(fact("g", "works_at", null, null, null, null, null, null, null, null))
+							.fact("b", "owns", "g"));
+			assertTrue(o.applied().facts().stream().anyMatch(f -> "owns".equals(f.predicate())),
+					"the whole fact stored: " + o.applied());
+			assertTrue(o.applied().warnings().stream().anyMatch(w -> w.contains("works_at")),
+					"the broken one named: " + o.applied().warnings());
+		}
+	}
+
+	@Test
 	@Scenario("B2")
 	void sharedSurnameBehindDifferentGivenNamesIsNotAmbiguous() {
 		try (Engine e = engine("b2-surname")) {
