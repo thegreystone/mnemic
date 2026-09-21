@@ -99,8 +99,10 @@ The extraction specification that tells the caller how to build a proposal
   version yet (see *Planned*); the stamp is there so that it can.
 
 The spec covers *how* to propose. A companion **memory protocol**
-(`protocol/guide.md`, meant to be pasted into a `CLAUDE.md` or the client's
-instruction field) covers *when*: call `recall` with no query at session
+(`protocol/instructions.md`, served to every client in the MCP initialize
+reply's `instructions`, which Claude Code puts in the system prompt; the
+proposal rules behind it are `protocol/guide.md`, returned by
+`inspect('guide')`) covers *when*: call `recall` with no query at session
 start for a briefing; call `recall` before answering anything about people,
 projects, decisions, or dates; call `remember` when the user states a fact,
 decision, preference, or correction, or when something they said contradicts

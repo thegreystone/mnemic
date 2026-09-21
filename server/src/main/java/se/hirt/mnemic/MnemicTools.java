@@ -56,6 +56,7 @@ import se.hirt.mnemic.observation.Observation;
 import se.hirt.mnemic.observation.Source;
 import se.hirt.mnemic.proposal.Proposal;
 import se.hirt.mnemic.protocol.MnemicException;
+import se.hirt.mnemic.protocol.Protocol;
 import se.hirt.mnemic.recall.RecallResult;
 import se.hirt.mnemic.recall.RecallService;
 
@@ -214,7 +215,7 @@ public class MnemicTools {
 	@Tool(name = "inspect", description = ToolDescriptions.INSPECT, annotations = @Tool.Annotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
 	ToolResponse inspect(
 		@ToolArg(description = "ent-12, a name or alias, f-12, obs-12, evt-3, q-3, pred:works_at, event:joined, "
-				+ "type:place, or 'registry'")
+				+ "type:place, group:family, 'registry', or 'guide'")
 		String ref,
 		@ToolArg(description = "For an entity: every fact that ever touched it, with its changes and tombstones "
 				+ "(default false)")
@@ -225,10 +226,13 @@ public class MnemicTools {
 			String r = ref == null ? "" : ref.trim();
 			if (r.isEmpty()) {
 				throw MnemicException.invalidArgument("'ref' is required: ent-12, a name, f-12, obs-12, evt-3, q-3, "
-						+ "pred:works_at, event:joined, type:place, group:family, or 'registry'.");
+						+ "pred:works_at, event:joined, type:place, group:family, 'registry', or 'guide'.");
 			}
 			if (r.equalsIgnoreCase("registry")) {
 				return registry();
+			}
+			if (r.equalsIgnoreCase("guide")) {
+				return Map.of("title", "Mnemic proposal guide", "text", Protocol.guide());
 			}
 			if (r.startsWith("f-")) {
 				return fact(parseId(r, "f-"));

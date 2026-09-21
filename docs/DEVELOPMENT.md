@@ -43,7 +43,11 @@ mvn -pl server test-compile failsafe:integration-test -Dnative.image.path=target
 ```
 
 The path to the native image is relative to `server/`, where failsafe runs (`target/...`, not `server/target/...`);
-`<version>` is the `revision` property of the parent POM, and the suffix is `.exe` on Windows only.
+`<version>` is the `revision` property of the parent POM, and the suffix is `.exe` on Windows only. The same wire
+test runs against the runner jar with `-Drunner.jar=target/mnemic-server-<version>-runner.jar` in place of the
+native path, after `mvn package`: it checks that the initialize reply carries the memory protocol as its
+`instructions` and that `inspect('guide')` returns the proposal guide, alongside the handshake and a remember and
+recall round trip.
 
 Formatting is enforced by [Spotless](https://github.com/diffplug/spotless) with the Eclipse formatter profile in
 `config/formatter/mnemic-formatting.xml` (tabs, 120 columns). `spotless:check` runs in the `validate` phase, so an
@@ -58,6 +62,19 @@ image.
 Do not run two Maven invocations against the same module at once; a native build rewrites `server/target`
 while it runs, and a bench run reads the installed server jar from `~/.m2`, so `mvn install` while a bench
 JVM is running can hand it a half-written jar.
+
+## The protocol texts
+
+Two files under `server/src/main/resources/protocol/` tell an assistant how to work with the store, each served
+whole from one place and never repeated elsewhere. `instructions.md` is the memory protocol; a config source
+(`InstructionsConfigSource`) hands it to the MCP library as the `instructions` of the initialize reply, which
+Claude Code puts into the system prompt (Claude Desktop and claude.ai connectors drop the field, as of
+September 2026). It has to stay under 2,000 characters: Claude Code holds every configured server's
+instructions in one block of about 4 KB and cuts the rest silently
+([anthropics/claude-code#43474](https://github.com/anthropics/claude-code/issues/43474)), so a longer text
+loses its end whenever other servers are configured; a test enforces the bound. `guide.md` is the proposal
+guide, returned by `inspect('guide')`; the instructions say when to fetch it. `extraction-spec.md` is the
+proposal format, used by the bench's model proposer.
 
 ## Tests
 
@@ -135,7 +152,8 @@ repository. Local models need no key.
 tool descriptions and the memory protocol actually gets a memory in and out. A model plays the assistant over the
 scripted conversations in `bench/usage/scenarios.json` (the fictional owner Mattias Sandell; twelve scenarios,
 forty steps). Each scenario starts a real server over stdio on a fresh data home, exactly as a client would, and
-the assistant is told the tools the server publishes. At each step the model either calls a tool (`{"tool": ...,
+the assistant is given what a real client gives it: the server's instructions from the initialize reply and the
+tools it publishes (the proposal guide is not pasted in; the assistant fetches it with `inspect('guide')`). At each step the model either calls a tool (`{"tool": ...,
 "arguments": {...}}`) or answers the user (`{"reply": ...}`); a judge grades the answers against the script's
 expected ones, abstention questions with the `_abs` rule of the retrieval bench.
 

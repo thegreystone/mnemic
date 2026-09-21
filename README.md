@@ -175,15 +175,17 @@ version, and your name as owner.
 
 ### The assistant knows the protocol
 
-The server tells every client how to work with it: the MCP initialize reply carries a short memory protocol
+The server tells the client how to work with it: the MCP initialize reply carries a short memory protocol
 (recall before answering anything about people, projects, places, decisions, or dates; remember at natural
 pauses rather than after every message; pass the store's questions on to you instead of guessing; treat "no,
-it was X" as a correction and "that changed" as news), and clients such as Claude Code put it in the system
-prompt of every conversation. The rules for reading an utterance into a proposal (time, negation, kinship,
-new vocabulary) are a second text the assistant fetches with `inspect('guide')` when it writes one. The two
-files are [protocol/instructions.md](server/src/main/resources/protocol/instructions.md) and
-[protocol/guide.md](server/src/main/resources/protocol/guide.md); a client that ignores server instructions
-gets the same by pasting the first into a `CLAUDE.md` or its instruction field.
+it was X" as a correction and "that changed" as news). Claude Code puts it in the system prompt of every
+conversation. Claude Desktop and claude.ai connectors do not read that field as of September 2026, so there
+the assistant works from the tool descriptions alone; paste
+[protocol/instructions.md](server/src/main/resources/protocol/instructions.md) into a `CLAUDE.md`, a project
+system prompt, or the client's instruction field to give it the same. The rules for reading an utterance into
+a proposal (time, negation, kinship, new vocabulary) are a second text,
+[protocol/guide.md](server/src/main/resources/protocol/guide.md), which the assistant fetches with
+`inspect('guide')` when it writes one.
 
 ## Use
 

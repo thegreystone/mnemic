@@ -125,7 +125,8 @@ final class ToolDescriptions {
 			+ "observations behind it, and its changes. An observation (obs-12): its text, source, dates, whether it is "
 			+ "retired, and the facts and events it produced. An event (evt-3), a question (q-3), a vocabulary entry "
 			+ "(pred:works_at, event:joined, type:place, group:family) with its definition, origin, and corrections, or "
-			+ "'registry' for every predicate, group, event type, and entity type at once. USE when the user asks 'what "
+			+ "'registry' for every predicate, group, event type, and entity type at once, or 'guide' for the rules of "
+			+ "writing a proposal (time, negation, kinship, new vocabulary). USE when the user asks 'what "
 			+ "do you know about X', "
 			+ "'what did I believe before', 'when did that change', wants to audit a fact, or before proposing a relation "
 			+ "or type you are unsure the registry has. Read-only.";

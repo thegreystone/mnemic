@@ -590,6 +590,23 @@ answered the boat entity question the store raised (`resolve` in the same `remem
 render template), which is the register-from-use loop working as meant. Cost: 115 requests, 116k input, 799k
 cache reads, 12k output, about $2.50.
 
+A third Sonnet run (`usage-sonnet-3`) tested a reworded harness rule and made things worse: 36 slips against
+12, all of them prose replies without the JSON wrapper, a recall before only 12 of 20 answers, and 18 of 20
+right (one answer was a bolded tool name followed by JSON, which the parser now reads; the other is the judge
+refusing "No, you don't own a boat. You do own a Volvo V60." against "No, you have said you do not own a
+boat"). The rule went back to the wording of the second run, with one example of each shape and the line
+that even a one-line answer goes inside the reply object, and moved to the end of the prompt after the
+tools. The same run also had the guide rewritten; from here the bench gives the assistant what a client gets,
+the server's instructions and its tools, and the proposal guide only through `inspect('guide')`.
+
+The fourth Sonnet run (`usage-sonnet-4`), with the rule moved and the protocol served the way a client gets it:
+20 of 20, every statement written down, 15 slips (all prose replies, plus one tool name followed by a fenced
+JSON block, which the parser now reads), a recall before 12 of 20 answers, 1.3 tool calls a step, about
+$0.47. Sonnet never fetched the guide with `inspect('guide')` although the instructions say to before the
+first proposal; its proposals were right anyway on this script. Fable recalled before all 20 answers; Sonnet
+answers from the conversation when the statement was made a few turns earlier, which the script allows since
+no scenario spans a session break. That break is the next scenario to write.
+
 One server finding came out of the traces and is fixed: `as_of: "2015"` was refused, and a year or
 a month is now taken as the end of that span. Cost, with the system prompt cached: 126 requests, 141k input tokens,
 889k cache reads, 17k output, about $0.65.

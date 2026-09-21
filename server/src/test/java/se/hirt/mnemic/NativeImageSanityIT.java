@@ -29,7 +29,7 @@
 package se.hirt.mnemic;
 
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
+import org.junit.jupiter.api.condition.EnabledIf;
 
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -48,13 +48,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * SQLite, migrations and FTS5 inside the image. A second test probes the 2026-07-28 stateless {@code server/discover}
  * so the dual-era requirement (DECISIONS.md §3.1) is checked on every release build.
  * <p>
- * Skipped unless {@code native.image.path} is set, e.g.
- * {@code mvn test-compile failsafe:integration-test -Dnative.image.path=target/mnemic-server-0.1.0-runner.exe}.
+ * Skipped unless {@code native.image.path} names the native binary or {@code runner.jar} the runner jar, e.g.
+ * {@code mvn test-compile failsafe:integration-test -Dnative.image.path=target/mnemic-server-0.1.0-runner.exe} or
+ * {@code -Drunner.jar=target/mnemic-server-0.1.0-runner.jar} after {@code mvn package}.
  */
 class NativeImageSanityIT {
 
 	@Test
-	@EnabledIfSystemProperty(named = "native.image.path", matches = ".+")
+	@EnabledIf("hasWireTarget")
 	void nativeBinaryRespondsToLegacyMcp() throws Exception {
 		Process process = start();
 		try {
@@ -66,6 +67,8 @@ class NativeImageSanityIT {
 			String init = readResponse(stdout, 15_000);
 			assertNotNull(init, "No initialize response");
 			assertTrue(init.contains("\"serverInfo\""), init);
+			assertTrue(init.contains("\"instructions\"") && init.contains("RECALL BEFORE YOU ANSWER"),
+					"the protocol rides in the initialize reply: " + init);
 
 			send(stdin, "{\"method\":\"notifications/initialized\",\"jsonrpc\":\"2.0\"}");
 			send(stdin, "{\"method\":\"tools/list\",\"params\":{},\"jsonrpc\":\"2.0\",\"id\":1}");
@@ -113,6 +116,17 @@ class NativeImageSanityIT {
 			String status = readResponse(stdout, 20_000);
 			assertNotNull(status, "No status response");
 			assertTrue(status.contains("openai-compatible"), "ModelProvider not found by ServiceLoader: " + status);
+
+			// The guidance is reachable on the wire: the instructions came with initialize (asserted above), and the
+			// proposal guide comes back whole from inspect('guide'), the way the instructions say to fetch it.
+			send(stdin,
+					"{\"method\":\"tools/call\",\"params\":{\"name\":\"inspect\",\"arguments\":{\"ref\":\"guide\"}},"
+							+ "\"jsonrpc\":\"2.0\",\"id\":7}");
+			String guide = readResponse(stdout, 20_000);
+			assertNotNull(guide, "No response to inspect('guide')");
+			assertTrue(guide.contains("Mnemic proposal guide") && guide.contains("Vocabulary")
+					&& guide.contains("lasting: true"), "the guide did not come back whole: " + guide);
+			assertFalse(guide.contains("\"isError\":true"), guide);
 		} finally {
 			process.destroyForcibly();
 			process.waitFor();
@@ -120,7 +134,7 @@ class NativeImageSanityIT {
 	}
 
 	@Test
-	@EnabledIfSystemProperty(named = "native.image.path", matches = ".+")
+	@EnabledIf("hasWireTarget")
 	void nativeBinaryAnswersServerDiscover() throws Exception {
 		Process process = start();
 		try {
@@ -299,12 +313,30 @@ class NativeImageSanityIT {
 		}
 	}
 
+	/** The native binary when {@code native.image.path} is set, else the runner jar when {@code runner.jar} is. */
+	static boolean hasWireTarget() {
+		return property("native.image.path") != null || property("runner.jar") != null;
+	}
+
+	/** A system property the build defines blank counts as unset. */
+	private static String property(String name) {
+		String v = System.getProperty(name);
+		return v == null || v.isBlank() ? null : v;
+	}
+
 	private static Process start(String ... extra) throws Exception {
-		Path binary = Path.of(System.getProperty("native.image.path"));
-		assertTrue(Files.exists(binary), "Native binary not found at: " + binary);
+		var cmd = new java.util.ArrayList<String>();
+		if (property("native.image.path") != null) {
+			Path binary = Path.of(property("native.image.path"));
+			assertTrue(Files.exists(binary), "Native binary not found at: " + binary);
+			cmd.add(binary.toAbsolutePath().toString());
+		} else {
+			Path jar = Path.of(property("runner.jar"));
+			assertTrue(Files.exists(jar), "Runner jar not found at: " + jar);
+			cmd.addAll(List.of("java", "-jar", jar.toAbsolutePath().toString()));
+		}
 		Path home = Files.createTempDirectory("mnemic-native-it");
-		var cmd = new java.util.ArrayList<String>(List.of(binary.toAbsolutePath().toString(),
-				"-Dmnemic.home=" + home.toAbsolutePath(), "-Dquarkus.mcp.server.stdio.enabled=true",
+		cmd.addAll(List.of("-Dmnemic.home=" + home.toAbsolutePath(), "-Dquarkus.mcp.server.stdio.enabled=true",
 				"-Dquarkus.log.file.path=" + home.resolve("mnemic.log").toAbsolutePath()));
 		// No test fetches 480 MB from the internet by accident: the semantic channel is off unless a test says so,
 		// and the server under test never sees this JVM's MNEMIC_* environment (the fetch test must start from nothing).

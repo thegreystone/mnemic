@@ -34,7 +34,9 @@ import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.Test;
 import se.hirt.mnemic.protocol.Json;
+import org.eclipse.microprofile.config.ConfigProvider;
 import se.hirt.mnemic.protocol.MnemicException;
+import se.hirt.mnemic.protocol.Protocol;
 
 import java.util.List;
 import java.util.Map;
@@ -602,6 +604,30 @@ class MnemicToolsTest {
 		assertFalse(two.isError(), text(two));
 		assertEquals(List.of("acquaintance", "contacts"),
 				result(tools.inspect("pred:knows", Optional.empty(), NONE)).get("groups"));
+	}
+
+	@Test
+	void theProtocolIsServedWholeFromItsTwoFiles() {
+		// The instructions ride in the MCP initialize reply, through the config the MCP library reads.
+		String served = ConfigProvider.getConfig().getValue("quarkus.mcp.server.server-info.instructions",
+				String.class);
+		assertEquals(Protocol.instructions(), served);
+		assertTrue(served.startsWith("# Mnemic memory protocol"), served);
+		assertTrue(served.contains("RECALL BEFORE YOU ANSWER") && served.contains("inspect('guide')"), served);
+		assertFalse(served.contains("## Vocabulary"), "the detail is not repeated in the instructions");
+		// Claude Code puts every server's instructions in one block of about 4 KB and cuts the rest silently
+		// (anthropics/claude-code#43474), so with other servers configured only a short text arrives whole.
+		assertTrue(served.length() <= 2000, "instructions are " + served.length() + " chars; keep them under 2000");
+		// The guide is fetched through inspect, and is the other file whole.
+		ToolResponse guide = tools.inspect("guide", Optional.empty(), NONE);
+		assertFalse(guide.isError(), text(guide));
+		assertEquals(Protocol.guide(), result(guide).get("text"));
+		assertTrue(Protocol.guide().contains("## Vocabulary") && Protocol.guide().contains("lasting: true"));
+		assertFalse(Protocol.guide().contains("RECALL BEFORE YOU ANSWER"), "the loop is not repeated in the guide");
+		// An assistant that reads only the tool descriptions is still told where the guide is.
+		assertTrue(ToolDescriptions.INSPECT.contains("'guide'"), ToolDescriptions.INSPECT);
+		assertTrue(tools.inspect("", Optional.empty(), NONE).isError());
+		assertTrue(text(tools.inspect("", Optional.empty(), NONE)).contains("'guide'"), "the id list names it");
 	}
 
 	@Test

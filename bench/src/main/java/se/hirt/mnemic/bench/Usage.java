@@ -35,10 +35,10 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import se.hirt.mnemic.model.AnthropicHttpProvider;
 import se.hirt.mnemic.model.ChatModel;
 import se.hirt.mnemic.model.ModelProvider;
+import se.hirt.mnemic.protocol.Protocol;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -101,6 +101,8 @@ public final class Usage {
 	}
 
 	private static final Pattern REPLY_SALVAGE = Pattern.compile("\"reply\"\\s*:\\s*\"(.*)", Pattern.DOTALL);
+	private static final Pattern LEADING_TOOL = Pattern
+			.compile("^[*_`\\s]*([a-z_]+)[*_`\\s:]*(?:```(?:json)?\\s*)?(?=\\{)");
 
 	static List<Scenario> load(Path script) throws IOException {
 		JsonNode root = JSON.readTree(Files.readString(script, StandardCharsets.UTF_8));
@@ -141,6 +143,21 @@ public final class Usage {
 		}
 		String body = response.strip();
 		int start = body.indexOf('{');
+		Matcher lead = LEADING_TOOL.matcher(body);
+		if (lead.find() && tools.contains(lead.group(1))) {
+			// "**recall** {"query": ...}": the tool named in words, its arguments as the object
+			String args = firstObject(body, lead.end());
+			if (args == null) {
+				args = closed(body, lead.end());
+			}
+			if (args != null) {
+				try {
+					return new Action(lead.group(1), arguments(JSON.readTree(args)), null, response, true);
+				} catch (IOException e) {
+					// fall through: not arguments after all
+				}
+			}
+		}
 		if (start >= 0) {
 			String object = firstObject(body, start);
 			boolean repaired = false;
@@ -309,27 +326,29 @@ public final class Usage {
 
 	/** The protocol the assistant is given: the guide, how to act in this harness, and the server's own tools. */
 	static String systemPrompt(List<Map<String, Object>> tools) throws IOException {
-		String guide;
-		try (InputStream in = Usage.class.getResourceAsStream("/protocol/guide.md")) {
-			guide = in == null ? "" : new String(in.readAllBytes(), StandardCharsets.UTF_8);
-		}
+		// What a real client gets: the server's instructions from the initialize reply, then its tools. The guide
+		// is not pasted in; the assistant fetches it with inspect('guide') if it follows the instructions.
 		var sb = new StringBuilder();
 		sb.append("You are the user's assistant, with a memory server called Mnemic reachable through tools.\n\n");
-		sb.append(guide).append("\n\n");
-		sb.append("HOW TO ACT IN THIS HARNESS\n");
-		sb.append("Each turn, reply with exactly one JSON object and nothing else. Either call a tool:\n");
-		sb.append("{\"tool\": \"<name>\", \"arguments\": {...}}\n");
-		sb.append("and you will receive its result and may act again; or answer the user:\n");
-		sb.append("{\"reply\": \"<what you say to the user>\"}\n");
-		sb.append("Call one tool at a time. When the user only tells you something, record what is worth keeping ");
-		sb.append("and reply briefly. When the user asks something, recall first, then answer from what came ");
-		sb.append("back; when the memory does not hold it, say that you do not know rather than guess. ");
-		sb.append("Today's date is ").append(Instant.now().toString(), 0, 10).append(".\n\n");
+		sb.append(Protocol.instructions()).append("\n\n");
 		sb.append("TOOLS (name, description, input schema)\n");
 		for (Map<String, Object> t : tools) {
 			sb.append("\n### ").append(t.get("name")).append('\n').append(t.get("description")).append('\n');
 			sb.append("input_schema: ").append(LINE.writeValueAsString(t.get("input_schema"))).append('\n');
 		}
+		// The harness rule comes last, where a model sees it closest to its own turn.
+		sb.append("\nHOW TO ACT IN THIS HARNESS\n");
+		sb.append("Each turn, reply with exactly one JSON object and nothing else. Either call a tool:\n");
+		sb.append("{\"tool\": \"<name>\", \"arguments\": {...}}\n");
+		sb.append("for example {\"tool\": \"recall\", \"arguments\": {\"query\": \"Anna's siblings\"}}\n");
+		sb.append("and you will receive its result and may act again; or answer the user:\n");
+		sb.append("{\"reply\": \"<what you say to the user>\"}\n");
+		sb.append("for example {\"reply\": \"Your mother is Gunilla Nyberg.\"}\n");
+		sb.append(
+				"Even a one-line answer goes inside {\"reply\": ...}; plain text is not delivered. Call one tool at a ");
+		sb.append(
+				"time. When the user only tells you something, record what is worth keeping and reply in a sentence. ");
+		sb.append("Today's date is ").append(Instant.now().toString(), 0, 10).append(".\n");
 		return sb.toString();
 	}
 

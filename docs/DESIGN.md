@@ -247,8 +247,9 @@ These choices give a small, portable, zero-infrastructure executable consistent 
 The design work this document originally left open has been done and is recorded, with the measurements that
 decided it, in the project's internal decision record (the measurements are in [BENCHMARKS.md](BENCHMARKS.md)): the schema (eighteen migrations), temporal and provenance semantics,
 ingestion and consolidation, hybrid recall ranking, the tool schemas, the local embedder and vector scan, the
-data-home layout and migrations, the memory protocol (`protocol/guide.md` and `protocol/extraction-spec.md` in the
-server resources), and staleness flagged from the time since a fact was last confirmed (the "absence of events"
+data-home layout and migrations, the memory protocol (`protocol/instructions.md`, served in the MCP initialize reply,
+`protocol/guide.md`, served by `inspect('guide')`, and `protocol/extraction-spec.md`, all in the server
+resources), and staleness flagged from the time since a fact was last confirmed (the "absence of events"
 question: such facts are annotated with their last confirmation and listed by `consolidate` for review; confidence
 itself does not decay).
 

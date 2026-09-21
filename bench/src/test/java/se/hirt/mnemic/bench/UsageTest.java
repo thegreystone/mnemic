@@ -83,6 +83,20 @@ class UsageTest {
 		Usage.Action braces = Usage.parse("{\"reply\": \"Use {braces} and [brackets] freely.\"}");
 		assertFalse(braces.slip());
 		assertEquals("Use {braces} and [brackets] freely.", braces.reply());
+		Usage.Action named = Usage.parse("**recall** {\"query\": \"self's stepmother\"}", Set.of("recall"));
+		assertTrue(named.isCall(), "the tool named in words, then its arguments");
+		assertTrue(named.slip());
+		assertEquals("recall", named.tool());
+		assertEquals("self's stepmother", named.arguments().get("query"));
+		Usage.Action fencedCall = Usage.parse(
+				"**correct**\n```json\n{\"target\": \"f-2\", \"replacement\": {\"ended\": \"2020\"}}\n```",
+				Set.of("correct"));
+		assertTrue(fencedCall.isCall(), "the tool named, then its arguments in a fence");
+		assertEquals("correct", fencedCall.tool());
+		assertEquals("f-2", fencedCall.arguments().get("target"));
+		Usage.Action notATool = Usage.parse("**note** {\"reply\": \"x\"}", Set.of("recall"));
+		assertFalse(notATool.isCall());
+		assertEquals("x", notATool.reply());
 		Usage.Action cut = Usage.parse("{\"reply\": \"Cut off mid-sent", Set.of());
 		assertTrue(cut.slip());
 		assertEquals("Cut off mid-sent", cut.reply());
@@ -120,6 +134,19 @@ class UsageTest {
 		assertEquals(1, s.get("wrong_answers_on_a_miss"));
 		assertEquals(1, s.get("protocol_slips"));
 		assertEquals("1/2", ((Map<?, ?>) s.get("by_scenario")).get("a"));
+	}
+
+	@Test
+	void theAssistantGetsTheGuideTheRuleAndTheTools() throws Exception {
+		String prompt = Usage.systemPrompt(List.of(Map.of("name", "recall", "description", "Ask the store.",
+				"input_schema", Map.of("type", "object", "properties", Map.of("query", Map.of("type", "string"))))));
+		assertTrue(prompt.contains("# Mnemic memory protocol"), "the server's instructions, as a client gets them");
+		assertTrue(prompt.contains("RECALL BEFORE YOU ANSWER"), prompt);
+		assertFalse(prompt.contains("## Vocabulary"), "the guide is not pasted in; the assistant fetches it");
+		assertTrue(prompt.contains("{\"tool\": \"<name>\", \"arguments\": {...}}"), prompt);
+		assertTrue(prompt.contains("{\"reply\": \"<what you say to the user>\"}"), prompt);
+		assertTrue(prompt.indexOf("HOW TO ACT") > prompt.indexOf("### recall"), "the harness rule comes last");
+		assertTrue(prompt.contains("\"query\""), "the schema is given verbatim");
 	}
 
 	@Test
