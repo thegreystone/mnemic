@@ -1,5 +1,13 @@
 # Mnemic
 
+[![Build](https://github.com/thegreystone/mnemic/actions/workflows/build.yml/badge.svg)](https://github.com/thegreystone/mnemic/actions/workflows/build.yml)
+[![Release](https://img.shields.io/github/v/release/thegreystone/mnemic)](https://github.com/thegreystone/mnemic/releases/latest)
+[![Java 25+](https://img.shields.io/badge/Java-25%2B-blue)](https://adoptium.net/)
+[![Quarkus](https://img.shields.io/badge/dynamic/xml?url=https%3A%2F%2Fraw.githubusercontent.com%2Fthegreystone%2Fmnemic%2Fmain%2Fpom.xml&query=%2F%2F*%5Blocal-name%28%29%3D%27quarkus.platform.version%27%5D&label=Quarkus&color=blueviolet)](https://quarkus.io/)
+[![GraalVM Native](https://img.shields.io/badge/GraalVM-native--image-orange)](https://www.graalvm.org/)
+[![MCP](https://img.shields.io/badge/MCP-server-teal)](https://modelcontextprotocol.io/)
+[![License: BSD-3](https://img.shields.io/badge/License-BSD--3-green)](https://opensource.org/licenses/BSD-3-Clause)
+
 A persistent, local memory that all your AI assistants share. Tell one of them something once, and every later
 conversation, in Claude Code, Claude Desktop, or any other tool that speaks MCP, can build on it: who someone
 is, what you decided, where you worked in 2015, what has changed since. Everything stays in one file on your
@@ -165,14 +173,17 @@ For other JSON-configured clients, or to point Claude Desktop at a binary you in
 Restart the client and ask the assistant to check Mnemic's status. It should report the data home, the schema
 version, and your name as owner.
 
-### Teach the assistant when to remember
+### The assistant knows the protocol
 
-The tools describe themselves, but an assistant works best with a short standing instruction: recall before
-answering anything about people, projects, places, decisions, or dates; remember at natural pauses rather
-than after every message; pass questions on to you instead of guessing; treat "no, it was X" as a
-correction and "that changed" as news. The full text, ready to paste into a `CLAUDE.md`, a project system
-prompt, or the client's instruction field, is at
-[server/src/main/resources/protocol/guide.md](server/src/main/resources/protocol/guide.md).
+The server tells every client how to work with it: the MCP initialize reply carries a short memory protocol
+(recall before answering anything about people, projects, places, decisions, or dates; remember at natural
+pauses rather than after every message; pass the store's questions on to you instead of guessing; treat "no,
+it was X" as a correction and "that changed" as news), and clients such as Claude Code put it in the system
+prompt of every conversation. The rules for reading an utterance into a proposal (time, negation, kinship,
+new vocabulary) are a second text the assistant fetches with `inspect('guide')` when it writes one. The two
+files are [protocol/instructions.md](server/src/main/resources/protocol/instructions.md) and
+[protocol/guide.md](server/src/main/resources/protocol/guide.md); a client that ignores server instructions
+gets the same by pasting the first into a `CLAUDE.md` or its instruction field.
 
 ## Use
 
