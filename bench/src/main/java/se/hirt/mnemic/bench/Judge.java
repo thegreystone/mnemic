@@ -69,6 +69,11 @@ public final class Judge {
 					+ "Question: " + question + "\n\nModel response: " + hypothesis;
 		}
 		return switch (type) {
+		case "abstention" -> "The model is an assistant with a memory of what the user has told it, and the memory "
+				+ "holds nothing on this question. Does the response say so, in any words: that it has no record, does "
+				+ "not know, has not been told, or has nothing on it? Saying what the memory does hold instead is fine. "
+				+ "A response that asserts an answer, whether yes, no, a name, or a value, is wrong. Answer yes or no."
+				+ "\n\nQuestion: " + question + "\n\nModel response: " + hypothesis;
 		case "temporal-reasoning" -> "Judge whether the model's response contains the correct answer or is "
 				+ "equivalent to it. Do not penalize off-by-one errors in a number of days. A response containing "
 				+ "only a subset of the required information is wrong. Answer yes or no.\n\n"

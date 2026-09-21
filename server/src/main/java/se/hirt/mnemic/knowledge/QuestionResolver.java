@@ -111,7 +111,17 @@ public final class QuestionResolver {
 		for (Resolve r : resolves) {
 			Question q = questions.require(r.questionId());
 			if (!q.open()) {
-				throw MnemicException.conflict(q.ref() + " is already " + q.status(), Map.of("question", q.ref()));
+				// An earlier answer in the same batch may have settled this one (a type's kind settles the
+				// mismatches under it), or the caller repeats an answer: the batch goes on, and the item says so.
+				var already = new LinkedHashMap<String, Object>();
+				already.put("question", q.ref());
+				already.put("choice", r.choice() == null ? "" : r.choice().trim());
+				already.put("status", "already " + q.status());
+				if (q.answer() != null) {
+					already.put("answer", q.answer());
+				}
+				out.add(already);
+				continue;
 			}
 			// A question housekeeping raised (a derivation) has no observation of its own and needs none.
 			Observation obs = carrier != null ? carrier
@@ -367,6 +377,8 @@ public final class QuestionResolver {
 		}
 		String kind = choice.substring(choice.indexOf(':') + 1);
 		if (choice.startsWith("kind:")) {
+			// The kind was offered, so choosing it must work even if nothing else has registered the type yet.
+			entityTypes.registerInferred(kind, q.observationId());
 			entityTypes.update(type, Map.of("parent", kind, "description", "A kind of " + kind + "."),
 					"user: " + q.ref());
 			m.put("entity_type", type);

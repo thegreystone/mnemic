@@ -337,7 +337,8 @@ public final class FactService {
 				skipped(a, e, "Predicate '" + d.name() + "'");
 			}
 		}
-		for (EntityTypeDef d : a.p.entityTypes()) {
+		// A type may name as its parent another type defined in the same proposal, in any order.
+		for (EntityTypeDef d : parentsFirst(a.p.entityTypes())) {
 			try {
 				Optional<EntityTypeRegistry.EntityType> before = types.get(d.name());
 				String resolution = before.isEmpty() ? "registered"
@@ -435,6 +436,32 @@ public final class FactService {
 		m.put("name", name);
 		m.put("resolution", resolution);
 		return m;
+	}
+
+	/**
+	 * The definitions in an order that registers a parent before the types under it, when the parent is defined in the
+	 * same proposal; otherwise the given order. A cycle falls back to the given order for what is left.
+	 */
+	static List<EntityTypeDef> parentsFirst(List<EntityTypeDef> defs) {
+		var out = new ArrayList<EntityTypeDef>();
+		var left = new ArrayList<>(defs);
+		while (!left.isEmpty()) {
+			Set<String> pending = left.stream()
+					.map(d -> d.name() == null ? "" : d.name().trim().toLowerCase(Locale.ROOT))
+					.collect(java.util.stream.Collectors.toSet());
+			List<EntityTypeDef> ready = left.stream()
+					.filter(d -> d.parent() == null || d.parent().isBlank()
+							|| !pending.contains(d.parent().trim().toLowerCase(Locale.ROOT))
+							|| d.parent().trim().equalsIgnoreCase(d.name() == null ? "" : d.name().trim()))
+					.toList();
+			if (ready.isEmpty()) {
+				out.addAll(left);
+				break;
+			}
+			out.addAll(ready);
+			left.removeAll(ready);
+		}
+		return out;
 	}
 
 	private static void skipped(Application a, MnemicException e, String what) {

@@ -607,6 +607,59 @@ first proposal; its proposals were right anyway on this script. Fable recalled b
 answers from the conversation when the statement was made a few turns earlier, which the script allows since
 no scenario spans a session break. That break is the next scenario to write.
 
+The fifth Sonnet run (`usage-sonnet-5`), with the protocol served as the initialize instructions in their
+final, shorter form: 19 of 20, every statement written down, 11 slips, a recall before 12 of 20 answers,
+about $0.59. The one miss was the judge, not the model: "I don't have any record of you having a brother or
+any siblings" was graded wrong under LongMemEval's abstention rule, so the usage bench now judges abstentions
+by its own rule (no record, not known, or not told counts; asserting an answer does not), and the retrieval
+bench keeps LongMemEval's. Sonnet fetched the guide for the first time, at the pet scenario, where it met a
+predicate the vocabulary lacked. One tool error: it wrote `ended: "2020"` on a fact, and the reply was a
+Jackson type message; a proposal error now names the field in the caller's terms, `'facts[0].ended' takes a
+boolean (got "2020")`, with the hint that the date goes in `valid_time.end`.
+
+Fable 5.1 again, with the protocol as the server now serves it (`usage-fable-2`): 20 of 20, a recall before
+every answer, every statement written down, 1.6 tool calls a step, and the guide fetched with
+`inspect('guide')` in eleven of twelve scenarios before the first proposal, as the instructions ask. Its five
+slips were its own tool-call syntax (`<invoke name="recall">`) with a made-up result written under it, which a
+real client would have executed; the parser now reads the call and drops the invented result. The trace
+found two server defects, both fixed with tests. A proposal defined the entity type `dog` with parent
+`animal` and defined `animal` after it, so `dog` was refused for an unknown parent and registered from use
+with no kind, which raised two questions that need not have been asked; types in one proposal now register
+parents first whatever the order. Then, answering four questions in one call, the answer to the type's kind
+settled the mismatch under it, the batch failed on that item as already answered after the earlier answers
+had been applied, and each retry failed on the next one; an already-answered question in a batch is now
+reported in its item, with the standing answer, and the rest of the batch goes through.
+
+A third Fable run to confirm those fixes (`usage-fable-3`): 20 of 20, a recall before 19 of 20 answers, the
+guide fetched in all twelve scenarios, one slip (its own tool syntax, now read as the call), about $4.60 with
+1.9 tool calls a step, since it read more. The pet scenario went through with no conflict error and turned
+up two smaller things, both fixed with a test. The predicate `has_pet` was defined with range `animal` and no
+type of that name existed, so the mismatch question offered `kind:animal` and then refused it; a type a
+predicate's domain or range names now exists from that definition on, and choosing an offered kind registers
+it in any case. And the definition wrote `domain: ["person"]` as a list, which the schema took as a string; a
+list is now read as the same statement.
+
+The sixth Sonnet run (`usage-sonnet-6`), on the same binary as the third Fable run: 20 of 20, all three
+abstentions right under the memory rule, every statement written down, ten slips of which nine were prose
+replies, about $0.59. Twice it wrote a date into `ended` (`"2018-03"`, `"2020"`), got the hint, and
+recovered at the cost of a call each time; a date there now reads as the fact's end date, since it means
+nothing else, and a string that is no date still gets the hint. The guide was fetched in four scenarios.
+
+The script grew to fifteen scenarios and fifty-seven steps on 2026-09-21 with three that span a session
+break (`{"break": true}`: the server restarted on the same store, the conversation empty), so that the
+questions after it measure memory use rather than context use. Sonnet 5 on it (`usage-sonnet-7`): 27 of 27,
+all four abstentions right, every statement written down, about $0.69. After a break it recalled in the
+answering turn for 5 of 7 questions and had recalled earlier in the same conversation for the other 2, so
+every post-break answer came from the store; the correction stated in a conversation that never saw the
+original fact was found by recall and made with `correct`, and "did I ever say I lived somewhere else" was
+answered from the corrected fact's history. Thirteen slips, prose replies.
+
+Fable 5.1 on the same fifteen scenarios (`usage-fable-4`): 27 of 27, a recall in the answering turn for
+every one of the 27 questions and for all 7 after a break, every statement written down, the guide fetched in
+all fifteen scenarios, two slips (its own tool syntax, read as the calls), no tool errors, 1.7 tool calls a
+step, about $5.50. It opened each conversation with the briefing as the instructions ask, and for "did I
+ever say I lived somewhere else" it asked with history included and answered from the corrected fact.
+
 One server finding came out of the traces and is fixed: `as_of: "2015"` was refused, and a year or
 a month is now taken as the end of that span. Cost, with the system prompt cached: 126 requests, 141k input tokens,
 889k cache reads, 17k output, about $0.65.

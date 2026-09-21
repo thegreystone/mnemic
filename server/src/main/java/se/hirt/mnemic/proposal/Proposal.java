@@ -32,7 +32,10 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.exc.InvalidFormatException;
+import com.fasterxml.jackson.databind.exc.MismatchedInputException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.quarkus.runtime.annotations.RegisterForReflection;
@@ -118,10 +121,11 @@ Integer specVersion, List<EntityRef> entities, List<EventRef> events, List<FactR
 					// fall through to the original error
 				}
 			}
-			throw MnemicException.invalidArgument("'proposal' is not a valid proposal: " + truncated.getMessage()
+			throw MnemicException.invalidArgument("'proposal' is not a valid proposal: " + readable(truncated)
 					+ ". Example: {\"facts\": [{\"subject\": \"self\", \"predicate\": \"works_at\", \"object\": \"Hooli\"}]}");
 		} catch (Exception e) {
-			throw MnemicException.invalidArgument("'proposal' is not a valid proposal: " + e.getMessage()
+			String why = e instanceof JsonProcessingException j ? readable(j) : e.getMessage();
+			throw MnemicException.invalidArgument("'proposal' is not a valid proposal: " + why
 					+ ". Example: {\"facts\": [{\"subject\": \"self\", \"predicate\": \"works_at\", \"object\": \"Hooli\"}]}");
 		}
 	}
@@ -134,8 +138,32 @@ Integer specVersion, List<EntityRef> entities, List<EventRef> events, List<FactR
 		try {
 			return parsed(MAPPER.valueToTree(map));
 		} catch (JsonProcessingException e) {
-			throw MnemicException.invalidArgument("'proposal' is not a valid proposal: " + e.getMessage());
+			throw MnemicException.invalidArgument("'proposal' is not a valid proposal: " + readable(e));
 		}
+	}
+
+	/**
+	 * A parse error in the caller's terms: the path of the field, the value, and the type it takes, with a hint for the
+	 * confusions seen in practice, instead of Jackson's class names.
+	 */
+	static String readable(JsonProcessingException e) {
+		if (!(e instanceof MismatchedInputException m) || m.getPath().isEmpty()) {
+			return e.getOriginalMessage();
+		}
+		var path = new StringBuilder();
+		for (JsonMappingException.Reference r : m.getPath()) {
+			if (r.getFieldName() != null) {
+				path.append(path.isEmpty() ? "" : ".").append(r.getFieldName());
+			} else {
+				path.append('[').append(r.getIndex()).append(']');
+			}
+		}
+		String field = path.toString();
+		String type = m.getTargetType() == null ? "another type" : m.getTargetType().getSimpleName().toLowerCase();
+		String value = e instanceof InvalidFormatException f ? " (got \"" + f.getValue() + "\")" : "";
+		String hint = field.endsWith(".ended") && "boolean".equals(type)
+				? "; 'ended' is true or false, and the date a fact ended goes in valid_time: {\"end\": \"2020\"}" : "";
+		return "'" + field + "' takes a " + type + value + hint;
 	}
 
 	private static Parsed parsed(JsonNode root) throws JsonProcessingException {
@@ -266,6 +294,24 @@ Integer specVersion, List<EntityRef> entities, List<EventRef> events, List<FactR
 		if (root == null || !root.isObject()) {
 			return root;
 		}
+		// A predicate's domain or range written as a list, ["person", "organization"], is the same statement as the
+		// string "person|organization" the definition takes.
+		JsonNode predicates = root.get("predicates");
+		if (predicates != null && predicates.isArray()) {
+			for (JsonNode p : predicates) {
+				for (String key : List.of("domain", "range")) {
+					if (p.isObject() && p.get(key) != null && p.get(key).isArray()) {
+						var names = new ArrayList<String>();
+						for (JsonNode t : p.get(key)) {
+							if (t.isTextual() && !t.asText().isBlank()) {
+								names.add(t.asText().trim());
+							}
+						}
+						((ObjectNode) p).put(key, String.join("|", names));
+					}
+				}
+			}
+		}
 		JsonNode facts = root.get("facts");
 		if (facts == null || !facts.isArray()) {
 			return root;
@@ -277,6 +323,17 @@ Integer specVersion, List<EntityRef> entities, List<EventRef> events, List<FactR
 			}
 			if (f.isObject()) {
 				var o = (ObjectNode) f;
+				// "ended": "2018-03" means one thing: the fact ended, and that is when. Sonnet 5 wrote it twice in
+				// one bench run; a date here is taken as valid_time.end, and 'ended' stays true or false.
+				JsonNode ended = o.get("ended");
+				if (ended != null && ended.isTextual() && ended.asText().strip().matches("\\d{4}(-\\d{2}){0,2}")) {
+					ObjectNode vt = o.get("valid_time") != null && o.get("valid_time").isObject()
+							? (ObjectNode) o.get("valid_time") : o.putObject("valid_time");
+					if (vt.get("end") == null || vt.get("end").isNull()) {
+						vt.put("end", ended.asText().strip());
+					}
+					o.put("ended", true);
+				}
 				if (o.get("caller_confidence") == null) {
 					if (o.get("confidence") != null && o.get("confidence").isNumber()) {
 						o.put("caller_confidence", o.get("confidence").asDouble());

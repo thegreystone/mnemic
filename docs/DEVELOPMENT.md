@@ -176,8 +176,14 @@ to a `correct` or `forget`, which is how "no, that was wrong" is written down) a
 `recall` came before the answer), `accuracy`, `abstention_correct`, `wrong_answers_on_a_miss` (an answer given
 although the last recall said MISS: the number that should be zero), `tool_calls_per_step`, and
 `protocol_slips` (turns that did not follow the JSON protocol and were read leniently: a `{"recall": {...}}`
-shape, a missing closing brace, a reply whose JSON broke, or plain prose; the raw text of each is kept under
-`slipped` in the step's record). Anthropic runs also report
+shape, a missing closing brace, a reply whose JSON broke, the model's own tool-call syntax, or plain prose; the
+raw text of each is kept under `slipped` in the step's record). A step `{"break": true}` ends the conversation:
+the server is started afresh on the same data home and the assistant meets an empty transcript, so the
+questions after it can only be answered from the store. Those are counted on their own as
+`questions_after_break`, `recall_first_rate_after_break` (a `recall` in the answering turn itself),
+`recall_in_conversation_rate_after_break` (a `recall` in that turn or earlier in the same conversation, whose
+block is still in front of the model), and `accuracy_after_break`; within one conversation an assistant may
+fairly answer from what was just said, after a break it cannot. Anthropic runs also report
 `api_usage`, the tokens billed, with the system prompt cached across calls.
 
 Scripts: `bench/scripts/local-proposers.sh` downloads, loads, runs, and compares a list of LM Studio models on

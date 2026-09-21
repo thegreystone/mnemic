@@ -94,6 +94,30 @@ class MnemicToolsTest {
 		assertTrue(badKind.isError());
 		assertEquals("INVALID_ARGUMENT", error(badKind).get("code"));
 
+		// A wrong type in a proposal is named in the caller's terms, with the fix for the confusion seen in use.
+		ToolResponse badType = tools.remember(Optional.of("Lena died."), NONE, NONE, NONE, Optional.empty(), NONE, NONE,
+				Map.of("facts", List.of(Map.of("subject", "Konrad Nyberg", "predicate", "spouse_of", "object",
+						"Lena Berg", "ended", "yes"))),
+				Optional.empty(), NONE, null);
+		assertTrue(badType.isError());
+		String badTypeMessage = error(badType).get("message").toString();
+		assertTrue(badTypeMessage.contains("'facts[0].ended' takes a boolean (got \"yes\")"), badTypeMessage);
+		assertTrue(badTypeMessage.contains("valid_time: {\"end\": \"2020\"}"), badTypeMessage);
+		assertFalse(badTypeMessage.contains("java.lang"), badTypeMessage);
+		// A date in 'ended' is what it looks like: the fact ended then (Sonnet 5 wrote it twice in one run).
+		ToolResponse endedOn = tools.remember(Optional.of("Konrad's marriage to Lena ended in 2020."), NONE, NONE, NONE,
+				Optional.empty(), NONE, NONE,
+				Map.of("facts",
+						List.of(Map.of("subject", "Konrad Nyberg", "predicate", "spouse_of", "object", "Lena Berg",
+								"valid_time", Map.of("start", "2015"), "ended", "2020"))),
+				Optional.empty(), NONE, null);
+		assertFalse(endedOn.isError(), text(endedOn));
+		@SuppressWarnings("unchecked")
+		Map<String, Object> endedFact = ((List<Map<String, Object>>) ((Map<?, ?>) result(endedOn).get("stored"))
+				.get("facts")).getFirst();
+		assertEquals("ended", endedFact.get("standing"), endedFact.toString());
+		assertTrue(endedFact.get("rendering").toString().contains("2015 – 2020"), endedFact.toString());
+
 		ToolResponse nothing = tools.correct("banana", Map.of("object", "x"), NONE);
 		assertTrue(nothing.isError());
 		assertTrue(error(nothing).get("message").toString().contains("pred:"), text(nothing));
@@ -628,6 +652,35 @@ class MnemicToolsTest {
 		assertTrue(ToolDescriptions.INSPECT.contains("'guide'"), ToolDescriptions.INSPECT);
 		assertTrue(tools.inspect("", Optional.empty(), NONE).isError());
 		assertTrue(text(tools.inspect("", Optional.empty(), NONE)).contains("'guide'"), "the id list names it");
+	}
+
+	@Test
+	void aTypeAPredicateNamesExistsFromThenOnAndAListIsADomain() {
+		// A definition may write domain and range as lists, and may name a type the registry has not seen: the
+		// predicate is the statement that the type exists, so the type is registered with it (2026-09-21, Fable run:
+		// the store offered kind:animal as an answer and then refused it for want of a type named animal).
+		Map<String, Object> proposal = Map.of("predicates",
+				List.of(Map.of("name", "keeps_pet", "description", "The subject keeps the object as a pet", "domain",
+						List.of("person"), "range", List.of("critter"))),
+				"entities", List.of(Map.of("ref", "b", "name", "Bello", "type", "hound")), "facts",
+				List.of(Map.of("subject", "self", "predicate", "keeps_pet", "object", "b")));
+		ToolResponse stored = tools.remember(Optional.of("Our hound is called Bello."), NONE, NONE, NONE,
+				Optional.empty(), NONE, NONE, proposal, Optional.empty(), Optional.of("type-from-predicate"), null);
+		assertFalse(stored.isError(), text(stored));
+		Map<String, Object> pred = result(tools.inspect("pred:keeps_pet", Optional.empty(), NONE));
+		assertEquals(List.of("person"), pred.get("domain"), pred.toString());
+		assertEquals(List.of("critter"), pred.get("range"), pred.toString());
+		assertFalse(tools.inspect("type:critter", Optional.empty(), NONE).isError(),
+				"named by the range, so it exists");
+		// The mismatch (a hound is not known to be a critter) is asked, and the offered kind can be chosen.
+		@SuppressWarnings("unchecked")
+		List<Map<String, Object>> questions = (List<Map<String, Object>>) result(stored).get("questions");
+		Map<String, Object> mismatch = questions.stream().filter(q -> "type_mismatch".equals(q.get("kind"))).findFirst()
+				.orElseThrow(() -> new AssertionError("no type_mismatch question: " + questions));
+		ToolResponse answered = tools.remember(NONE, NONE, NONE, NONE, Optional.empty(), NONE, NONE, null,
+				Optional.empty(), NONE, List.of(Map.of("question_id", mismatch.get("id"), "choice", "kind:critter")));
+		assertFalse(answered.isError(), text(answered));
+		assertEquals("critter", result(tools.inspect("type:hound", Optional.empty(), NONE)).get("parent"));
 	}
 
 	@Test

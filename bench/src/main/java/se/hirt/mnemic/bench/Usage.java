@@ -80,8 +80,12 @@ public final class Usage {
 	private Usage() {
 	}
 
-	/** One thing the user does: says something, or asks something with the answer a judge should accept. */
-	record Step(String say, String ask, String expect, String type) {
+	/**
+	 * One thing the user does: says something, asks something with the answer a judge should accept, or comes back
+	 * another day ({@code brk}: the conversation is over, the server is started afresh on the same store, and what the
+	 * assistant knows from here on is what it recalls).
+	 */
+	record Step(String say, String ask, String expect, String type, boolean brk) {
 		boolean question() {
 			return ask != null;
 		}
@@ -101,8 +105,12 @@ public final class Usage {
 	}
 
 	private static final Pattern REPLY_SALVAGE = Pattern.compile("\"reply\"\\s*:\\s*\"(.*)", Pattern.DOTALL);
+	private static final Pattern INVOKE = Pattern.compile("<invoke\\s+name=\"([a-z_]+)\"\\s*>(.*?)</invoke>",
+			Pattern.DOTALL);
+	private static final Pattern PARAMETER = Pattern.compile("<parameter\\s+name=\"([^\"]+)\"\\s*>(.*?)</parameter>",
+			Pattern.DOTALL);
 	private static final Pattern LEADING_TOOL = Pattern
-			.compile("^[*_`\\s]*([a-z_]+)[*_`\\s:]*(?:```(?:json)?\\s*)?(?=\\{)");
+			.compile("^[*_`\\s]*(?:[Tt]ool\\s*:?\\s*)?([a-z_]+)[*_`\\s:]*(?:```(?:json)?\\s*)?(?=\\{)");
 
 	static List<Scenario> load(Path script) throws IOException {
 		JsonNode root = JSON.readTree(Files.readString(script, StandardCharsets.UTF_8));
@@ -111,7 +119,7 @@ public final class Usage {
 			var steps = new ArrayList<Step>();
 			for (JsonNode st : s.get("steps")) {
 				steps.add(new Step(text(st, "say"), text(st, "ask"), text(st, "expect"),
-						st.has("type") ? st.get("type").asText() : "fact"));
+						st.has("type") ? st.get("type").asText() : "fact", st.path("break").asBoolean(false)));
 			}
 			out.add(new Scenario(s.get("id").asText(), s.path("owner").asText("Mattias Sandell"),
 					s.path("about").asText(""), steps));
@@ -142,6 +150,25 @@ public final class Usage {
 			return new Action(null, null, "", "", true);
 		}
 		String body = response.strip();
+		Matcher invoke = INVOKE.matcher(body);
+		if (invoke.find() && tools.contains(invoke.group(1))) {
+			// The model's own tool-call syntax, which a real client would execute; here it is read as the call.
+			var args = new LinkedHashMap<String, Object>();
+			Matcher param = PARAMETER.matcher(invoke.group(2));
+			while (param.find()) {
+				String value = param.group(2).strip();
+				Object parsed = value;
+				if (value.startsWith("{") || value.startsWith("[")) {
+					try {
+						parsed = JSON.readValue(value, Object.class);
+					} catch (IOException e) {
+						// keep the text
+					}
+				}
+				args.put(param.group(1), parsed);
+			}
+			return new Action(invoke.group(1), args, null, response, true);
+		}
 		int start = body.indexOf('{');
 		Matcher lead = LEADING_TOOL.matcher(body);
 		if (lead.find() && tools.contains(lead.group(1))) {
@@ -299,19 +326,40 @@ public final class Usage {
 				done++;
 				System.err.println("scenario " + sc.id());
 				Path home = Files.createTempDirectory("mnemic-usage");
-				try (McpClient client = McpClient.start(server, home, sc.owner(), embed)) {
+				McpClient client = McpClient.start(server, home, sc.owner(), embed);
+				try {
 					List<Map<String, Object>> tools = client.listTools();
 					String system = systemPrompt(tools);
 					Set<String> toolNames = tools.stream().map(t -> (String) t.get("name")).collect(Collectors.toSet());
 					var transcript = new StringBuilder();
+					boolean afterBreak = false;
+					boolean recalledInConversation = false;
 					for (int i = 0; i < sc.steps().size(); i++) {
-						Map<String, Object> rec = step(sc, i, sc.steps().get(i), assistant, judge, client, system,
-								toolNames, transcript, maxCalls);
+						Step st = sc.steps().get(i);
+						Map<String, Object> rec;
+						if (st.brk()) {
+							// Another day: the same store under a new server, and an empty conversation.
+							client.close();
+							client = McpClient.start(server, home, sc.owner(), embed);
+							transcript.setLength(0);
+							afterBreak = true;
+							recalledInConversation = false;
+							rec = new LinkedHashMap<>();
+							rec.put("scenario", sc.id());
+							rec.put("step", i);
+							rec.put("kind", "break");
+						} else {
+							rec = step(sc, i, st, assistant, judge, client, system, toolNames, transcript, maxCalls,
+									afterBreak, recalledInConversation);
+							recalledInConversation |= Boolean.TRUE.equals(rec.get("recalled_in_conversation"));
+						}
 						records.add(rec);
 						trace.write(LINE.writeValueAsString(rec));
 						trace.newLine();
 						trace.flush();
 					}
+				} finally {
+					client.close();
 				}
 			}
 		}
@@ -354,7 +402,8 @@ public final class Usage {
 
 	private static Map<String, Object> step(
 		Scenario sc, int index, Step st, ChatModel assistant, Judge judge, McpClient client, String system,
-		Set<String> toolNames, StringBuilder transcript, int maxCalls) throws Exception {
+		Set<String> toolNames, StringBuilder transcript, int maxCalls, boolean afterBreak, boolean recalledEarlier)
+			throws Exception {
 		String said = st.question() ? st.ask() : st.say();
 		transcript.append("User: ").append(said).append('\n');
 		var calls = new ArrayList<Map<String, Object>>();
@@ -403,6 +452,9 @@ public final class Usage {
 		rec.put("scenario", sc.id());
 		rec.put("step", index);
 		rec.put("kind", st.question() ? "ask" : "say");
+		if (afterBreak) {
+			rec.put("after_break", true);
+		}
 		rec.put("text", said);
 		rec.put("calls", calls);
 		rec.put("tool_calls", calls.size());
@@ -414,10 +466,14 @@ public final class Usage {
 		if (st.question()) {
 			rec.put("expect", st.expect());
 			rec.put("type", st.type());
-			rec.put("recalled_before_answer", calls.stream().anyMatch(c -> "recall".equals(c.get("tool"))));
+			boolean recalledNow = calls.stream().anyMatch(c -> "recall".equals(c.get("tool")));
+			rec.put("recalled_before_answer", recalledNow);
+			// A recall earlier in the same conversation counts too: its block is still in front of the model.
+			rec.put("recalled_in_conversation", recalledNow || recalledEarlier);
 			rec.put("last_verdict", lastVerdict);
 			if (judge != null) {
-				String qid = sc.id() + "-" + index + ("abstention".equals(st.type()) ? "_abs" : "");
+				// No "_abs" suffix: an abstention here is judged by the memory-assistant rule, not LongMemEval's.
+				String qid = sc.id() + "-" + index;
 				boolean correct = judge.correct(qid, judgeType(st.type()), st.ask(), st.expect(), reply);
 				rec.put("correct", correct);
 			}
@@ -433,6 +489,7 @@ public final class Usage {
 		return switch (type == null ? "fact" : type) {
 		case "update" -> "knowledge-update";
 		case "temporal" -> "temporal-reasoning";
+		case "abstention" -> "abstention";
 		default -> "single-session-user";
 		};
 	}
@@ -480,8 +537,16 @@ public final class Usage {
 		int answeredOnMiss = 0;
 		int calls = 0;
 		int parseFailures = 0;
+		int asksAfterBreak = 0;
+		int recalledFirstAfterBreak = 0;
+		int recalledInConversationAfterBreak = 0;
+		int judgedAfterBreak = 0;
+		int correctAfterBreak = 0;
 		var byScenario = new LinkedHashMap<String, int[]>(); // asked, correct
 		for (Map<String, Object> r : records) {
+			if ("break".equals(r.get("kind"))) {
+				continue;
+			}
 			calls += (int) r.getOrDefault("tool_calls", 0);
 			parseFailures += (int) r.getOrDefault("parse_failures", 0);
 			if ("say".equals(r.get("kind"))) {
@@ -493,6 +558,11 @@ public final class Usage {
 			asks++;
 			boolean recalled = Boolean.TRUE.equals(r.get("recalled_before_answer"));
 			recalledFirst += recalled ? 1 : 0;
+			boolean afterBreak = Boolean.TRUE.equals(r.get("after_break"));
+			asksAfterBreak += afterBreak ? 1 : 0;
+			recalledFirstAfterBreak += afterBreak && recalled ? 1 : 0;
+			recalledInConversationAfterBreak += afterBreak
+					&& (recalled || Boolean.TRUE.equals(r.get("recalled_in_conversation"))) ? 1 : 0;
 			boolean abstention = "abstention".equals(r.get("type"));
 			abstentions += abstention ? 1 : 0;
 			int[] sc = byScenario.computeIfAbsent(String.valueOf(r.get("scenario")), k -> new int[2]);
@@ -502,6 +572,8 @@ public final class Usage {
 				boolean ok = Boolean.TRUE.equals(r.get("correct"));
 				correct += ok ? 1 : 0;
 				sc[1] += ok ? 1 : 0;
+				judgedAfterBreak += afterBreak ? 1 : 0;
+				correctAfterBreak += afterBreak && ok ? 1 : 0;
 				abstentionsCorrect += abstention && ok ? 1 : 0;
 				String verdict = String.valueOf(r.get("last_verdict"));
 				if (!ok && !abstention && ("MISS".equals(verdict) || "unresolved".equals(verdict))) {
@@ -523,6 +595,11 @@ public final class Usage {
 		m.put("abstention_questions", abstentions);
 		m.put("abstention_correct", abstentionsCorrect);
 		m.put("wrong_answers_on_a_miss", answeredOnMiss);
+		// After a break the conversation holds nothing: these are the questions only the memory can answer.
+		m.put("questions_after_break", asksAfterBreak);
+		m.put("recall_first_rate_after_break", rate(recalledFirstAfterBreak, asksAfterBreak));
+		m.put("recall_in_conversation_rate_after_break", rate(recalledInConversationAfterBreak, asksAfterBreak));
+		m.put("accuracy_after_break", rate(correctAfterBreak, judgedAfterBreak));
 		m.put("tool_calls", calls);
 		m.put("tool_calls_per_step", records.isEmpty() ? 0 : Math.round(10.0 * calls / records.size()) / 10.0);
 		m.put("protocol_slips", parseFailures);

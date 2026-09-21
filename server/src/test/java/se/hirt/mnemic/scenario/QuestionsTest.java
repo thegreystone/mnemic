@@ -37,6 +37,7 @@ import se.hirt.mnemic.knowledge.Entity;
 import se.hirt.mnemic.knowledge.Fact;
 import se.hirt.mnemic.knowledge.QuestionResolver.Resolve;
 import se.hirt.mnemic.knowledge.Question;
+import se.hirt.mnemic.proposal.Proposal.EntityTypeDef;
 import se.hirt.mnemic.proposal.Proposal.PredicateDef;
 import se.hirt.mnemic.recall.RecallResult;
 import se.hirt.mnemic.recall.TokenEstimator;
@@ -162,6 +163,49 @@ class QuestionsTest {
 			RememberOutcome anna = remember(e, "Marit called.",
 					proposal().entity("e1", "Marit", "person").fact("self", "knows", "e1"));
 			assertEquals(1, anna.applied().questions().size(), "'Marit' vs 'Marit Nyberg' stays a question");
+		}
+	}
+
+	@Test
+	void entityTypesInOneProposalMayNameEachOtherAsParents() {
+		try (Engine e = engine("types-in-order")) {
+			// "dog" names "animal" as its parent, and "animal" is defined after it in the same proposal.
+			RememberOutcome o = remember(e, "Our dog is called Rufus.",
+					proposal().entity("r", "Rufus", "dog").fact("self", "owns", "r")
+							.entityType(new EntityTypeDef("dog", "A domestic dog", "animal", List.of(),
+									List.of("dog", "puppy")))
+							.entityType(new EntityTypeDef("animal", "A living animal", null, List.of(), List.of())));
+			assertEquals("animal", e.entityTypes().get("dog").orElseThrow().parent(), o.applied().toString());
+			assertTrue(o.applied().warnings().stream().noneMatch(w -> w.contains("unknown parent")),
+					o.applied().warnings().toString());
+			assertTrue(o.applied().questions().stream().noneMatch(q -> "type_kind".equals(q.get("kind"))),
+					"the kind was stated, so it is not asked: " + o.applied().questions());
+		}
+	}
+
+	@Test
+	void anAnswerThatSettlesALaterAnswerInTheSameBatchDoesNotFailTheBatch() {
+		try (Engine e = engine("batch-settles")) {
+			// A new type with no stated kind, used where a person is expected: the store asks what kind of thing a
+			// dog is, and whether the mismatch is fine. Answering the kind settles the mismatch.
+			RememberOutcome o = remember(e, "Rufus works at Initrode.",
+					proposal().entity("r", "Rufus", "dog").fact("r", "works_at", "Initrode"));
+			List<Map<String, Object>> asked = o.applied().questions();
+			String kind = asked.stream().filter(q -> "type_kind".equals(q.get("kind"))).map(q -> q.get("id").toString())
+					.findFirst().orElseThrow(() -> new AssertionError("no type_kind question: " + asked));
+			String mismatch = asked.stream().filter(q -> "type_mismatch".equals(q.get("kind")))
+					.map(q -> q.get("id").toString()).findFirst()
+					.orElseThrow(() -> new AssertionError("no type_mismatch question: " + asked));
+			RememberOutcome answered = remember(e, "A dog is a person here.", null, new Resolve(kind, "person"),
+					new Resolve(mismatch, "kind:person"));
+			assertEquals(2, answered.resolved().size(), answered.resolved().toString());
+			assertEquals("answered", answered.resolved().get(0).get("status"), answered.resolved().toString());
+			assertTrue(answered.resolved().get(1).get("status").toString().startsWith("already"),
+					"settled by the first answer, reported rather than refused: " + answered.resolved());
+			assertEquals(0, e.questions().openCount());
+			// Repeating an answer is reported the same way, never an error.
+			RememberOutcome again = remember(e, "Yes, a person.", null, new Resolve(kind, "person"));
+			assertEquals("already answered", again.resolved().getFirst().get("status"), again.resolved().toString());
 		}
 	}
 
@@ -428,13 +472,13 @@ class QuestionsTest {
 			assertEquals("current", stored(e, c, 0).status(), "Initech stays");
 			assertEquals(0, e.questions().openCount());
 
-			// a closed question cannot be answered twice
-			try {
-				remember(e, "Again.", null, new Resolve(questionId(d), "reject"));
-				assertTrue(false, "expected a conflict error");
-			} catch (se.hirt.mnemic.protocol.MnemicException ex) {
-				assertEquals(se.hirt.mnemic.protocol.MnemicException.Code.CONFLICT, ex.code());
-			}
+			// a closed question answered again: reported as such, nothing changes, nothing fails (an assistant
+			// that repeats a batch after one item failed must not be refused for the items that went through)
+			RememberOutcome again = remember(e, "Again.", null, new Resolve(questionId(d), "ended"));
+			assertEquals("already answered", again.resolved().getFirst().get("status"), again.resolved().toString());
+			assertEquals("reject", again.resolved().getFirst().get("answer"), "the standing answer is shown");
+			assertEquals("rejected", stored(e, d, 0).status(), "the second answer did not apply");
+			assertEquals("current", stored(e, c, 0).status());
 		}
 	}
 

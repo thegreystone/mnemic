@@ -1,5 +1,5 @@
 {
-  "about": "Scripted conversations for the usage bench (bench usage). Each scenario is a fresh store for the fictional owner Mattias Sandell. A step either says something (the assistant should record what is worth keeping) or asks something with the answer a judge should accept; type is fact (default), update (the latest value wins), temporal (a point in time), or abstention (the right answer is that it is not known). Nothing here is a real person.",
+  "about": "Scripted conversations for the usage bench (bench usage). Each scenario is a fresh store for the fictional owner Mattias Sandell. A step either says something (the assistant should record what is worth keeping) or asks something with the answer a judge should accept; type is fact (default), update (the latest value wins), temporal (a point in time), or abstention (the right answer is that it is not known). A step {\"break\": true} ends the conversation: the server is started afresh on the same store and the assistant meets an empty transcript, so what follows can only be answered from memory. Nothing here is a real person.",
   "scenarios": [
     {
       "id": "family-basics",
@@ -111,6 +111,41 @@
       "steps": [
         {"say": "I prefer to be reached on WhatsApp rather than email for anything urgent."},
         {"ask": "How should someone reach me if it is urgent?", "expect": "On WhatsApp rather than email."}
+      ]
+    },
+    {
+      "id": "another-day",
+      "about": "Facts stated in one conversation and asked for in the next, when only the memory can answer.",
+      "steps": [
+        {"say": "My mother is Gunilla Nyberg and my father is Konrad Nyberg."},
+        {"say": "I have worked at Hooli since March 2018."},
+        {"say": "I prefer to be reached on WhatsApp rather than email for anything urgent."},
+        {"break": true},
+        {"ask": "Who is my mother?", "expect": "Gunilla Nyberg"},
+        {"ask": "Where do I work?", "expect": "Hooli"},
+        {"ask": "How should someone reach me if it is urgent?", "expect": "On WhatsApp rather than email."},
+        {"ask": "Do I have a brother?", "expect": "Not known: nothing about a brother has been recorded.", "type": "abstention"}
+      ]
+    },
+    {
+      "id": "decision-another-day",
+      "about": "A decision recorded one day and asked about the next.",
+      "steps": [
+        {"say": "For the Mnemic project we decided to use SQLite as the store, one file per data home."},
+        {"break": true},
+        {"ask": "Which database did we decide on for Mnemic?", "expect": "SQLite"}
+      ]
+    },
+    {
+      "id": "correction-another-day",
+      "about": "A fact stated one day, corrected the next in a conversation that never saw it, and asked for on a third.",
+      "steps": [
+        {"say": "I live in Zürich."},
+        {"break": true},
+        {"say": "No, that was wrong: I live in Schübelbach, not Zürich."},
+        {"break": true},
+        {"ask": "Where do I live?", "expect": "Schübelbach", "type": "update"},
+        {"ask": "Did I ever say I lived somewhere else?", "expect": "Yes, Zürich, which was corrected to Schübelbach."}
       ]
     }
   ]

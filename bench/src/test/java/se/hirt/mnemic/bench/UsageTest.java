@@ -94,6 +94,22 @@ class UsageTest {
 		assertTrue(fencedCall.isCall(), "the tool named, then its arguments in a fence");
 		assertEquals("correct", fencedCall.tool());
 		assertEquals("f-2", fencedCall.arguments().get("target"));
+		Usage.Action labelled = Usage.parse("**Tool: correct**\n```json\n{\"target\": \"f-2\"}\n```",
+				Set.of("correct"));
+		assertTrue(labelled.isCall(), "a 'Tool:' label before the name");
+		assertEquals("correct", labelled.tool());
+		Usage.Action invoked = Usage
+				.parse("<invoke name=\"recall\">\n<parameter name=\"query\">Anna's siblings</parameter>\n</invoke>\n"
+						+ "[\"mnemic-recall: connection refused\"]", Set.of("recall"));
+		assertTrue(invoked.isCall(), "the model's own tool syntax is a call, and its made-up result is ignored");
+		assertTrue(invoked.slip());
+		assertEquals("recall", invoked.tool());
+		assertEquals("Anna's siblings", invoked.arguments().get("query"));
+		Usage.Action invokedEmpty = Usage.parse("<invoke name=\"recall\">\n</invoke>\nNo result", Set.of("recall"));
+		assertTrue(invokedEmpty.isCall() && invokedEmpty.arguments().isEmpty(), "a briefing call");
+		Usage.Action invokedJson = Usage.parse("<invoke name=\"remember\"><parameter name=\"text\">x</parameter>"
+				+ "<parameter name=\"proposal\">{\"facts\": []}</parameter></invoke>", Set.of("remember"));
+		assertTrue(invokedJson.arguments().get("proposal") instanceof Map, "JSON-shaped values are parsed");
 		Usage.Action notATool = Usage.parse("**note** {\"reply\": \"x\"}", Set.of("recall"));
 		assertFalse(notATool.isCall());
 		assertEquals("x", notATool.reply());
@@ -104,6 +120,15 @@ class UsageTest {
 				"{\"tool\": \"remember\", \"arguments\": {\"text\": \"x\", \"proposal\": {\"facts\": [{\"subject\": \"self\"}]}}}");
 		assertTrue(nested.isCall());
 		assertTrue(nested.arguments().get("proposal") instanceof Map);
+	}
+
+	@Test
+	void anAbstentionIsJudgedByTheMemoryRuleNotLongMemEvals() {
+		String memory = Judge.prompt("family-basics-3", "abstention", "Do I have a brother?", "Not known.",
+				"I have no record of any siblings.");
+		assertTrue(memory.contains("no record") && memory.contains("asserts an answer"), memory);
+		String longMemEval = Judge.prompt("q1_abs", "single-session-user", "x", "y", "z");
+		assertTrue(longMemEval.contains("unanswerable"), "the retrieval bench keeps LongMemEval's own rule");
 	}
 
 	@Test
@@ -161,5 +186,32 @@ class UsageTest {
 				"every scenario asks something");
 		assertTrue(scenarios.stream().flatMap(sc -> sc.steps().stream()).filter(Usage.Step::question)
 				.allMatch(st -> st.expect() != null && !st.expect().isBlank()), "every question has its answer");
+		Usage.Scenario anotherDay = scenarios.stream().filter(sc -> sc.id().equals("another-day")).findFirst()
+				.orElseThrow();
+		assertTrue(anotherDay.steps().stream().anyMatch(Usage.Step::brk), "a break step loads as one");
+		assertTrue(anotherDay.steps().stream().filter(Usage.Step::brk).allMatch(st -> !st.question()));
+	}
+
+	@Test
+	void questionsAfterABreakAreCountedOnTheirOwn() {
+		List<Map<String, Object>> records = List.of(Map.of("scenario", "a", "kind", "say", "tool_calls", 1,
+				"parse_failures", 0, "remembered", true, "remembered_with_reading", true),
+				Map.of("scenario", "a", "kind", "break", "step", 1),
+				Map.of("scenario", "a", "kind", "ask", "tool_calls", 1, "parse_failures", 0, "type", "fact",
+						"recalled_before_answer", true, "last_verdict", "matched", "correct", true, "after_break",
+						true),
+				Map.of("scenario", "a", "kind", "ask", "tool_calls", 0, "parse_failures", 0, "type", "fact",
+						"recalled_before_answer", false, "recalled_in_conversation", true, "correct", false,
+						"after_break", true),
+				Map.of("scenario", "b", "kind", "ask", "tool_calls", 0, "parse_failures", 0, "type", "fact",
+						"recalled_before_answer", false, "correct", true));
+		Map<String, Object> s = Usage.summarise(records);
+		assertEquals(3, s.get("questions"), "the break is not a question");
+		assertEquals(2, s.get("questions_after_break"));
+		assertEquals(0.5, s.get("recall_first_rate_after_break"));
+		assertEquals(1.0, s.get("recall_in_conversation_rate_after_break"),
+				"the second question had a recall earlier in the same conversation");
+		assertEquals(0.5, s.get("accuracy_after_break"));
+		assertEquals(1, s.get("statements"));
 	}
 }

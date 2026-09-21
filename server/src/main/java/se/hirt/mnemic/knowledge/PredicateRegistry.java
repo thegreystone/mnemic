@@ -946,6 +946,14 @@ public final class PredicateRegistry {
 		validateRules(name, parsed);
 		Map<String, Map<String, String>> implied = parseImplies(name, def.implies());
 		registerGroupsFromUse(groups);
+		// A domain or range naming a type the registry lacks is the statement that the type exists: registered from
+		// this use, so that the kinds the predicate offers in a mismatch question can be chosen.
+		for (String t : domain) {
+			registerTypeFromUse(t, observationId);
+		}
+		for (String t : range) {
+			registerTypeFromUse(t, observationId);
+		}
 		insert(p);
 		if (!parsed.isEmpty()) {
 			setRules(name, parsed);
@@ -1968,6 +1976,12 @@ public final class PredicateRegistry {
 				list(r.str("aliases")), list(r.str("inverse_lexicon")), r.lngOrNull("defined_by"), r.lng("seed") == 1,
 				r.lng("inferred") == 1, r.lng("containment") == 1, list(r.str("groups")), r.lng("lasting") == 1,
 				r.lng("lasting_stated") == 1);
+	}
+
+	private void registerTypeFromUse(String type, Long observationId) {
+		if (!"*".equals(type) && !"literal".equals(type) && entityTypes.get(type).isEmpty()) {
+			entityTypes.registerInferred(type, observationId);
+		}
 	}
 
 	private List<String> types(String csv) {
