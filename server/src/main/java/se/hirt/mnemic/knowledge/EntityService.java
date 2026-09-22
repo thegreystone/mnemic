@@ -789,6 +789,41 @@ public final class EntityService {
 	}
 
 	/**
+	 * The namesakes of a name: every entity with a longer name that carries these words as a run, "Polestar 4" and
+	 * "Hans Nordvik" for "Polestar" and "Nordvik". What a question may mean by a name when the thing that carries the
+	 * name exactly cannot be what it asks about. The owner is never one.
+	 */
+	public List<Entity> namesakes(String name) {
+		List<String> words = Names.tokens(name);
+		if (words.isEmpty()) {
+			return List.of();
+		}
+		String gram = String.join(" ", words);
+		String needle = gram.replace("%", "").replace("_", "");
+		var out = new LinkedHashMap<Long, Entity>();
+		for (Row r : db.read(tx -> tx.query("""
+				SELECT e.*, a.alias_norm AS alias_norm FROM entity_alias a JOIN entity e ON e.id = a.entity_id
+				WHERE a.alias_norm LIKE '%' || ? || '%' AND a.alias_norm <> ? AND e.merged_into IS NULL AND e.id <> ?
+				ORDER BY e.id""", needle, gram, owner.id()))) {
+			List<String> at = Names.tokens(r.str("alias_norm"));
+			if (at.size() > words.size() && containsRun(at, words)) {
+				Entity e = Entity.from(r);
+				out.putIfAbsent(e.id(), e);
+			}
+		}
+		return new ArrayList<>(out.values());
+	}
+
+	private static boolean containsRun(List<String> tokens, List<String> run) {
+		for (int i = 0; i + run.size() <= tokens.size(); i++) {
+			if (tokens.subList(i, i + run.size()).equals(run)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
 	 * The family a shorter name refers to: every entity whose alias, with its model numbers removed, is the words
 	 * given. "raspberry pi" spots Raspberry Pi 4 and Raspberry Pi 5 alike, and the reader sorts them out; "raspberry pi
 	 * 5" is exact and spots one. Nothing is spotted for a name that is itself a plain word.

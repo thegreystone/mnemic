@@ -717,6 +717,37 @@ class MnemicToolsTest {
 	}
 
 	@Test
+	void aNameThatLandsOnTheWrongKindOfThingIsReadAsItsNamesakeOfTheRightKind() {
+		// The maker and the car share a name: "the Polestar" spots the organization exactly, and plates are a
+		// vehicle's. The structured verdict said MISS while the lexical hit was the plate fact (2026-09-22).
+		remember("Polestar issued me a digital key for the car.",
+				Map.of("entities", List.of(Map.of("ref", "e1", "name", "Polestar", "type", "organization")), "facts",
+						List.of(Map.of("subject", "self", "predicate", "uses", "object", "e1"))),
+				"namesake-1");
+		Map<String, Object> plate = Map.of("entities", List.of(Map.of("ref", "e1", "name",
+				"Polestar 4 Long Range Dual Motor Prime", "type", "vehicle", "aliases", List.of("Polestar 4"))),
+				"predicates",
+				List.of(Map.of("name", "has_plate", "description", "A vehicle carries this registration plate.",
+						"domain", "vehicle", "range", "*", "lexicon", List.of("plate", "registration plate"))),
+				"facts", List.of(Map.of("subject", "e1", "predicate", "has_plate", "object", "SZ 121742")));
+		ToolResponse stored = remember("The plate for the Polestar is SZ 121742.", plate, "namesake-2");
+		assertFalse(stored.isError(), text(stored));
+		String block = text(tools.recall(Optional.of("What is the registration plate for the Polestar again?"), NONE,
+				Optional.of(600), Optional.empty(), Optional.empty()));
+		assertTrue(block.contains("structured: matched"), block);
+		assertTrue(block.contains("SZ 121742"), block);
+		assertTrue(block.contains("'Polestar' read as Polestar 4 Long Range Dual Motor Prime"), block);
+		// Asked about the organization with a predicate that does apply to it, the organization answers as before.
+		String org = text(tools.recall(Optional.of("what does Mattias use"), NONE, Optional.of(400), Optional.empty(),
+				Optional.empty()));
+		assertTrue(org.contains("uses Polestar") || org.contains("uses → 1 fact"), org);
+		// And a name with no namesake of the right kind is still a MISS, not a guess.
+		String miss = text(tools.recall(Optional.of("what is the registration plate for Hooli"), NONE, Optional.of(400),
+				Optional.empty(), Optional.empty()));
+		assertTrue(miss.contains("MISS") || miss.contains("unresolved"), miss);
+	}
+
+	@Test
 	void asOfTakesAYearOrAMonthAndMeansItsEnd() {
 		assertEquals("2015-12-31T23:59:59Z", MnemicTools.instant("2015").toString());
 		assertEquals("2016-02-29T23:59:59Z", MnemicTools.instant("2016-02").toString());

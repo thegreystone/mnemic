@@ -110,55 +110,37 @@ final class StructuredProbe {
 	private Structured probeOne(Query q, Query.Bound bound, Instant asOf, Instant now, boolean includeHistory) {
 		Cue cue = bound.cue();
 		List<Entity> subjects = bound.hasSubject() ? bound.subjects() : q.spotted();
-		Entity entity = subjects.getFirst();
 		var matched = new ArrayList<Fact>();
 		var near = new ArrayList<Fact>();
 		var future = new ArrayList<Fact>();
 		var notes = new ArrayList<String>();
 		for (Entity e : subjects) {
-			String direction = direction(cue, e, q.text());
-			// A past-tense yes/no question is answered by ended facts too.
-			for (Fact f : facts.probe(e.id(), cue.predicate().name(), asOf, now, includeHistory || q.past())) {
-				if (q.past() && "corrected".equals(f.status())) {
-					continue;
+			probeFacts(q, cue, e, direction(cue, e, q.text()), asOf, now, includeHistory, matched, near, future, notes);
+		}
+		// "The plate for the Polestar": the name lands on the maker, an organization, and plates are a vehicle's.
+		// When nothing was found and the named thing is of a kind the predicate does not apply to, a namesake of
+		// the fitting kind ("Polestar 4", the car) is what the question meant, on the side it fits.
+		var readAs = new HashSet<Long>(); // the named things a namesake stood in for: no longer what the question is about
+		if (matched.isEmpty() && near.isEmpty() && future.isEmpty()) {
+			List<Alternate> alternates = namesakesThatFit(cue, subjects);
+			if (!alternates.isEmpty()) {
+				for (Alternate a : alternates) {
+					probeFacts(q, cue, a.entity(), a.side(), asOf, now, includeHistory, matched, near, future, notes);
 				}
-				// A fact valid from a later date is recorded, not yet so: neither a match nor a miss. With as_of
-				// the date decides.
-				if (asOf == null && "future".equals(f.state(now))) {
-					if (future.stream().noneMatch(m -> m.id() == f.id())) {
-						future.add(f);
-					}
-					continue;
-				}
-				if ("subject".equals(direction) && f.subjectId() != e.id()) {
-					continue; // "Mattias's children": Mattias is the parent, the subject
-				}
-				if ("object".equals(direction) && (f.objectId() == null || f.objectId() != e.id())) {
-					continue; // "Mattias's father": Mattias is the child, the object
-				}
-				// A symmetric relation is stored once with the qualifier describing the subject; asked from the
-				// other side ("Mattias's half-sister" against "Mattias is Clara's half-brother") the family matches
-				// and the gender, which is not on record, is not invented.
-				boolean qualifierOk = cue.qualifier() == null || cue.qualifier().equalsIgnoreCase(f.qualifier())
-						|| Predicate.qualifierWithin(cue.qualifier(), f.qualifier())
-						|| (f.qualifier() == null && cue.predicate().qualifiers().isEmpty())
-						|| (cue.predicate().symmetric()
-								&& Predicate.sameQualifierFamily(cue.qualifier(), f.qualifier()));
-				if (qualifierOk) {
-					if (matched.stream().noneMatch(m -> m.id() == f.id())) {
-						matched.add(f);
-						// "aunt" asked, "aunt or uncle" on record: it answers, and says what is not on record.
-						if (cue.qualifier() != null && f.qualifier() != null
-								&& !cue.qualifier().equalsIgnoreCase(f.qualifier())) {
-							notes.add(f.ref() + " is recorded as '" + f.qualifier() + "', which covers '"
-									+ cue.qualifier() + "' without settling it");
-						}
-					}
-				} else {
-					near.add(f);
+				if (!matched.isEmpty() || !near.isEmpty() || !future.isEmpty()) {
+					Entity named = subjects.getFirst();
+					Alternate first = alternates.getFirst();
+					List<String> kinds = "object".equals(first.side()) ? cue.predicate().range()
+							: cue.predicate().domain();
+					notes.add("'" + named.name() + "' read as " + first.entity().name() + ": " + cue.predicate().name()
+							+ " is of " + article(kinds.getFirst()) + " " + String.join(" or ", kinds) + ", and "
+							+ named.name() + " is " + article(named.type()) + " " + named.type());
+					subjects.forEach(e -> readAs.add(e.id()));
+					subjects = alternates.stream().map(Alternate::entity).toList();
 				}
 			}
 		}
+		Entity entity = subjects.getFirst();
 		// A fact held pending under this predicate (a conflict nobody has answered) contests the verdict: said.
 		for (Entity e : subjects) {
 			for (Fact p : facts.pending(e.id(), cue.predicate().name())) {
@@ -175,7 +157,7 @@ final class StructuredProbe {
 		// The other things the question names beside this relation's subject; the owner is a possessive as often
 		// as not ("where is my raspberry pi") and narrows nothing.
 		long ownerId = entities.owner().id();
-		List<Entity> xs = bound.others().stream().filter(e -> e.id() != ownerId).toList();
+		List<Entity> xs = bound.others().stream().filter(e -> e.id() != ownerId && !readAs.contains(e.id())).toList();
 		if (!xs.isEmpty() || !q.residual().isEmpty()) {
 			bounds.removeIf(x -> !covers(x, xs, q.residual()));
 		}
@@ -354,6 +336,97 @@ final class StructuredProbe {
 		return new Structured(state, entity.ref(), entity.name(), cue.predicate().name(), cue.qualifier(),
 				List.copyOf(matched), List.copyOf(near), chain, List.copyOf(bounds), decidedBy, basis,
 				List.copyOf(notes), List.copyOf(future), List.copyOf(ended)).withGroup(cue.group());
+	}
+
+	/** The facts of one entity under the cue, sorted into matched, near (the qualifier differs), and future. */
+	private void probeFacts(
+		Query q, Cue cue, Entity e, String direction, Instant asOf, Instant now, boolean includeHistory,
+		List<Fact> matched, List<Fact> near, List<Fact> future, List<String> notes) {
+		// A past-tense yes/no question is answered by ended facts too.
+		for (Fact f : facts.probe(e.id(), cue.predicate().name(), asOf, now, includeHistory || q.past())) {
+			if (q.past() && "corrected".equals(f.status())) {
+				continue;
+			}
+			// A fact valid from a later date is recorded, not yet so: neither a match nor a miss. With as_of
+			// the date decides.
+			if (asOf == null && "future".equals(f.state(now))) {
+				if (future.stream().noneMatch(m -> m.id() == f.id())) {
+					future.add(f);
+				}
+				continue;
+			}
+			if ("subject".equals(direction) && f.subjectId() != e.id()) {
+				continue; // "Mattias's children": Mattias is the parent, the subject
+			}
+			if ("object".equals(direction) && (f.objectId() == null || f.objectId() != e.id())) {
+				continue; // "Mattias's father": Mattias is the child, the object
+			}
+			// A symmetric relation is stored once with the qualifier describing the subject; asked from the
+			// other side ("Mattias's half-sister" against "Mattias is Clara's half-brother") the family matches
+			// and the gender, which is not on record, is not invented.
+			boolean qualifierOk = cue.qualifier() == null || cue.qualifier().equalsIgnoreCase(f.qualifier())
+					|| Predicate.qualifierWithin(cue.qualifier(), f.qualifier())
+					|| (f.qualifier() == null && cue.predicate().qualifiers().isEmpty())
+					|| (cue.predicate().symmetric() && Predicate.sameQualifierFamily(cue.qualifier(), f.qualifier()));
+			if (qualifierOk) {
+				if (matched.stream().noneMatch(m -> m.id() == f.id())) {
+					matched.add(f);
+					// "aunt" asked, "aunt or uncle" on record: it answers, and says what is not on record.
+					if (cue.qualifier() != null && f.qualifier() != null
+							&& !cue.qualifier().equalsIgnoreCase(f.qualifier())) {
+						notes.add(f.ref() + " is recorded as '" + f.qualifier() + "', which covers '" + cue.qualifier()
+								+ "' without settling it");
+					}
+				}
+			} else {
+				near.add(f);
+			}
+		}
+	}
+
+	/** A namesake of a named thing, and the side of the relation it fits. */
+	private record Alternate(Entity entity, String side) {
+	}
+
+	/**
+	 * Namesakes of the named things that the predicate applies to, when the named things themselves are of a kind it
+	 * does not: the members of the same name family ("Polestar 4" for "Polestar", "Hans Nordvik" for "Nordvik") whose
+	 * type is in the domain, as subjects, or in the range, as objects. A named thing that fits either side has no
+	 * namesake looked for: it was asked about and has nothing, which is a miss. A relation that takes anything on a
+	 * side never sends a name there.
+	 */
+	private List<Alternate> namesakesThatFit(Cue cue, List<Entity> subjects) {
+		var out = new ArrayList<Alternate>();
+		List<String> domain = cue.predicate().domain();
+		List<String> range = cue.predicate().range();
+		boolean openDomain = domain.contains("*") || domain.contains("literal");
+		boolean openRange = range.contains("*") || range.contains("literal");
+		for (Entity e : subjects) {
+			if (types.unplaced(e.type())) {
+				continue;
+			}
+			boolean fitsDomain = !openDomain && domain.stream().anyMatch(k -> types.isA(e.type(), k));
+			boolean fitsRange = !openRange && range.stream().anyMatch(k -> types.isA(e.type(), k));
+			if (fitsDomain || fitsRange || (openDomain && openRange)) {
+				continue;
+			}
+			for (Entity mate : entities.namesakes(e.name())) {
+				if (out.stream().anyMatch(a -> a.entity().id() == mate.id())) {
+					continue;
+				}
+				if (!openDomain && domain.stream().anyMatch(k -> types.isA(mate.type(), k))) {
+					out.add(new Alternate(mate, "subject"));
+				} else if (!openRange && range.stream().anyMatch(k -> types.isA(mate.type(), k))) {
+					out.add(new Alternate(mate, "object"));
+				}
+			}
+		}
+		return out;
+	}
+
+	private static String article(String word) {
+		return word != null && !word.isEmpty() && "aeiou".indexOf(Character.toLowerCase(word.charAt(0))) >= 0 ? "an"
+				: "a";
 	}
 
 	/** An entity without a predicate cue ("who is Bosse"): its facts are the channel. */
