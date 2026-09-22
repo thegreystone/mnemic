@@ -1672,11 +1672,25 @@ public final class FactService {
 				}
 			}
 			int reopened = reopen(tx, goneFacts, goneEvents);
-			// Aliases this observation added to entities it did not create (a fuzzy match's name) go with it; an
-			// entity's own name stays whatever added it.
-			for (Row al : tx.query("SELECT a.id, a.alias_norm, e.name FROM entity_alias a JOIN entity e ON e.id = "
-					+ "a.entity_id WHERE a.source_observation = ?", observationId)) {
-				if (!Names.norm(al.str("name")).equals(al.str("alias_norm"))) {
+			// An alias this observation added goes with it, unless another observation's reading names it: then it
+			// is the name that observation reached the entity by, and it moves there (a re-reading that left
+			// "Polestar 4" out of the aliases lost it for every observation that had used it, 2026-09-22). A fuzzy
+			// match's name that no other reading uses ("Hooli Inc") still goes. An entity's own name stays whatever
+			// added it.
+			for (Row al : tx.query("SELECT a.id, a.alias, a.alias_norm, e.name FROM entity_alias a JOIN entity e "
+					+ "ON e.id = a.entity_id WHERE a.source_observation = ?", observationId)) {
+				if (Names.norm(al.str("name")).equals(al.str("alias_norm"))) {
+					continue;
+				}
+				String needle = "\""
+						+ al.str("alias").toLowerCase(Locale.ROOT).replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
+				Long elsewhere = tx.query(
+						"SELECT id FROM observation WHERE id <> ? AND forgotten_at IS NULL AND proposal_json "
+								+ "IS NOT NULL AND instr(lower(proposal_json), ?) > 0 ORDER BY id LIMIT 1",
+						observationId, needle).stream().map(r -> r.lng("id")).findFirst().orElse(null);
+				if (elsewhere != null) {
+					tx.update("UPDATE entity_alias SET source_observation = ? WHERE id = ?", elsewhere, al.lng("id"));
+				} else {
 					tx.update("DELETE FROM entity_alias WHERE id = ?", al.lng("id"));
 				}
 			}

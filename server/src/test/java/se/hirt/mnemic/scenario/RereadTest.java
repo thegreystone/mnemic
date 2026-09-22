@@ -86,6 +86,37 @@ class RereadTest {
 	}
 
 	@Test
+	void aReReadingKeepsTheAliasesOtherObservationsReachedTheEntityBy() {
+		try (Engine e = TestHomes.engine("s27-reread-alias")) {
+			// The first reading names the car in full and gives it a short alias; a later observation uses the alias.
+			RememberOutcome first = remember(e, "I ordered a Polestar 4 Long Range Dual Motor.",
+					proposal().entity("e1", "Polestar 4 Long Range Dual Motor", "vehicle", "Polestar 4").fact("self",
+							"owns", "e1"));
+			long obs = obsId(first);
+			Entity car = e.entities().byRef("Polestar 4").orElseThrow();
+			RememberOutcome later = remember(e, "The Polestar 4 gets its plates on Tuesday.",
+					proposal().entity("e1", "Polestar 4", "vehicle").fact("self", "uses", "e1"));
+			assertTrue(later.applied().questions().isEmpty(), later.applied().questions().toString());
+			assertEquals(car.id(), e.entities().byRef(later.applied().entities().getFirst().id()).orElseThrow().id(),
+					"the later mention resolved through the alias");
+			// The first reading is replaced by one that leaves the alias out (an assistant fixing a date, say).
+			Reading r = e.reread(obs, proposal().entity("e1", "Polestar 4 Long Range Dual Motor", "vehicle")
+					.fact("self", "owns", "e1").build());
+			assertTrue(r.replaced());
+			assertEquals(car.id(), e.entities().byRef("Polestar 4").orElseThrow().id(),
+					"the alias the later observation used survives the re-reading (it was lost on 2026-09-22)");
+			assertTrue(e.entities().aliases(car.id()).contains("Polestar 4"),
+					e.entities().aliases(car.id()).toString());
+			// Forgetting for privacy is another matter: with nothing else using the entity, its aliases go too.
+			RememberOutcome lone = remember(e, "I also looked at a Volvo EX30 Twin Motor.", proposal()
+					.entity("e1", "Volvo EX30 Twin Motor", "vehicle", "EX30").fact("self", "considering", "e1"));
+			assertTrue(e.entities().byRef("EX30").isPresent());
+			e.forget(obsId(lone), false);
+			assertTrue(e.entities().byRef("EX30").isEmpty(), "the alias went with the only observation that used it");
+		}
+	}
+
+	@Test
 	@Scenario("S27")
 	void aReadingIsReplacedAndTheObservationKeepsItsIdentity() {
 		try (Engine e = TestHomes.engine("s27-reread")) {

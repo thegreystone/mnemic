@@ -153,12 +153,35 @@ public final class EventTypeRegistry {
 			return type.replace('_', ' ') + " (" + String.join(", ", participants) + ")";
 		}
 		String subject = participants.isEmpty() ? "" : participants.getFirst();
-		String object = participants.size() < 2 ? "" : String.join(", ", participants.subList(1, participants.size()));
-		String out = OPTIONAL.matcher(template)
-				.replaceAll(m -> object.isEmpty() ? "" : Matcher.quoteReplacement(m.group(1)));
-		out = out.replace("{subject}", subject).replace("{object}", object);
+		List<String> rest = participants.size() < 2 ? List.of() : participants.subList(1, participants.size());
+		// A template may give the third and fourth participants their own slots ({object2}, {object3}) or the rest
+		// one ({others}): "{subject} paid {object}[[ for {object2}]]". Without them {object} is everyone but the
+		// subject, joined, as before.
+		int named = template.contains("{object3}") ? 3 : template.contains("{object2}") ? 2 : 1;
+		boolean slotted = named > 1 || template.contains("{others}");
+		String object = rest.isEmpty() ? "" : slotted ? rest.getFirst() : String.join(", ", rest);
+		var slots = new LinkedHashMap<String, String>();
+		slots.put("{subject}", subject);
+		slots.put("{object}", object);
+		slots.put("{object2}", rest.size() > 1 ? rest.get(1) : "");
+		slots.put("{object3}", rest.size() > 2 ? rest.get(2) : "");
+		slots.put("{others}", rest.size() > 1 ? String.join(", ", rest.subList(1, rest.size())) : "");
+		// An optional segment vanishes when any slot in it has nothing to say.
+		String out = OPTIONAL.matcher(template).replaceAll(m -> {
+			String segment = m.group(1);
+			boolean empty = slots.entrySet().stream()
+					.anyMatch(s -> segment.contains(s.getKey()) && s.getValue().isEmpty());
+			return empty ? "" : Matcher.quoteReplacement(segment);
+		});
+		for (Map.Entry<String, String> s : slots.entrySet()) {
+			out = out.replace(s.getKey(), s.getValue());
+		}
 		if (!object.isEmpty() && !template.contains("{object}")) {
 			out += " (" + object + ")";
+		}
+		// Participants the template has no slot for are not lost: they follow in parentheses.
+		if (slotted && !template.contains("{others}") && rest.size() > named) {
+			out += " (" + String.join(", ", rest.subList(named, rest.size())) + ")";
 		}
 		return out.replaceAll("\\s+", " ").trim();
 	}

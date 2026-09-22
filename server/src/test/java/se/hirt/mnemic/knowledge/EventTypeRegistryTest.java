@@ -69,6 +69,44 @@ class EventTypeRegistryTest {
 	}
 
 	@Test
+	void aTemplateMayGiveTheThirdParticipantItsOwnSlot() {
+		try (Database db = open(TestHomes.fresh("events-render-slots"))) {
+			var types = new EventTypeRegistry(db);
+			// Without a slot for it, everyone but the subject is the object, joined: awkward with three (an
+			// assistant's remark on "Marcus Hirt paid Hammer Auto Center AG, Polestar 4", 2026-09-22).
+			types.register(new EventTypeDef("paid", "Subject paid object.", List.of(), List.of(), List.of(), false,
+					List.of("paid"), "{subject} paid {object}"), null, REGISTERED);
+			assertEquals("Marcus paid Hammer Auto, Polestar 4",
+					types.render("paid", List.of("Marcus", "Hammer Auto", "Polestar 4")));
+			// With one, the sentence says what each participant is, and a missing one takes its words with it.
+			types.update("paid", Map.<String, Object> of("render", "{subject} paid {object}[[ for {object2}]]"),
+					"clearer", REGISTERED);
+			assertEquals("Marcus paid Hammer Auto for Polestar 4",
+					types.render("paid", List.of("Marcus", "Hammer Auto", "Polestar 4")));
+			assertEquals("Marcus paid Hammer Auto", types.render("paid", List.of("Marcus", "Hammer Auto")));
+			assertEquals("Marcus paid", types.render("paid", List.of("Marcus")));
+			// A fourth participant the template has no slot for is not lost.
+			assertEquals("Marcus paid Hammer Auto for Polestar 4 (Malin)",
+					types.render("paid", List.of("Marcus", "Hammer Auto", "Polestar 4", "Malin")));
+			// {others} takes everyone after the object; {object3} a fourth by name.
+			types.update("paid", Map.<String, Object> of("render", "{subject} paid {object}[[ with {others}]]"),
+					"all of them", REGISTERED);
+			assertEquals("Marcus paid Hammer Auto with Polestar 4, Malin",
+					types.render("paid", List.of("Marcus", "Hammer Auto", "Polestar 4", "Malin")));
+			types.update("paid",
+					Map.<String, Object> of("render", "{subject} paid {object}[[ for {object2}]][[ via {object3}]]"),
+					"each", REGISTERED);
+			assertEquals("Marcus paid Hammer Auto for Polestar 4 via Malin",
+					types.render("paid", List.of("Marcus", "Hammer Auto", "Polestar 4", "Malin")));
+			assertEquals("Marcus paid Hammer Auto for Polestar 4",
+					types.render("paid", List.of("Marcus", "Hammer Auto", "Polestar 4")));
+			// The old optional form is unchanged: the segment goes when there is no object at all.
+			assertEquals("Mattias was born", types.render("born", List.of("Mattias")));
+			assertEquals("Mattias was born in Lund", types.render("born", List.of("Mattias", "Lund")));
+		}
+	}
+
+	@Test
 	void aRegistrationIsVisibleAtOnceAndAtTheNextStart() {
 		Path home = TestHomes.fresh("events-register");
 		try (Database db = open(home)) {
