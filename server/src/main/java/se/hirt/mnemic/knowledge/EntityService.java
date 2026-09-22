@@ -381,6 +381,9 @@ public final class EntityService {
 		}
 		List<String> words = Names.contentTokens(name);
 		Set<String> grams = trigrams(norm);
+		// "Marcus's iPad" is not Marcus: the possessor names whose the thing is, not what it is. Against a name with
+		// no possessive the possessor does not count as shared; against one with another possessor the things differ.
+		List<String> possessors = Names.possessors(name);
 		var out = new ArrayList<Candidate>();
 		for (Row r : tx.query("SELECT * FROM entity WHERE merged_into IS NULL AND id <> ?", owner.id())) {
 			Entity e = Entity.from(r);
@@ -401,8 +404,21 @@ public final class EntityService {
 				String an = Names.norm(alias);
 				List<String> at = types.identityTokens(alias, e.type()).stream().filter(EntityService::identity)
 						.toList();
-				long shared = tokens.stream().filter(at::contains).count();
+				List<String> aliasPossessors = Names.possessors(alias);
+				List<String> mine = tokens;
+				List<String> theirs = at;
+				if (!possessors.isEmpty() && aliasPossessors.isEmpty()) {
+					mine = tokens.stream().filter(t -> !possessors.contains(t)).toList();
+				} else if (possessors.isEmpty() && !aliasPossessors.isEmpty()) {
+					theirs = at.stream().filter(t -> !aliasPossessors.contains(t)).toList(); // "Marcus" is not the iPad
+				}
+				long shared = mine.stream().filter(theirs::contains).count();
 				double tokenScore = shared == 0 ? 0 : (double) shared / Math.max(tokens.size(), at.size());
+				// Malin's iPad is not Marcus's iPad, and a name that shares only its possessor's letters with
+				// another is not that other: neither may reach a question on letters alone.
+				boolean otherOwner = !possessors.isEmpty() && !aliasPossessors.isEmpty()
+						&& !possessors.equals(aliasPossessors);
+				boolean possessorOnly = shared == 0 && (mine != tokens || theirs != at);
 				// "Oskar Nyberg" against "Konrad Nyberg": two full names whose leading tokens differ share a
 				// family name, not an identity. "Anna" against "Anna Lindqvist" stays ambiguous.
 				if (tokens.size() >= 2 && at.size() >= 2 && !tokens.getFirst().equals(at.getFirst())
@@ -412,6 +428,9 @@ public final class EntityService {
 				}
 				double gramScore = an.length() >= 4 ? jaccard(grams, trigrams(an)) : 0;
 				double score = Math.max(tokenScore, gramScore);
+				if (otherOwner || possessorOnly) {
+					score = Math.min(score, AMBIGUOUS - 0.1);
+				}
 				// "coffee" against a project "Coff-E": no name part shared and not the same kind of thing. Letters
 				// alone raise a question across types only when the spellings nearly agree.
 				if (tokenScore == 0 && !type.equals(e.type()) && gramScore < LETTERS_ACROSS_TYPES) {

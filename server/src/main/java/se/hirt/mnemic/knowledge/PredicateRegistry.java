@@ -1765,7 +1765,7 @@ public final class PredicateRegistry {
 								"half-sister", "stepbrother", "stepsister")),
 				seed("owns", "Subject owns object.", List.of("*"), List.of("*"), false, null, false, "medium",
 						List.of("own", "owns", "owned", "buy", "bought", "purchase", "purchased", "acquired"),
-						"{subject} owns {object}", List.of()),
+						"{subject} owns {object}[[ ({qualifier})]]", List.of()),
 				seed("prefers", "Subject prefers object.", List.of("person"), List.of("*"), false, null, false,
 						"medium", List.of("prefer", "prefers", "favourite", "favorite", "likes", "like", "enjoys"),
 						"{subject} prefers {object}", List.of()),

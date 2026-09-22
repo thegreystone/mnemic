@@ -44,6 +44,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -681,6 +682,38 @@ class MnemicToolsTest {
 				Optional.empty(), NONE, List.of(Map.of("question_id", mismatch.get("id"), "choice", "kind:critter")));
 		assertFalse(answered.isError(), text(answered));
 		assertEquals("critter", result(tools.inspect("type:hound", Optional.empty(), NONE)).get("parent"));
+	}
+
+	@Test
+	void anAnswerGivenWithAReReadingIsGivenFirst() {
+		// An ambiguity, then the assistant's natural move: answer "new" and resend the reading in one call. The
+		// answer must not be dropped (it was, silently, and one assistant asked the same question three times).
+		remember("I met Ingrid Lund at the conference.",
+				Map.of("entities", List.of(Map.of("ref", "e1", "name", "Ingrid Lund", "type", "person")), "facts",
+						List.of(Map.of("subject", "self", "predicate", "knows", "object", "e1"))),
+				"reread-resolve-1");
+		Map<String, Object> reading = Map.of("entities",
+				List.of(Map.of("ref", "e1", "name", "Ingrid", "type", "person")), "facts",
+				List.of(Map.of("subject", "e1", "predicate", "works_at", "object", "Hooli")));
+		ToolResponse asked = remember("Ingrid is joining Hooli.", reading, "reread-resolve-2");
+		assertFalse(asked.isError(), text(asked));
+		@SuppressWarnings("unchecked")
+		List<Map<String, Object>> questions = (List<Map<String, Object>>) result(asked).get("questions");
+		assertEquals(1, questions.size(), questions.toString());
+		String obs = (String) result(asked).get("observation_id");
+		ToolResponse answeredAndReread = tools.remember(NONE, Optional.of(obs), NONE, NONE, Optional.empty(), NONE,
+				NONE, reading, Optional.empty(), NONE,
+				List.of(Map.of("question_id", questions.getFirst().get("id"), "choice", "new")));
+		assertFalse(answeredAndReread.isError(), text(answeredAndReread));
+		Map<String, Object> out = result(answeredAndReread);
+		assertTrue(out.get("resolved").toString().contains("answered"), "the answer was applied: " + out);
+		assertTrue(((List<?>) out.getOrDefault("questions", List.of())).isEmpty(),
+				"the new reading resolves to the entity the answer created: " + out);
+		Map<String, Object> ingrid = result(tools.inspect("Ingrid", Optional.empty(), NONE));
+		Map<String, Object> lund = result(tools.inspect("Ingrid Lund", Optional.empty(), NONE));
+		assertNotEquals(ingrid.get("id"), lund.get("id"), "a new Ingrid, as answered: " + ingrid + " / " + lund);
+		assertTrue(ingrid.get("facts").toString().contains("works_at"), "the re-reading's fact is on her: " + ingrid);
+		assertFalse(lund.get("facts").toString().contains("works_at"), "and not on Ingrid Lund: " + lund);
 	}
 
 	@Test

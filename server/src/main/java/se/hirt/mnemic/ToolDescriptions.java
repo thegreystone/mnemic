@@ -96,7 +96,9 @@ final class ToolDescriptions {
 	static final String REMEMBER_RESOLVE = "Answers to open questions: [{question_id: q-N, choice}]. The choice is one of the "
 			+ "question's numbered candidate ids; entity and predicate questions also take \"new\", conflicts take ended | "
 			+ "supersede | reject | reinterpret | wrong (reinterpret rejects the pending fact and applies this call's "
-			+ "proposal instead), containment questions take yes | no.";
+			+ "proposal instead), containment questions take yes | no. Answers may come with a new text, alone, or "
+			+ "with a re-reading (observation_id + proposal): they are applied first, so what an answer creates (a new "
+			+ "entity) is there when the reading resolves its names.";
 
 	static final String RECALL = "Retrieve what is known before answering anything about people, projects, decisions, places, "
 			+ "or dates, and before storing something that may already be known. USE at the start of a conversation and "

@@ -277,7 +277,9 @@ public record Predicate(String name, String description, List<String> domain, Li
 
 	/** The template's verb phrase: "{subject} works at {object}" → "works at". */
 	public String verbPhrase() {
-		String t = render.replace("[[", "").replace("]]", "").replace("{subject}", "").replace("{object}", "")
+		// An optional segment is not part of the verb: "{subject} owns {object}[[ ({qualifier})]]" reads "owns", not
+		// "owns ()".
+		String t = render.replaceAll("\\[\\[.*?]]", "").replace("{subject}", "").replace("{object}", "")
 				.replace("{scope}", "").replaceAll("\\{qualifier[^}]*}", "").replace("'s", "");
 		return t.replaceAll("\\s+", " ").trim();
 	}

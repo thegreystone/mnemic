@@ -72,6 +72,129 @@ class EntityResolutionTest {
 	}
 
 	@Test
+	void aThingNamedAfterItsOwnerIsNotTheOwner() {
+		try (Engine e = engine("b3-possessive")) {
+			remember(e, "I know Marcus Lagergren from the JVM days.",
+					proposal().entity("e1", "Marcus Lagergren", "person").fact("self", "knows", "e1"));
+			// "Marcus's iPad", a device nobody has placed, shares a word with the person. The possessive says whose
+			// it is, not what it is: no question (an assistant went round this one three times on 2026-09-22).
+			RememberOutcome ipad = remember(e, "My iPad is cosmetically damaged but still works.",
+					proposal().entity("e1", "Marcus's iPad", "device").fact("self", "owns", "e1"));
+			// The only question is what kind of thing a "device" is, since the type is new: not who the iPad is.
+			assertTrue(ipad.applied().questions().stream().noneMatch(q -> "entity_resolution".equals(q.get("kind"))),
+					ipad.applied().questions().toString());
+			assertEquals(1, ipad.applied().facts().size(), "the fact is stored, not held: " + ipad.applied());
+			ipad.applied().questions().stream().filter(q -> "type_kind".equals(q.get("kind"))).findFirst()
+					.ifPresent(q -> e.answer(List.of(new Resolve(q.get("id").toString(), "product"))));
+			Entity device = e.entities().byRef("Marcus's iPad").orElseThrow();
+			assertNotEquals(e.entities().byRef("Marcus Lagergren").orElseThrow().id(), device.id());
+			// Another owner's iPad is another thing, not this one and not a question.
+			RememberOutcome malin = remember(e, "Malin's iPad is the older one.",
+					proposal().entity("e1", "Malin's iPad", "device").fact("self", "knows", "e1"));
+			assertTrue(malin.applied().questions().stream().noneMatch(q -> "entity_resolution".equals(q.get("kind"))),
+					malin.applied().questions().toString());
+			assertNotEquals(device.id(), e.entities().byRef("Malin's iPad").orElseThrow().id());
+			// The same name again is the same thing.
+			RememberOutcome again = remember(e, "Marcus's iPad was bought in 2023.",
+					proposal().entity("e1", "Marcus's iPad", "device").fact("self", "owns", "e1"));
+			assertTrue(again.applied().questions().isEmpty(), again.applied().questions().toString());
+			assertEquals(device.id(), e.entities().byRef("Marcus's iPad").orElseThrow().id());
+			assertEquals(1, e.facts().factsOf(device.id()).size(), "the same fact corroborated, not duplicated");
+		}
+	}
+
+	@Test
+	void thePossessiveRuleIsAboutNamesNotAboutDevicesOrOwning() {
+		try (Engine e = engine("b3-possessive-general")) {
+			// Any kind of thing, any predicate, either spelling of the possessive: the possessor is not the thing.
+			remember(e, "Anna Lindqvist is my wife.",
+					proposal().entity("e1", "Anna Lindqvist", "person").fact("self", "spouse_of", "e1"));
+			remember(e, "Hooli is where I work.",
+					proposal().entity("e1", "Hooli", "organization").fact("self", "works_at", "e1"));
+			remember(e, "Andreas Berg is a colleague.",
+					proposal().entity("e1", "Andreas Berg", "person").fact("self", "knows", "e1"));
+			RememberOutcome car = remember(e, "Anna's car is in the shop.",
+					proposal().entity("e1", "Anna's car", "vehicle").fact("self", "uses", "e1"));
+			RememberOutcome office = remember(e, "Hooli's office is in Zürich.",
+					proposal().entity("e1", "Hooli's office", "place").entity("e2", "Zürich", "place").fact("e1",
+							"located_in", "e2"));
+			RememberOutcome bike = remember(e, "Andreas' bike was stolen.",
+					proposal().entity("e1", "Andreas' bike", "vehicle").fact("self", "knows", "e1"));
+			for (RememberOutcome o : List.of(car, office, bike)) {
+				assertTrue(o.applied().questions().stream().noneMatch(q -> "entity_resolution".equals(q.get("kind"))),
+						o.applied().questions().toString());
+			}
+			assertNotEquals(e.entities().byRef("Anna Lindqvist").orElseThrow().id(),
+					e.entities().byRef("Anna's car").orElseThrow().id());
+			assertNotEquals(e.entities().byRef("Hooli").orElseThrow().id(),
+					e.entities().byRef("Hooli's office").orElseThrow().id());
+			assertNotEquals(e.entities().byRef("Andreas Berg").orElseThrow().id(),
+					e.entities().byRef("Andreas' bike").orElseThrow().id());
+			// The owner is still found by name afterwards, without the things named after them getting in the way.
+			RememberOutcome anna = remember(e, "Anna Lindqvist changed jobs.",
+					proposal().entity("e1", "Anna Lindqvist", "person").fact("e1", "works_at", "Initrode"));
+			assertTrue(anna.applied().questions().isEmpty(), anna.applied().questions().toString());
+			RememberOutcome hooli = remember(e, "I still work at Hooli.",
+					proposal().entity("e1", "Hooli", "organization").fact("self", "works_at", "e1"));
+			assertTrue(hooli.applied().questions().isEmpty(), hooli.applied().questions().toString());
+			// A name that ends in the possessive names the thing itself: "McDonald's" has no possessor, and its
+			// spelling without the apostrophe still finds it as before.
+			remember(e, "McDonald's is a client.",
+					proposal().entity("e1", "McDonald's", "organization").fact("self", "related_to", "e1"));
+			Entity mcd = e.entities().byRef("McDonald's").orElseThrow();
+			RememberOutcome plain = remember(e, "McDonalds renewed the contract.",
+					proposal().entity("e1", "McDonalds", "organization").fact("self", "related_to", "e1"));
+			boolean same = e.entities().byRef("McDonalds").map(x -> x.id() == mcd.id()).orElse(false);
+			boolean asked = plain.applied().questions().stream()
+					.anyMatch(q -> String.valueOf(q.get("candidates")).contains(mcd.ref()));
+			assertTrue(same || asked, "merged or asked, never a stranger: " + plain.applied());
+		}
+	}
+
+	@Test
+	void thePersonStillResolvesAsBeforeBesideAThingNamedAfterHim() {
+		try (Engine e = engine("b3-possessive-person")) {
+			remember(e, "I know Marcus Lagergren from the JVM days.",
+					proposal().entity("e1", "Marcus Lagergren", "person").fact("self", "knows", "e1"));
+			Entity lagergren = e.entities().byRef("Marcus Lagergren").orElseThrow();
+			RememberOutcome ipad = remember(e, "My iPad is damaged.",
+					proposal().entity("e1", "Marcus's iPad", "device").fact("self", "owns", "e1"));
+			ipad.applied().questions().stream().filter(q -> "type_kind".equals(q.get("kind"))).findFirst()
+					.ifPresent(q -> e.answer(List.of(new Resolve(q.get("id").toString(), "product"))));
+			Entity device = e.entities().byRef("Marcus's iPad").orElseThrow();
+			// The full name is the person, exactly, and the iPad never comes into it.
+			RememberOutcome full = remember(e, "Marcus Lagergren moved to Stockholm.",
+					proposal().entity("e1", "Marcus Lagergren", "person").fact("e1", "lives_in", "Stockholm"));
+			assertTrue(full.applied().questions().isEmpty(), full.applied().questions().toString());
+			assertEquals(lagergren.id(),
+					e.entities().byRef(full.applied().entities().getFirst().id()).orElseThrow().id());
+			// The first name alone is ambiguous with the person, as a first name always was, and the iPad is not
+			// offered: "Marcus" is whose the iPad is, not what it is.
+			RememberOutcome first = remember(e, "Marcus called about the talk.",
+					proposal().entity("e1", "Marcus", "person").fact("self", "knows", "e1"));
+			assertEquals(1, first.applied().questions().size(), first.applied().questions().toString());
+			@SuppressWarnings("unchecked")
+			List<Map<String, Object>> candidates = (List<Map<String, Object>>) first.applied().questions().getFirst()
+					.get("candidates");
+			assertTrue(candidates.stream().anyMatch(c -> lagergren.ref().equals(c.get("id"))), candidates.toString());
+			assertTrue(candidates.stream().noneMatch(c -> device.ref().equals(c.get("id"))),
+					"the iPad is no candidate for a person: " + candidates);
+			e.answer(
+					List.of(new Resolve(first.applied().questions().getFirst().get("id").toString(), lagergren.ref())));
+			assertEquals(lagergren.id(), e.entities().byRef("Marcus").orElseThrow().id(), "Marcus is now his alias");
+			// The surname alone is the person too, by the same half-name rule as before.
+			RememberOutcome surname = remember(e, "Lagergren is speaking at JFokus.",
+					proposal().entity("e1", "Lagergren", "person").fact("self", "knows", "e1"));
+			List<Map<String, Object>> qs = surname.applied().questions();
+			assertTrue(qs.isEmpty() || qs.getFirst().get("candidates").toString().contains(lagergren.ref()),
+					"resolved or asked with him as the candidate: " + surname.applied());
+			// And the iPad, asked for by its own name, is still itself.
+			assertEquals(device.id(), e.entities().byRef("Marcus's iPad").orElseThrow().id());
+			assertEquals("device", device.type());
+		}
+	}
+
+	@Test
 	@Scenario("B3")
 	void sameNameDifferentTypeIsAskedOnce() {
 		try (Engine e = engine("b3")) {

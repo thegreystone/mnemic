@@ -112,6 +112,14 @@ public class MnemicTools {
 		List<Map<String, Object>> resolve) {
 		return ToolSupport.json("remember", () -> {
 			Proposal.Parsed parsed = Engine.proposalWithWarnings(proposal);
+			List<Resolve> resolves = (resolve == null ? List.<Map<String, Object>> of() : resolve).stream().map(m -> {
+				Object id = m.containsKey("question_id") ? m.get("question_id") : m.get("question");
+				if (id == null) {
+					throw MnemicException.invalidArgument("Each resolve entry needs 'question_id' (q-N) and 'choice'.");
+				}
+				return new Resolve(String.valueOf(id),
+						m.get("choice") == null ? null : String.valueOf(m.get("choice")));
+			}).toList();
 			if (observation_id.isPresent()) {
 				if (text.isPresent() && !text.get().isBlank()) {
 					throw MnemicException.invalidArgument("Pass either 'text' (a new observation) or 'observation_id' "
@@ -121,16 +129,16 @@ public class MnemicTools {
 					throw MnemicException.invalidArgument("'proposal' is required with observation_id: the structured "
 							+ "reading of the observation.");
 				}
-				return attached(parseId(observation_id.get(), "obs-"), parsed);
-			}
-			List<Resolve> resolves = (resolve == null ? List.<Map<String, Object>> of() : resolve).stream().map(m -> {
-				Object id = m.containsKey("question_id") ? m.get("question_id") : m.get("question");
-				if (id == null) {
-					throw MnemicException.invalidArgument("Each resolve entry needs 'question_id' (q-N) and 'choice'.");
+				// Answers given with a re-reading are given first, so that what they create (a new entity, an alias)
+				// is there when the new reading resolves its names. Ignoring them silently sent one assistant round
+				// the same question three times (2026-09-22).
+				List<Map<String, Object>> answered = resolves.isEmpty() ? List.of() : engine.answer(resolves);
+				Map<String, Object> out = attached(parseId(observation_id.get(), "obs-"), parsed);
+				if (!answered.isEmpty()) {
+					out.put("resolved", answered);
 				}
-				return new Resolve(String.valueOf(id),
-						m.get("choice") == null ? null : String.valueOf(m.get("choice")));
-			}).toList();
+				return out;
+			}
 			if ((text.isEmpty() || text.get().isBlank()) && parsed == null && !resolves.isEmpty()) {
 				// Answers alone: nothing to observe, the answers live on the questions.
 				var out = new LinkedHashMap<String, Object>();

@@ -93,4 +93,23 @@ public final class Names {
 		return tokens(s).stream().filter(t -> t.length() > 1 && !STOPWORDS.contains(t)).toList();
 	}
 
+	private static final Pattern POSSESSOR = Pattern.compile("([\\p{L}\\p{N}]+)['’]s?(?=\\s+\\S)");
+
+	/**
+	 * The possessors in a name, normalised: "Marcus" in "Marcus's iPad", "Andreas" in "Andreas' bike". A thing named
+	 * after its owner is not the owner, so these words say whose the thing is, not what it is. A name that ends in the
+	 * possessive with nothing after it ("McDonald's", "Kellogg's") names the thing itself and has no possessor.
+	 */
+	public static List<String> possessors(String s) {
+		var out = new ArrayList<String>();
+		if (s == null) {
+			return out;
+		}
+		var m = POSSESSOR.matcher(norm(s));
+		while (m.find()) {
+			out.add(m.group(1));
+		}
+		return out;
+	}
+
 }
