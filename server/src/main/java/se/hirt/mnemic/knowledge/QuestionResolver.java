@@ -299,8 +299,25 @@ public final class QuestionResolver {
 			FactLedger.supersession(tx, pendingId, null, "invalidation", "user: " + choice, null, obs.id(), null);
 			return null;
 		});
+		case "both" -> db.write(tx -> {
+			// One value lies within the other (a house within its town): one thing at two granularities, and both
+			// stand. Only then; a one-value predicate does not take two values on the user's say-so.
+			Fact existing = factIn(tx, existingId);
+			Fact pending = factIn(tx, pendingId);
+			if (existing.objectId() == null || pending.objectId() == null
+					|| !facts.nested(tx, existing.objectId(), pending.objectId())) {
+				throw MnemicException.invalidArgument("'both' answers " + q.ref() + " only when one value lies within "
+						+ "the other on record (" + FactRenderer.nameIn(tx, pending.objectId()) + " located in "
+						+ FactRenderer.nameIn(tx, existing.objectId())
+						+ ", say); state that containment first, or answer "
+						+ "ended, supersede, reject, reinterpret, or wrong.");
+			}
+			tx.update("UPDATE fact SET status = 'current' WHERE id = ?", pendingId);
+			return null;
+		});
 		default -> throw MnemicException.invalidArgument("'" + choice + "' is not an answer to " + q.ref()
-				+ "; use ended, supersede, reject, reinterpret, or wrong.");
+				+ "; use ended, supersede, reject, reinterpret, wrong, or both (when one value lies within the "
+				+ "other).");
 		}
 		questions.answer(q.id(), choice);
 		var m = new LinkedHashMap<String, Object>();

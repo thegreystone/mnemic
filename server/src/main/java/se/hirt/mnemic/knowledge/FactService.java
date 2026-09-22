@@ -1609,6 +1609,11 @@ public final class FactService {
 	 * survives, re-homed there with one corroboration fewer. {@code keepEntities} leaves the entities the observation
 	 * created in place, for a re-seed of the same text; forgetting for privacy removes those nothing else references.
 	 */
+	/** Whether one entity lies within the other on record (a house within its town), in either direction. */
+	boolean nested(Tx tx, long a, long b) {
+		return conflicts.nested(tx, a, b);
+	}
+
 	public Removed forgetDerived(long observationId, boolean keepEntities) {
 		var undated = new ArrayList<Long>();
 		Removed removed = db.write(tx -> {

@@ -40,7 +40,9 @@ text.
 - A `conflict` question means a predicate that allows one current value already has one. Say whether the
   earlier one `ended` (date unknown), the new one should `supersede` it from now, the new one is wrong
   (`reject`), you misread it (`reinterpret`, then send the corrected proposal in the same call), or the
-  earlier record was simply an error (`wrong`).
+  earlier record was simply an error (`wrong`). A finer value beside a coarser one (a street address beside
+  the town it lies in) is one thing at two granularities, not a conflict: with the containment on record
+  (`located_in`, `part_of`) no question is asked, and an open one takes `both`.
 - An `entity_resolution` or `predicate_resolution` question holds the facts that depend on it until you
   answer with a candidate id or "new".
 

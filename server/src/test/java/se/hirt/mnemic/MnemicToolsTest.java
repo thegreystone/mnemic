@@ -748,6 +748,52 @@ class MnemicToolsTest {
 	}
 
 	@Test
+	void anOpenConflictBetweenAPlaceAndAPlaceWithinItTakesBoth() {
+		// "Lives in Küssnacht" on record, then "lives at Gschweighusweg 20b" with nothing yet saying where 20b is:
+		// asked (q-52, 2026-09-22). The assistant states the containment and answers "both"; both facts stand.
+		remember("Ossian Nyberg lives in Küssnacht am Rigi.",
+				Map.of("entities",
+						List.of(Map.of("ref", "e1", "name", "Ossian Nyberg", "type", "person"),
+								Map.of("ref", "e2", "name", "Küssnacht am Rigi", "type", "place")),
+						"facts", List.of(Map.of("subject", "e1", "predicate", "lives_in", "object", "e2"))),
+				"both-1");
+		ToolResponse house = remember("Ossian lives at Gschweighusweg 20b.",
+				Map.of("entities",
+						List.of(Map.of("ref", "e1", "name", "Ossian Nyberg", "type", "person"),
+								Map.of("ref", "e2", "name", "Gschweighusweg 20b", "type", "place")),
+						"facts", List.of(Map.of("subject", "e1", "predicate", "lives_in", "object", "e2"))),
+				"both-2");
+		assertFalse(house.isError(), text(house));
+		@SuppressWarnings("unchecked")
+		List<Map<String, Object>> questions = (List<Map<String, Object>>) result(house).get("questions");
+		assertEquals(1, questions.size(), text(house));
+		assertEquals("conflict", questions.getFirst().get("kind"), text(house));
+		String q = questions.getFirst().get("id").toString();
+		// Before the containment is on record, "both" is refused and says what would make it apply.
+		ToolResponse early = tools.remember(NONE, NONE, NONE, NONE, Optional.empty(), NONE, NONE, null,
+				Optional.empty(), Optional.of("both-3"), List.of(Map.of("question_id", q, "choice", "both")));
+		assertTrue(early.isError(), text(early));
+		assertTrue(text(early).contains("Gschweighusweg 20b located in Küssnacht am Rigi"), text(early));
+		// Answers are applied before a call's proposal, so the containment goes in first, then the answer.
+		ToolResponse contained = remember("Gschweighusweg 20b is in Küssnacht am Rigi.",
+				Map.of("entities",
+						List.of(Map.of("ref", "e1", "name", "Gschweighusweg 20b", "type", "place"),
+								Map.of("ref", "e2", "name", "Küssnacht am Rigi", "type", "place")),
+						"facts", List.of(Map.of("subject", "e1", "predicate", "located_in", "object", "e2"))),
+				"both-4");
+		assertFalse(contained.isError(), text(contained));
+		ToolResponse both = tools.remember(NONE, NONE, NONE, NONE, Optional.empty(), NONE, NONE, null, Optional.empty(),
+				Optional.of("both-5"), List.of(Map.of("question_id", q, "choice", "both")));
+		assertFalse(both.isError(), text(both));
+		assertTrue(text(both).contains("\"status\":\"answered\""), text(both));
+		String block = text(tools.recall(Optional.of("where does Ossian Nyberg live"), NONE, Optional.of(600),
+				Optional.empty(), Optional.empty()));
+		assertTrue(block.contains("lives in Küssnacht am Rigi") && block.contains("lives in Gschweighusweg 20b"),
+				block);
+		assertFalse(block.contains("pending"), block);
+	}
+
+	@Test
 	void asOfTakesAYearOrAMonthAndMeansItsEnd() {
 		assertEquals("2015-12-31T23:59:59Z", MnemicTools.instant("2015").toString());
 		assertEquals("2016-02-29T23:59:59Z", MnemicTools.instant("2016-02").toString());

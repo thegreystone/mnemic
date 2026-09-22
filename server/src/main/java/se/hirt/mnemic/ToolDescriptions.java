@@ -73,7 +73,7 @@ final class ToolDescriptions {
 			+ "does not define are named in 'warnings'. Returns ids, resolutions, warnings, and 'questions': answer each "
 			+ "with the user, then send 'resolve': [{\"question_id\": \"q-3\", \"choice\": \"ent-7\"}] with your next "
 			+ "remember (choices are numbered candidates; conflicts take ended | supersede | reject | reinterpret | "
-			+ "wrong). To give an observation stored without a reading its facts (a connector's email, a note), pass "
+			+ "wrong, or both when one value lies within the other on record). To give an observation stored without a reading its facts (a connector's email, a note), pass "
 			+ "'observation_id' instead of 'text' with the proposal. To answer questions and nothing else, pass 'resolve' "
 			+ "alone: no observation is recorded, the answers live on the questions. The same call on an observation that already has a "
 			+ "reading replaces it: what the old reading produced is taken back (listed as 'replaced'), the text keeps its "
@@ -96,7 +96,8 @@ final class ToolDescriptions {
 	static final String REMEMBER_RESOLVE = "Answers to open questions: [{question_id: q-N, choice}]. The choice is one of the "
 			+ "question's numbered candidate ids; entity and predicate questions also take \"new\", conflicts take ended | "
 			+ "supersede | reject | reinterpret | wrong (reinterpret rejects the pending fact and applies this call's "
-			+ "proposal instead), containment questions take yes | no. Answers may come with a new text, alone, or "
+			+ "proposal instead) or both (only when one value lies within the other on record: a street address "
+			+ "within its town; both then stand), containment questions take yes | no. Answers may come with a new text, alone, or "
 			+ "with a re-reading (observation_id + proposal): they are applied first, so what an answer creates (a new "
 			+ "entity) is there when the reading resolves its names.";
 

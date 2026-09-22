@@ -68,6 +68,24 @@ final class ConflictCheck {
 		this.types = types;
 	}
 
+	/**
+	 * Whether the new value and the value on record are one thing at two granularities: either lies within the other.
+	 */
+	boolean nested(Tx tx, Operands op, Fact other) {
+		if (op.object() == null || other.objectId() == null) {
+			return false;
+		}
+		return nested(tx, op.object().id(), other.objectId());
+	}
+
+	boolean nested(Tx tx, long a, long b) {
+		if (a == b) {
+			return false;
+		}
+		Relation r = Containment.of(tx, a, b, predicates.containmentPredicates(), types).relation();
+		return r == Relation.WITHIN || r == Relation.CONTAINS;
+	}
+
 	Outcome check(Tx tx, Operands op, Bounds bounds, boolean ended, Event event, String rendering) {
 		var toClose = new ArrayList<Fact>();
 		var asks = new ArrayList<long[]>();
@@ -91,6 +109,10 @@ final class ConflictCheck {
 				if (event != null && eventTypes.supersedes(event.type(), op.predicate().name())) {
 					toClose.add(other);
 				} else if (disjoint(other, bounds) || other.ended() || ended) {
+					continue;
+				} else if (nested(tx, op, other)) {
+					// "lives in Gschweighusweg 20b" beside "lives in Küssnacht", with 20b located in Küssnacht:
+					// one place at two granularities, not two places. Both stand (2026-09-22).
 					continue;
 				} else {
 					conflictWith = other;

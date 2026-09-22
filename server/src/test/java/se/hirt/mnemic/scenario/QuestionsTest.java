@@ -459,6 +459,71 @@ class QuestionsTest {
 	}
 
 	@Test
+	void aFinerPlaceBesideACoarserOneIsOnePlaceNotTwo() {
+		try (Engine e = engine("c2-nested")) {
+			// "Lives in Küssnacht" on record; the house is in Küssnacht; "lives in the house" arrives. A one-value
+			// predicate, and yet no conflict: the house is in the town (an assistant met q-52 on 2026-09-22).
+			remember(e, "I live in Küssnacht am Rigi.",
+					proposal().entity("e1", "Küssnacht am Rigi", "place").fact("self", "lives_in", "e1"));
+			remember(e, "Gschweighusweg 20b is in Küssnacht am Rigi.",
+					proposal().entity("e1", "Gschweighusweg 20b", "place").entity("e2", "Küssnacht am Rigi", "place")
+							.fact("e1", "located_in", "e2"));
+			RememberOutcome house = remember(e, "I live at Gschweighusweg 20b.",
+					proposal().entity("e1", "Gschweighusweg 20b", "place").fact("self", "lives_in", "e1"));
+			assertTrue(house.applied().questions().isEmpty(), house.applied().questions().toString());
+			assertEquals("current", stored(e, house, 0).status());
+			assertEquals(0, e.questions().openCount());
+			List<String> where = e.facts().factsOf(e.entities().owner().id()).stream()
+					.filter(f -> "lives_in".equals(f.predicate()) && f.current()).map(Fact::rendering).sorted()
+					.toList();
+			assertEquals(2, where.size(), "both stand: " + where);
+			// The coarser one arriving after the finer one is a restatement, not a conflict either.
+			RememberOutcome town = remember(e, "I live in Küssnacht.",
+					proposal().entity("e1", "Küssnacht am Rigi", "place").fact("self", "lives_in", "e1"));
+			assertTrue(town.applied().questions().isEmpty(), town.applied().questions().toString());
+			// A place the chain cannot relate is still a conflict, as it was.
+			RememberOutcome elsewhere = remember(e, "I live in Zürich.",
+					proposal().entity("e1", "Zürich", "place").fact("self", "lives_in", "e1"));
+			assertEquals(1, elsewhere.applied().questions().size(), elsewhere.applied().questions().toString());
+			assertEquals("conflict", elsewhere.applied().questions().getFirst().get("kind"));
+			// "both" answers such a question only once the containment is on record; before that it is refused.
+			String q = questionId(elsewhere);
+			assertThrows(se.hirt.mnemic.protocol.MnemicException.class,
+					() -> remember(e, "Both.", null, new Resolve(q, "both")));
+			remember(e, "Zürich is within Küssnacht, for the sake of argument.",
+					proposal().entity("e1", "Zürich", "place").entity("e2", "Küssnacht am Rigi", "place").fact("e1",
+							"located_in", "e2"));
+			RememberOutcome both = remember(e, "Both, then.", null, new Resolve(q, "both"));
+			assertEquals("answered", both.resolved().getFirst().get("status"), both.resolved().toString());
+			assertEquals("current", stored(e, elsewhere, 0).status(), "the held fact stands beside the other");
+			assertEquals(0, e.questions().openCount());
+		}
+	}
+
+	@Test
+	void nestingHoldsForAnyOneValuePredicateAndAnyContainment() {
+		try (Engine e = engine("c2-nested-any")) {
+			// Not a rule about homes and towns: a predicate the proposal itself declares one-valued, and a room within
+			// a building through part_of, get the same reading.
+			PredicateDef sits = new PredicateDef("sits_in", "Subject's desk is in object.", "person", "place", true,
+					null, null, null, null, List.of("sits in", "desk in"), null, List.of(), List.of());
+			remember(e, "Mattias sits in Building 7.",
+					proposal().predicate(sits).entity("e1", "Building 7", "place").fact("self", "sits_in", "e1"));
+			remember(e, "Room 7.12 is part of Building 7.", proposal().entity("e1", "Room 7.12", "place")
+					.entity("e2", "Building 7", "place").fact("e1", "part_of", "e2"));
+			RememberOutcome room = remember(e, "Mattias sits in Room 7.12.",
+					proposal().entity("e1", "Room 7.12", "place").fact("self", "sits_in", "e1"));
+			assertTrue(room.applied().questions().isEmpty(), room.applied().questions().toString());
+			assertEquals("current", stored(e, room, 0).status());
+			// Another building is another value, and asked about.
+			RememberOutcome moved = remember(e, "Mattias sits in the Annex.",
+					proposal().entity("e1", "the Annex", "place").fact("self", "sits_in", "e1"));
+			assertEquals(1, moved.applied().questions().size(), moved.applied().questions().toString());
+			assertEquals("conflict", moved.applied().questions().getFirst().get("kind"));
+		}
+	}
+
+	@Test
 	@Scenario("C2")
 	void conflictAnswersEndedSupersedeReject() {
 		try (Engine e = engine("c2-answers")) {
