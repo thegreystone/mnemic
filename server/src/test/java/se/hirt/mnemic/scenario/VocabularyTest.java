@@ -231,9 +231,11 @@ class VocabularyTest {
 			RememberOutcome before = remember(e, "Kanton Schwyz.", proposal().entity("e1", "Kanton Schwyz", "kanton"));
 			Entity schwyz = e.entities().byRef(before.applied().entities().getFirst().id()).orElseThrow();
 			assertEquals("kanton", schwyz.type(), "an unregistered type passes through as written");
-			RememberOutcome refused = remember(e, "I live there.", proposal().fact("lives_in", "Kanton Schwyz"));
-			assertEquals(0, refused.applied().facts().size());
-			assertEquals("type_mismatch", refused.applied().questions().getFirst().get("kind"));
+			// "kanton" is a kind word of place, so the type is placed at once and the fact stands (2026-09-23).
+			assertEquals("place", e.entityTypes().get("kanton").orElseThrow().parent());
+			RememberOutcome placed = remember(e, "I live there.", proposal().fact("lives_in", "Kanton Schwyz"));
+			assertEquals(1, placed.applied().facts().size(), placed.applied().toString());
+			assertEquals(List.of(), placed.applied().questions());
 			remember(e, "A canton is a kind of place.", proposal().entityType(CANTON));
 			assertEquals("canton", e.entities().get(schwyz.id()).orElseThrow().type(), "retyped on registration");
 			RememberOutcome accepted = remember(e, "I live in Kanton Schwyz.",
@@ -387,23 +389,23 @@ class VocabularyTest {
 	@Scenario("S14")
 	void anUnregisteredEntityTypeRegistersFromUseAndAsksWhatKindItIs() {
 		try (Engine e = TestHomes.engine("s14-type-from-use")) {
-			RememberOutcome o = remember(e, "Two cantons.", proposal().entity("e1", "Kanton Schwyz", "canton")
-					.entity("e2", "Kanton Luzern", "canton").entity("e3", "Anna Lindqvist", "person"));
+			RememberOutcome o = remember(e, "Two cantons.", proposal().entity("e1", "Kanton Schwyz", "shire")
+					.entity("e2", "Kanton Luzern", "shire").entity("e3", "Anna Lindqvist", "person"));
 			assertEquals(3, o.applied().entities().size());
 			Map<String, Object> defined = o.applied().definitions().getFirst();
 			assertEquals("inferred", defined.get("resolution"), defined.toString());
 			assertTrue(((Map<?, ?>) defined.get("inferred")).containsKey("parent"),
 					"the assumed parent (none) is shown");
-			var t = e.entityTypes().get("canton").orElseThrow();
+			var t = e.entityTypes().get("shire").orElseThrow();
 			assertTrue(t.inferred());
 			assertEquals(null, t.parent());
 			assertEquals(1, o.applied().questions().size(), "asked once, however many entities use the type");
 			Map<String, Object> q = question(o, "type_kind");
-			assertEquals("canton", q.get("subject"));
+			assertEquals("shire", q.get("subject"));
 			List<String> ids = candidateIds(q);
 			assertTrue(ids.contains("place") && ids.contains("organization") && ids.contains("none"), ids.toString());
 			assertFalse(ids.contains("country"), "only root kinds are offered: " + ids);
-			RememberOutcome again = remember(e, "Again.", proposal().entity("e1", "Appenzell", "canton"));
+			RememberOutcome again = remember(e, "Again.", proposal().entity("e1", "Appenzell", "shire"));
 			assertEquals(List.of(), again.applied().questions());
 			assertEquals(List.of(), again.applied().definitions(), "registered once");
 		}
@@ -414,20 +416,20 @@ class VocabularyTest {
 	void answeringWhatKindAnEntityTypeIsMakesItAcceptedWhereItsParentIs() {
 		try (Engine e = TestHomes.engine("s19-type-kind")) {
 			RememberOutcome o = remember(e, "I live in Kanton Schwyz.",
-					proposal().entity("e1", "Kanton Schwyz", "canton").fact("self", "lives_in", "e1"));
-			assertEquals(0, o.applied().facts().size(), "a canton is not yet a place");
+					proposal().entity("e1", "Kanton Schwyz", "shire").fact("self", "lives_in", "e1"));
+			assertEquals(0, o.applied().facts().size(), "a shire is not yet a place");
 			String kindQ = (String) question(o, "type_kind").get("id");
 			assertEquals("type_mismatch", question(o, "type_mismatch").get("kind"));
-			RememberOutcome a = remember(e, "A canton is a Swiss region.", null, new Resolve(kindQ, "place"));
-			assertEquals("place", e.entityTypes().get("canton").orElseThrow().parent());
-			assertTrue(e.entityTypes().isA("canton", "place"));
+			RememberOutcome a = remember(e, "A shire is a Swiss region.", null, new Resolve(kindQ, "place"));
+			assertEquals("place", e.entityTypes().get("shire").orElseThrow().parent());
+			assertTrue(e.entityTypes().isA("shire", "place"));
 			assertEquals(1, ((List<?>) a.resolved().getFirst().get("settled")).size(),
 					"the held fact no longer mismatches: " + a.resolved());
 			assertEquals(0, e.questions().openCount());
 			assertEquals(List.of("Mattias Sandell lives in Kanton Schwyz"),
 					e.facts().factsOf(e.entities().owner().id()).stream().map(Fact::rendering).toList());
 			RememberOutcome later = remember(e, "I was born in Kanton Uri.",
-					proposal().entity("e1", "Kanton Uri", "canton").fact("self", "born_in", "e1"));
+					proposal().entity("e1", "Kanton Uri", "shire").fact("self", "born_in", "e1"));
 			assertEquals(List.of("Mattias Sandell was born in Kanton Uri"), renderings(e, later));
 			assertEquals(List.of(), later.applied().questions());
 		}
@@ -450,12 +452,12 @@ class VocabularyTest {
 					e.facts().factsOf(e.entities().owner().id()).getFirst().rendering());
 			// A type registered from use can instead become a kind of what the predicate accepts.
 			RememberOutcome c = remember(e, "I live in Kanton Schwyz.",
-					proposal().entity("e1", "Kanton Schwyz", "canton").fact("self", "lives_in", "e1"));
+					proposal().entity("e1", "Kanton Schwyz", "shire").fact("self", "lives_in", "e1"));
 			Map<String, Object> mismatch = question(c, "type_mismatch");
 			assertEquals(List.of("kind:place", "retype:place", "dismiss"), candidateIds(mismatch));
-			RememberOutcome k = remember(e, "A canton is a place.", null,
+			RememberOutcome k = remember(e, "A shire is a place.", null,
 					new Resolve((String) mismatch.get("id"), "kind:place"));
-			assertEquals("place", e.entityTypes().get("canton").orElseThrow().parent());
+			assertEquals("place", e.entityTypes().get("shire").orElseThrow().parent());
 			assertEquals(1, ((List<?>) k.resolved().getFirst().get("facts")).size());
 			assertEquals(0, e.questions().openCount(), "the kind question was settled by the same answer");
 			// Or the fact was simply wrong.

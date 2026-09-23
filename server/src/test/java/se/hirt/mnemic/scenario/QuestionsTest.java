@@ -206,7 +206,7 @@ class QuestionsTest {
 			// A new type with no stated kind, used where a person is expected: the store asks what kind of thing a
 			// dog is, and whether the mismatch is fine. Answering the kind settles the mismatch.
 			RememberOutcome o = remember(e, "Rufus works at Initrode.",
-					proposal().entity("r", "Rufus", "dog").fact("r", "works_at", "Initrode"));
+					proposal().entity("r", "Rufus", "hound").fact("r", "works_at", "Initrode"));
 			List<Map<String, Object>> asked = o.applied().questions();
 			String kind = asked.stream().filter(q -> "type_kind".equals(q.get("kind"))).map(q -> q.get("id").toString())
 					.findFirst().orElseThrow(() -> new AssertionError("no type_kind question: " + asked));
@@ -305,7 +305,7 @@ class QuestionsTest {
 			assertTrue(b.applied().questions().isEmpty(), "containment nests, no conflict: " + b.applied().questions());
 			assertEquals("current", stored(e, a, 0).status());
 			assertEquals("current", stored(e, b, 0).status());
-			assertEquals(33, e.database().schemaVersion());
+			assertEquals(35, e.database().schemaVersion());
 		}
 	}
 

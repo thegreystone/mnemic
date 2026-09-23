@@ -70,7 +70,161 @@ class EntityTypeRegistryTest {
 					"a country drops the type words of the place it is");
 			assertEquals(List.of("kanton"), types.identityTokens("Kanton", "place"),
 					"a name that is only a type word keeps it");
-			assertEquals(11, types.all().size());
+			assertEquals(12, types.all().size());
+		}
+	}
+
+	@Test
+	void aSpellingThatSaysWhereATypeGoesPlacesIt() {
+		Path home = TestHomes.fresh("types-place-from-use");
+		try (Database db = open(home)) {
+			var types = new EntityTypeRegistry(db);
+			// A word in a type's kinds: a new type under it, inferred, so a definition can still move it.
+			EntityTypeRegistry.Placement hotel = types.placeFromUse("hotel", null).orElseThrow();
+			assertEquals("place", hotel.type().parent());
+			assertTrue(hotel.type().inferred());
+			assertTrue(types.isA("hotel", "place"));
+			assertEquals(List.of("hotel", "gracery"), types.identityTokens("Hotel Gracery", "hotel"),
+					"a kind is not an affix: the hotel keeps every word of its name");
+			// A plural of such a word: the singular is the type, the plural its synonym.
+			EntityTypeRegistry.Placement cats = types.placeFromUse("cats", null).orElseThrow();
+			assertEquals("cat", cats.type().name());
+			assertEquals(List.of("cats"), cats.type().synonyms());
+			assertEquals("animal", cats.type().parent());
+			assertEquals("cat", types.canonical("cats"));
+			assertEquals(List.of("cat", "animal"), types.lineage("cats"), "a synonym reads as its type");
+			// A plural of a registered type: that type, the plural added as a synonym, the type still movable.
+			EntityTypeRegistry.Placement hotels = types.placeFromUse("hotels", null).orElseThrow();
+			assertEquals("hotel", hotels.type().name());
+			assertFalse(hotels.created());
+			assertTrue(hotels.type().synonyms().contains("hotels"));
+			assertTrue(hotels.type().inferred(), "a synonym the store noted does not make the type deliberate");
+			// A plural of a synonym: the type the synonym names, and no type of the synonym's own.
+			EntityTypeRegistry.Placement companies = types.placeFromUse("companies", null).orElseThrow();
+			assertEquals("organization", companies.type().name());
+			assertFalse(companies.created());
+			assertTrue(types.get("company").isEmpty(), "the synonym is not hijacked into a subtype");
+			assertEquals("organization", types.canonical("companies"));
+			// A compound is placed under what its head names: a registered type first, a kind second.
+			EntityTypeRegistry.Placement boutique = types.placeFromUse("boutique hotel", null).orElseThrow();
+			assertEquals("boutique_hotel", boutique.type().name());
+			assertEquals("hotel", boutique.type().parent(), "hotel exists by now, so the head names it");
+			assertEquals("team", types.placeFromUse("football team", null).orElseThrow().type().parent());
+			assertEquals("place", types.placeFromUse("garden cottage", null).orElseThrow().type().parent());
+			// An unplaced type's plural leaves it unplaced: the question that asked about it still stands.
+			types.registerInferred("van", null);
+			types.placeFromUse("vans", null).orElseThrow();
+			assertTrue(types.unplaced("van"), "still nobody's kind");
+			assertTrue(types.unplaced("vans"), "and so is its plural");
+			// A word nothing in the store answers for: nothing placed, the caller asks.
+			assertTrue(types.placeFromUse("substance", null).isEmpty());
+			assertTrue(types.placeFromUse("hotel", null).isEmpty(), "a registered type is not placed again");
+		}
+		try (Database db = open(home)) {
+			var reopened = new EntityTypeRegistry(db);
+			assertEquals("cat", reopened.canonical("cats"));
+			assertEquals("hotel", reopened.get("boutique_hotel").orElseThrow().parent());
+			assertTrue(reopened.isA("boutique_hotel", "place"));
+		}
+	}
+
+	@Test
+	void kindsAreTheStoresOwnVocabulary() {
+		Path home = TestHomes.fresh("types-kinds-grow");
+		try (Database db = open(home)) {
+			var types = new EntityTypeRegistry(db);
+			// A defined type with kinds of its own places what it names, ahead of the seeds.
+			types.register(new EntityTypeDef("vehicle", "Something one drives.", "thing", List.of(), List.of(), null,
+					List.of("car", "van", "truck")), null);
+			assertEquals("vehicle", types.placeFromUse("van", null).orElseThrow().type().parent());
+			// A type waiting for its kind is placed when a definition names it, and stays movable.
+			types.registerInferred("truck", null);
+			assertEquals(List.of("truck"), types.adoptKinds("vehicle"));
+			assertEquals("vehicle", types.get("truck").orElseThrow().parent());
+			assertTrue(types.get("truck").orElseThrow().inferred());
+			// A word two types claim places nothing, from use or from a definition.
+			types.register(new EntityTypeDef("lorry", "A big truck.", "thing", List.of(), List.of(), null,
+					List.of("truck", "tanker")), null);
+			types.registerInferred("tanker", null);
+			assertEquals(List.of("tanker"), types.adoptKinds("lorry"), "truck is claimed twice, tanker once");
+			assertEquals("vehicle", types.get("truck").orElseThrow().parent(), "not moved");
+			// "car" is now claimed by thing (seed) and vehicle: nothing is placed, the caller asks.
+			assertTrue(types.placeFromUse("car", null).isEmpty(), "two claims: ask");
+			// A correction settles it: the seed's list is the store's to change, and the change is logged.
+			List<String> without = types.get("thing").orElseThrow().kinds().stream().filter(k -> !k.equals("car"))
+					.toList();
+			types.update("thing", Map.of("kinds", without), "cars are vehicles here");
+			assertEquals("vehicle", types.placeFromUse("car", null).orElseThrow().type().parent());
+			assertTrue(types.changes("thing").stream().anyMatch(c -> "kinds".equals(c.get("field"))),
+					types.changes("thing").toString());
+		}
+		try (Database db = open(home)) {
+			var reopened = new EntityTypeRegistry(db);
+			assertFalse(reopened.get("thing").orElseThrow().kinds().contains("car"),
+					"the corrected seed list stays corrected across a start");
+			assertEquals(List.of("car", "van", "truck"), reopened.get("vehicle").orElseThrow().kinds());
+		}
+	}
+
+	@Test
+	void aStoreFromBeforeKindsGetsTheSeedWordsOnce() {
+		Path home = TestHomes.fresh("types-kinds-once");
+		try (Database db = open(home)) {
+			new EntityTypeRegistry(db);
+			// A row from before the column: NULL, not an empty list.
+			db.write(tx -> tx.update("UPDATE entity_type SET kinds = NULL WHERE name = 'place'"));
+		}
+		try (Database db = open(home)) {
+			var types = new EntityTypeRegistry(db);
+			assertTrue(types.get("place").orElseThrow().kinds().contains("hotel"), "filled from the seed");
+			types.update("place", Map.of("kinds", List.of()), "none here");
+		}
+		try (Database db = open(home)) {
+			var reopened = new EntityTypeRegistry(db);
+			assertEquals(List.of(), reopened.get("place").orElseThrow().kinds(), "an emptied list is not refilled");
+		}
+	}
+
+	@Test
+	void aSeedThatArrivesAfterTheStoreNamedItFromUseIsMergedIn() {
+		Path home = TestHomes.fresh("types-seed-after-use");
+		try (Database db = open(home)) {
+			new EntityTypeRegistry(db);
+			// As if the store had met "animal" from use before the seed existed: an inferred row with a parent.
+			db.write(tx -> tx.update("DELETE FROM entity_type WHERE name = 'animal'"));
+			db.write(tx -> tx.update("""
+					INSERT INTO entity_type(name, description, parent, synonyms, type_words, kinds, defined_by, seed,
+					                        inferred, created_at, disjoint) VALUES ('animal', NULL, 'thing', '[]', '[]',
+					                        '[]', NULL, 0, 1, '2026-09-01T00:00:00Z', 0)"""));
+		}
+		try (Database db = open(home)) {
+			var types = new EntityTypeRegistry(db);
+			EntityTypeRegistry.EntityType animal = types.get("animal").orElseThrow();
+			assertTrue(animal.seed(), "a seed from now on");
+			assertEquals("thing", animal.parent(), "the parent the store chose stays");
+			assertTrue(animal.kinds().contains("dog"), "with the seed's kinds");
+			assertEquals("animal", types.canonical("pet"), "and its synonyms");
+			assertEquals("animal", types.placeFromUse("dog", null).orElseThrow().type().parent());
+		}
+	}
+
+	@Test
+	void everySeedKindNamesOneKind() {
+		var seen = new java.util.HashMap<String, String>();
+		for (EntityTypeRegistry.EntityType t : EntityTypeRegistry.seed()) {
+			for (String w : t.kinds()) {
+				String other = seen.put(w, t.name());
+				assertEquals(null, other, "'" + w + "' is a kind of both " + other + " and " + t.name());
+				assertEquals(w, w.toLowerCase(), w);
+			}
+		}
+		// A kind is never a synonym of any seed: a synonym names the type itself, a kind names a subtype.
+		var synonyms = new java.util.HashSet<String>();
+		EntityTypeRegistry.seed().forEach(t -> synonyms.addAll(t.synonyms()));
+		for (EntityTypeRegistry.EntityType t : EntityTypeRegistry.seed()) {
+			for (String w : t.kinds()) {
+				assertFalse(synonyms.contains(w), "'" + w + "' is both a synonym and a kind");
+			}
 		}
 	}
 
@@ -97,7 +251,7 @@ class EntityTypeRegistryTest {
 			assertEquals("place", canton.parent());
 			assertEquals(List.of("kanton"), canton.synonyms());
 			assertEquals("canton", reopened.canonical("kanton"));
-			assertEquals(12, reopened.all().size());
+			assertEquals(13, reopened.all().size());
 		}
 	}
 

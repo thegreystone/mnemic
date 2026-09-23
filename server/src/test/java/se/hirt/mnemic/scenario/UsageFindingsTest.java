@@ -38,6 +38,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static se.hirt.mnemic.TestHomes.engine;
 import static se.hirt.mnemic.TestHomes.fact;
@@ -141,6 +142,102 @@ class UsageFindingsTest {
 					proposal().entity("e1", "Hooli", "organization").fact("self", "works_at", "e1"));
 			RecallResult brother = recall(e, "do I have a brother");
 			assertFalse(brother.text().contains("is on record under"), brother.text());
+		}
+	}
+
+	@Test
+	void aTypeNamedByAKindWordIsPlacedWithoutAQuestion() {
+		try (Engine e = engine("usage-kind-words")) {
+			// "hotel", "school", "dog": words in the kinds of place, organization, animal. Placed at once,
+			// reported as inferred with what placed them, no question.
+			RememberOutcome o = remember(e, "I'm staying at Hotel Gracery; Viggo starts at the Primarschule.",
+					proposal().entity("e1", "Hotel Gracery", "hotel").entity("e2", "Primarschule Schübelbach", "school")
+							.entity("e3", "Rufus", "dog").fact("self", "lives_in", "e1"));
+			assertTrue(o.applied().questions().stream().noneMatch(q -> "type_kind".equals(q.get("kind"))),
+					o.applied().questions().toString());
+			assertEquals("place", e.entityTypes().get("hotel").orElseThrow().parent());
+			assertEquals("organization", e.entityTypes().get("school").orElseThrow().parent());
+			assertEquals("animal", e.entityTypes().get("dog").orElseThrow().parent());
+			assertTrue(e.entityTypes().get("hotel").orElseThrow().inferred(),
+					"still inferred: a definition may move it");
+			Map<String, Object> hotel = o.applied().definitions().stream().filter(d -> "hotel".equals(d.get("name")))
+					.findFirst().orElseThrow();
+			assertEquals("inferred", hotel.get("resolution"));
+			assertEquals("place", ((Map<?, ?>) hotel.get("inferred")).get("parent"), hotel.toString());
+			assertTrue(((Map<?, ?>) hotel.get("inferred")).get("placed_by").toString().contains("kind of place"));
+			// Placed under place, the hotel is a place: the fact stands.
+			assertEquals(1, o.applied().facts().size(), o.applied().toString());
+			// A word no type knows is still asked about, once.
+			RememberOutcome unknown = remember(e, "I'm allergic to penicillin.",
+					proposal().entity("e1", "penicillin", "substance").fact("self", "dislikes", "e1"));
+			assertEquals(1,
+					unknown.applied().questions().stream().filter(q -> "type_kind".equals(q.get("kind"))).count(),
+					unknown.applied().questions().toString());
+			// A plural spelling is the singular type: both cats are cats, and the plural is a synonym.
+			RememberOutcome plural = remember(e, "Two cats.",
+					proposal().entity("e1", "Misse", "cats").entity("e2", "Findus", "cats"));
+			assertTrue(plural.applied().questions().isEmpty(), plural.applied().questions().toString());
+			assertEquals("cat", e.entityTypes().get("cat").orElseThrow().name());
+			assertEquals("cat", e.entities().byRef("Misse").orElseThrow().type());
+			assertEquals("cat", e.entities().byRef("Findus").orElseThrow().type());
+			// A plural of a seed type is that type, reported as existing, nothing inferred.
+			RememberOutcome people = remember(e, "Two people.",
+					proposal().entity("e1", "Sven Nyberg", "persons").entity("e2", "Hedvig Nyberg", "persons"));
+			assertEquals("person", e.entities().byRef("Sven Nyberg").orElseThrow().type());
+			Map<String, Object> person = people.applied().definitions().stream()
+					.filter(d -> "person".equals(d.get("name"))).findFirst().orElseThrow();
+			assertEquals("exists", person.get("resolution"), person.toString());
+			assertTrue(person.get("placed_by").toString().contains("plural"), person.toString());
+		}
+	}
+
+	@Test
+	void theAssistantTeachesTheStoreAFamilyOfKindsAtOnce() {
+		try (Engine e = engine("usage-kinds-taught")) {
+			// The store asks what a "van" is; instead of answering one word at a time, the assistant defines the
+			// family: from then on every kind it named is placed without a question, in this store.
+			RememberOutcome asked = remember(e, "I drive a van.",
+					proposal().entity("e1", "the van", "van").fact("self", "uses", "e1"));
+			assertEquals(1, asked.applied().questions().stream().filter(q -> "type_kind".equals(q.get("kind"))).count(),
+					asked.applied().questions().toString());
+			RememberOutcome taught = remember(e, "A van is a vehicle; so are trucks and scooters.",
+					proposal().entityType(
+							new se.hirt.mnemic.proposal.Proposal.EntityTypeDef("vehicle", "Something one drives.",
+									"thing", List.of(), List.of(), null, List.of("van", "truck", "scooter"))));
+			assertEquals("vehicle", e.entityTypes().get("van").orElseThrow().parent(), taught.applied().toString());
+			assertEquals(0, e.questions().openCount(), "the definition answered the question");
+			RememberOutcome later = remember(e, "Anna rides a scooter.",
+					proposal().entity("e1", "Anna Lindqvist", "person").entity("e2", "Anna's scooter", "scooter")
+							.fact("e1", "uses", "e2"));
+			assertTrue(later.applied().questions().isEmpty(), later.applied().questions().toString());
+			assertEquals("vehicle", e.entityTypes().get("scooter").orElseThrow().parent());
+			assertTrue(e.entityTypes().isA("scooter", "thing"));
+			// And inspect shows the family, so the next session can build on it.
+			assertEquals(List.of("van", "truck", "scooter"), e.entityTypes().get("vehicle").orElseThrow().kinds());
+		}
+	}
+
+	@Test
+	void aThingNamedAfterItsTownIsNotTheTown() {
+		try (Engine e = engine("usage-kind-word-identity")) {
+			// The town first, then a hotel named after it: two things. A kind is not dropped from the name the way
+			// an affix ("Kanton") is, so nothing merges and the town is not retyped (review, 2026-09-23).
+			remember(e, "I live in Zürich.", proposal().entity("e1", "Zürich", "place").fact("self", "lives_in", "e1"));
+			RememberOutcome stay = remember(e, "Anna is staying at Hotel Zürich.",
+					proposal().entity("e1", "Anna Lindqvist", "person").entity("e2", "Hotel Zürich", "hotel").fact("e1",
+							"located_in", "e2"));
+			assertEquals("place", e.entities().byRef("Zürich").orElseThrow().type(), "the town keeps its type");
+			// The shared word may make the store ask; it never decides on its own that they are one.
+			for (Map<String, Object> q : stay.applied().questions()) {
+				if ("entity_resolution".equals(q.get("kind"))) {
+					remember(e, "Another thing.", null,
+							new se.hirt.mnemic.knowledge.QuestionResolver.Resolve(q.get("id").toString(), "new"));
+				}
+			}
+			assertTrue(e.entities().byRef("Hotel Zürich").isPresent(), stay.applied().toString());
+			assertNotEquals(e.entities().byRef("Zürich").orElseThrow().id(),
+					e.entities().byRef("Hotel Zürich").orElseThrow().id(), "not merged: " + stay.applied());
+			assertEquals("place", e.entities().byRef("Zürich").orElseThrow().type(), "and not retyped");
 		}
 	}
 

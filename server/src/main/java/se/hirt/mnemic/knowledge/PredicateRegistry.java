@@ -932,8 +932,10 @@ public final class PredicateRegistry {
 		}
 		List<String> domain = types(def.domain());
 		List<String> range = types(def.range());
+		// The default template carries the optional qualifier slot: a qualifier is always allowed, and a template
+		// without a slot stored it unseen and warned at every use (a usage run's patient_of, 2026-09-23).
 		String render = def.render() != null && !def.render().isBlank() ? def.render()
-				: "{subject} " + name.replace('_', ' ') + " {object}";
+				: "{subject} " + name.replace('_', ' ') + " {object}[[ ({qualifier})]]";
 		// Without cue words the name supplies them: its words become the search terms.
 		List<String> lexicon = def.lexicon().isEmpty() ? Predicate.lexiconOf(name) : def.lexicon();
 		List<String> groups = def.groups() == null ? List.of() : groupNames(def.groups());

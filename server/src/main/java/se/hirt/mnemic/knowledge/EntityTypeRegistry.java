@@ -58,14 +58,22 @@ import java.util.Set;
  */
 public final class EntityTypeRegistry {
 
+	/**
+	 * A registered type. {@code typeWords} are affixes of the same thing ("Kanton", "GmbH"), dropped from a name's
+	 * identity; {@code kinds} are words that name a kind of it ("hotel" of place, "clinic" of organization, "dog" of
+	 * animal): a type proposed under one of them is placed under this type from its first use instead of being asked
+	 * about, and keeps every word of its name, a hotel named after its town being another thing than the town. Both
+	 * lists grow through a definition or a correction, as the store learns the user's world.
+	 */
 	public record EntityType(String name, String description, String parent, List<String> synonyms,
-			List<String> typeWords, Long definedBy, boolean seed, boolean inferred, boolean disjoint) {
+			List<String> typeWords, List<String> kinds, Long definedBy, boolean seed, boolean inferred,
+			boolean disjoint) {
 	}
 
 	/** A definition that states nothing beyond the name. */
 	static boolean bare(EntityTypeDef d) {
 		return d.description() == null && (d.parent() == null || d.parent().isBlank()) && d.synonyms().isEmpty()
-				&& d.typeWords().isEmpty() && d.disjoint() == null;
+				&& d.typeWords().isEmpty() && d.kinds().isEmpty() && d.disjoint() == null;
 	}
 
 	public static final String UNKNOWN = "unknown";
@@ -74,15 +82,41 @@ public final class EntityTypeRegistry {
 	private final Map<String, EntityType> byName = new LinkedHashMap<>();
 	private final Map<String, String> bySynonym = new HashMap<>();
 	private final Set<String> typeWords = new HashSet<>();
+	/** Seed rows read with no kinds column value at all: filled from the seed once, at this start. */
+	private final Set<String> kindsUnset = new HashSet<>();
 
 	public EntityTypeRegistry(Database db) {
 		this.db = db;
 		load();
 		for (EntityType e : seed()) {
-			if (!byName.containsKey(e.name())) {
+			EntityType stored = byName.get(e.name());
+			if (stored == null) {
 				insert(e);
+			} else if (stored.inferred() && !stored.seed()) {
+				// The store registered the name from use before the seed existed ("animal" on 2026-09-23): the seed's
+				// words and description arrive, the parent the store chose stays, and the row is a seed from now on.
+				var merged = new EntityType(stored.name(),
+						stored.description() == null ? e.description() : stored.description(), stored.parent(),
+						union(stored.synonyms(), e.synonyms()), union(stored.typeWords(), e.typeWords()),
+						stored.kinds().isEmpty() ? e.kinds() : stored.kinds(), stored.definedBy(), true, false,
+						stored.disjoint() || e.disjoint());
+				db.write(tx -> tx.update("""
+						UPDATE entity_type SET description = ?, synonyms = ?, type_words = ?, kinds = ?, seed = 1,
+						                       inferred = 0, disjoint = ? WHERE name = ?""", merged.description(),
+						Vocabulary.json(merged.synonyms()), Vocabulary.json(merged.typeWords()),
+						Vocabulary.json(merged.kinds()), merged.disjoint() ? 1 : 0, merged.name()));
+				index(merged);
+			} else if (kindsUnset.contains(e.name()) && !e.kinds().isEmpty()) {
+				// A store from before kinds existed: the seed's words are written once, and from then on the row
+				// is the store's own, however the user changes it (a list emptied on purpose stays empty).
+				String json = Vocabulary.json(e.kinds());
+				db.write(tx -> tx.update("UPDATE entity_type SET kinds = ? WHERE name = ?", json, e.name()));
+				index(new EntityType(stored.name(), stored.description(), stored.parent(), stored.synonyms(),
+						stored.typeWords(), e.kinds(), stored.definedBy(), stored.seed(), stored.inferred(),
+						stored.disjoint()));
 			}
 		}
+		kindsUnset.clear();
 		// Entities typed with a type nobody registered (a store from before 2.3): registered from use now.
 		for (Row r : db.read(tx -> tx.query("SELECT DISTINCT type FROM entity WHERE merged_into IS NULL"))) {
 			String type = r.str("type");
@@ -127,10 +161,10 @@ public final class EntityTypeRegistry {
 		return byName.values().stream().filter(t -> t.parent() == null).map(EntityType::name).toList();
 	}
 
-	/** The type and its ancestors, nearest first: {@code country, place}. */
+	/** The type and its ancestors, nearest first: {@code country, place}; a synonym ("cats") reads as its type. */
 	public synchronized List<String> lineage(String type) {
 		var out = new ArrayList<String>();
-		String at = type == null ? UNKNOWN : type;
+		String at = type == null ? UNKNOWN : canonical(type);
 		while (at != null && !out.contains(at)) {
 			out.add(at);
 			EntityType e = byName.get(at);
@@ -157,7 +191,7 @@ public final class EntityTypeRegistry {
 		if (type == null || type.isBlank() || UNKNOWN.equals(type)) {
 			return false;
 		}
-		EntityType e = byName.get(key(type));
+		EntityType e = byName.get(canonical(type));
 		return e == null || (e.inferred() && e.parent() == null);
 	}
 
@@ -218,9 +252,135 @@ public final class EntityTypeRegistry {
 		if (byName.containsKey(n)) {
 			return byName.get(n);
 		}
-		var e = new EntityType(n, null, null, List.of(), List.of(), observationId, false, true, false);
+		var e = new EntityType(n, null, null, List.of(), List.of(), List.of(), observationId, false, true, false);
 		insert(e);
 		return e;
+	}
+
+	/**
+	 * Where a proposed type landed without a question: the type, what placed it in words, and whether the type is new
+	 * ({@code created}) or an existing one the spelling named (a plural of a registered type or of its synonym).
+	 */
+	public record Placement(EntityType type, String how, boolean created) {
+	}
+
+	/**
+	 * Places a type from its use when its spelling says where it goes: a plural of a registered type, or of one of its
+	 * synonyms, is that type ("cats" → cat, "companies" → organization; the plural kept as a synonym, entities
+	 * retyped); a word in a registered type's {@code kinds}, singular or plural, becomes a new type under it ("hotel"
+	 * under place, "cats" the type cat under animal); a compound is placed under what its head names, a registered type
+	 * or synonym first ("football team" under team), a kind second ("boutique hotel" under place), under its own name.
+	 * What the store creates stays inferred, so a definition or a correction can move it. Empty when nothing in the
+	 * spelling says, or when two types claim the word, and the caller asks.
+	 */
+	public synchronized Optional<Placement> placeFromUse(String name, Long observationId) {
+		String n = key(name);
+		if (n.isBlank() || UNKNOWN.equals(n) || byName.containsKey(n) || bySynonym.containsKey(n)) {
+			return Optional.empty();
+		}
+		for (String form : Lang.singulars(n)) {
+			Optional<EntityType> named = named(form);
+			if (named.isPresent() && !form.equals(n)) {
+				EntityType t = named.get();
+				String why = "'" + n + "' is the plural of " + form
+						+ (form.equals(t.name()) ? "" : ", a synonym of " + t.name());
+				return Optional.of(new Placement(update(t.name(), Map.of("synonyms", plus(t.synonyms(), n)), why, true),
+						why, false));
+			}
+		}
+		for (String form : Lang.singulars(n)) {
+			Optional<String> parent = kindNamedByWord(form);
+			if (parent.isPresent()) {
+				var e = new EntityType(form, "A kind of " + parent.get() + ".", parent.get(),
+						form.equals(n) ? List.of() : List.of(n), List.of(), List.of(), observationId, false, true,
+						false);
+				insert(e);
+				adopt(e);
+				return Optional.of(new Placement(e, "'" + form + "' is a kind of " + parent.get(), true));
+			}
+		}
+		int cut = n.lastIndexOf('_');
+		if (cut > 0) {
+			for (String form : Lang.singulars(n.substring(cut + 1))) {
+				Optional<String> parent = named(form).map(EntityType::name).or(() -> kindNamedByWord(form));
+				if (parent.isPresent() && !parent.get().equals(n)) {
+					var e = new EntityType(n, "A kind of " + parent.get() + ".", parent.get(), List.of(), List.of(),
+							List.of(), observationId, false, true, false);
+					insert(e);
+					return Optional.of(new Placement(e,
+							"'" + form + "', the head of '" + n + "', is a kind of " + parent.get(), true));
+				}
+			}
+		}
+		return Optional.empty();
+	}
+
+	/** The registered type a word names outright: by name or by synonym. */
+	private Optional<EntityType> named(String word) {
+		if (byName.containsKey(word)) {
+			return Optional.of(byName.get(word));
+		}
+		return Optional.ofNullable(bySynonym.get(word)).map(byName::get);
+	}
+
+	/**
+	 * Places the types registered from use, and not yet placed, that a type's kinds now name ("van" after vehicle is
+	 * defined with kinds [van, truck]): each becomes a kind of it, logged as such. Returns the names placed, so the
+	 * caller can settle the questions that asked what they were.
+	 */
+	public synchronized List<String> adoptKinds(String typeName) {
+		EntityType parent = byName.get(key(typeName));
+		if (parent == null) {
+			return List.of();
+		}
+		var placed = new ArrayList<String>();
+		for (String word : parent.kinds()) {
+			if (!kindNamedByWord(word).filter(parent.name()::equals).isPresent()) {
+				continue; // another type claims the word too: nothing is placed, as from use
+			}
+			for (EntityType t : List.copyOf(byName.values())) {
+				boolean named = t.name().equals(word) || Lang.singulars(t.name()).contains(word);
+				if (named && t.inferred() && t.parent() == null && !t.name().equals(parent.name())
+						&& !lineage(parent.name()).contains(t.name())) {
+					update(t.name(), Map.of("parent", parent.name()), "'" + word + "' is a kind of " + parent.name(),
+							true);
+					placed.add(t.name());
+				}
+			}
+		}
+		return placed;
+	}
+
+	/** The one registered type whose kinds hold the word; empty when none or several do. */
+	private Optional<String> kindNamedByWord(String word) {
+		String found = null;
+		for (EntityType t : byName.values()) {
+			if (t.kinds().contains(word)) {
+				if (found != null) {
+					return Optional.empty();
+				}
+				found = t.name();
+			}
+		}
+		return Optional.ofNullable(found);
+	}
+
+	private static List<String> union(List<String> a, List<String> b) {
+		var out = new ArrayList<>(a);
+		for (String x : b) {
+			if (!out.contains(x)) {
+				out.add(x);
+			}
+		}
+		return out;
+	}
+
+	private static List<String> plus(List<String> list, String item) {
+		var out = new ArrayList<>(list);
+		if (!out.contains(item)) {
+			out.add(item);
+		}
+		return out;
 	}
 
 	/** Registers a caller-defined type; an existing name is returned as it is. */
@@ -248,6 +408,9 @@ public final class EntityTypeRegistry {
 			if (!def.typeWords().isEmpty()) {
 				replacement.put("type_words", def.typeWords());
 			}
+			if (!def.kinds().isEmpty()) {
+				replacement.put("kinds", def.kinds());
+			}
 			if (def.disjoint() != null) {
 				replacement.put("disjoint", def.disjoint());
 			}
@@ -259,7 +422,7 @@ public final class EntityTypeRegistry {
 					+ "'; register the parent first or leave it out.");
 		}
 		var e = new EntityType(name, def.description(), parent, lower(def.synonyms()), lower(def.typeWords()),
-				observationId, false, false, Boolean.TRUE.equals(def.disjoint()));
+				lower(def.kinds()), observationId, false, false, Boolean.TRUE.equals(def.disjoint()));
 		insert(e);
 		adopt(e);
 		return e;
@@ -273,14 +436,25 @@ public final class EntityTypeRegistry {
 	}
 
 	/**
-	 * Corrects {@code description}, {@code parent}, {@code synonyms}, or {@code type_words}; every change is logged.
+	 * Corrects {@code description}, {@code parent}, {@code synonyms}, {@code type_words}, {@code kinds}, or
+	 * {@code disjoint}; every change is logged.
 	 */
 	public synchronized EntityType update(String name, Map<String, Object> replacement, String reason) {
+		return update(name, replacement, reason, false);
+	}
+
+	/**
+	 * As above; {@code keepInferred} leaves a type registered from use as inferred, for a change the store makes on its
+	 * own (a plural noted as a synonym, a placement under a kind), so that a definition can still move it.
+	 */
+	private synchronized EntityType update(
+		String name, Map<String, Object> replacement, String reason, boolean keepInferred) {
 		EntityType e = get(name).orElseThrow(() -> MnemicException.notFound("No entity type " + name));
 		String description = e.description();
 		String parent = e.parent();
 		List<String> synonyms = e.synonyms();
 		List<String> words = e.typeWords();
+		List<String> kinds = e.kinds();
 		boolean disjoint = e.disjoint();
 		var changes = new ArrayList<String[]>();
 		for (Map.Entry<String, Object> c : replacement.entrySet()) {
@@ -307,23 +481,29 @@ public final class EntityTypeRegistry {
 				old = Vocabulary.json(words);
 				words = lower(Vocabulary.strings(c.getValue()));
 			}
+			case "kinds" -> {
+				old = Vocabulary.json(kinds);
+				kinds = lower(Vocabulary.strings(c.getValue()));
+			}
 			case "disjoint" -> {
 				old = String.valueOf(disjoint);
 				disjoint = Boolean.parseBoolean(String.valueOf(c.getValue()));
 			}
 			default -> throw MnemicException.invalidArgument("Unknown entity type property '" + c.getKey()
-					+ "'; correctable: description, parent, synonyms, type_words, disjoint.");
+					+ "'; correctable: description, parent, synonyms, type_words, kinds, disjoint.");
 			}
 			changes.add(new String[] {c.getKey(), old, value});
 		}
-		var updated = new EntityType(e.name(), description, parent, synonyms, words, e.definedBy(), e.seed(), false,
-				disjoint);
+		boolean inferred = keepInferred && e.inferred();
+		var updated = new EntityType(e.name(), description, parent, synonyms, words, kinds, e.definedBy(), e.seed(),
+				inferred, disjoint);
 		db.write(tx -> {
 			tx.update(
-					"UPDATE entity_type SET description = ?, parent = ?, synonyms = ?, type_words = ?, disjoint = ?, "
-							+ "inferred = 0 WHERE name = ?",
+					"UPDATE entity_type SET description = ?, parent = ?, synonyms = ?, type_words = ?, kinds = ?, "
+							+ "disjoint = ?, inferred = ? WHERE name = ?",
 					updated.description(), updated.parent(), Vocabulary.json(updated.synonyms()),
-					Vocabulary.json(updated.typeWords()), updated.disjoint() ? 1 : 0, updated.name());
+					Vocabulary.json(updated.typeWords()), Vocabulary.json(updated.kinds()), updated.disjoint() ? 1 : 0,
+					inferred ? 1 : 0, updated.name());
 			Vocabulary.logChanges(tx, "entity_type", updated.name(), changes, reason);
 			return null;
 		});
@@ -350,12 +530,19 @@ public final class EntityTypeRegistry {
 						List.of("company", "corporation", "corp", "inc", "ltd", "llc", "plc", "gmbh", "ag", "ab", "oy",
 								"asa", "sa", "bv", "nv", "group", "holding", "holdings", "foundation", "institute",
 								"university", "school", "bank", "agency", "department", "ministry", "verein",
-								"stiftung", "forening")),
+								"stiftung", "forening"),
+						List.of("university", "school", "kindergarten", "bank", "insurer", "agency", "ministry",
+								"hospital", "clinic", "practice", "dealer", "dealership", "club", "church", "shop",
+								"store", "restaurant", "cafe", "publisher", "charity", "association", "startup")),
 				seed("place", "A town, region, address, or other location.", null,
 						List.of("city", "town", "region", "location", "village"),
 						List.of("kanton", "canton", "county", "province", "region", "state", "district", "lake",
 								"mount", "mountain", "river", "island", "city", "town", "village", "municipality",
-								"kommun", "gemeinde", "stadt", "bezirk", "landkreis", "lan", "sjo", "berg", "see")),
+								"kommun", "gemeinde", "stadt", "bezirk", "landkreis", "lan", "sjo", "berg", "see"),
+						List.of("canton", "kanton", "county", "province", "district", "municipality", "address",
+								"apartment", "flat", "house", "home", "cottage", "cabin", "venue", "hotel", "hostel",
+								"building", "room", "office", "street", "square", "park", "airport", "station",
+								"harbour", "harbor", "beach", "farm", "island", "lake", "mountain", "river")),
 				disjointSeed("country", "A country; two different countries never overlap.", "place", List.of("nation"),
 						List.of()),
 				seed("project", "A project or initiative.", null, List.of(),
@@ -365,22 +552,37 @@ public final class EntityTypeRegistry {
 				seed("product", "A product.", null, List.of(), List.of()),
 				seed("technology", "A tool, library, language, or platform.", null,
 						List.of("tool", "library", "language", "framework", "software", "database", "platform"),
-						List.of()),
+						List.of(),
+						List.of("app", "application", "api", "protocol", "compiler", "runtime", "module", "component",
+								"package", "repository", "plugin", "extension")),
 				seed("event", "A conference, meeting, trip, or other occasion.", null, List.of(),
-						List.of("conference", "meeting", "summit", "workshop", "festival", "trip", "review")),
-				seed("thing", "A physical object.", null, List.of("object", "item"), List.of()),
+						List.of("conference", "meeting", "summit", "workshop", "festival", "trip", "review"),
+						List.of("wedding", "party", "concert", "holiday", "vacation", "exam", "appointment")),
+				seed("thing", "A physical object.", null, List.of("object", "item"), List.of(),
+						List.of("car", "vehicle", "bike", "bicycle", "motorcycle", "boat", "phone", "laptop",
+								"computer", "printer", "device", "gadget", "machine", "instrument", "robot", "camera",
+								"watch", "appliance")),
+				seed("animal", "An animal: a pet, livestock, wildlife.", null, List.of("pet", "animals"), List.of(),
+						List.of("dog", "cat", "horse", "pony", "bird", "rabbit", "hamster", "puppy", "kitten", "fish",
+								"cow", "sheep", "goat", "chicken")),
 				seed("domain", "A field of knowledge or activity.", null, List.of("field", "area"), List.of()));
 	}
 
 	private static EntityType seed(
 		String name, String description, String parent, List<String> synonyms, List<String> typeWords) {
-		return new EntityType(name, description, parent, synonyms, typeWords, null, true, false, false);
+		return seed(name, description, parent, synonyms, typeWords, List.of());
+	}
+
+	private static EntityType seed(
+		String name, String description, String parent, List<String> synonyms, List<String> typeWords,
+		List<String> kinds) {
+		return new EntityType(name, description, parent, synonyms, typeWords, kinds, null, true, false, false);
 	}
 
 	/** A seed kind whose members never overlap one another. */
 	private static EntityType disjointSeed(
 		String name, String description, String parent, List<String> synonyms, List<String> typeWords) {
-		return new EntityType(name, description, parent, synonyms, typeWords, null, true, false, true);
+		return new EntityType(name, description, parent, synonyms, typeWords, List.of(), null, true, false, true);
 	}
 
 	/** Whether two different things of the type (or of a kind it nests within) never overlap. */
@@ -398,18 +600,24 @@ public final class EntityTypeRegistry {
 
 	private void load() {
 		for (Row r : db.read(tx -> tx.query("SELECT * FROM entity_type ORDER BY seed DESC, name"))) {
+			String kinds = r.str("kinds");
+			if (kinds == null && r.lng("seed") == 1) {
+				kindsUnset.add(r.str("name"));
+			}
 			index(new EntityType(r.str("name"), r.str("description"), r.str("parent"),
-					Vocabulary.list(r.str("synonyms")), Vocabulary.list(r.str("type_words")), r.lngOrNull("defined_by"),
-					r.lng("seed") == 1, r.lng("inferred") == 1, r.lng("disjoint") == 1));
+					Vocabulary.list(r.str("synonyms")), Vocabulary.list(r.str("type_words")),
+					kinds == null ? List.of() : Vocabulary.list(kinds), r.lngOrNull("defined_by"), r.lng("seed") == 1,
+					r.lng("inferred") == 1, r.lng("disjoint") == 1));
 		}
 	}
 
 	private void insert(EntityType e) {
 		db.write(tx -> tx.insert("""
-				INSERT INTO entity_type(name, description, parent, synonyms, type_words, defined_by, seed, inferred,
-				                        created_at, disjoint) VALUES (?,?,?,?,?,?,?,?,?,?)""", e.name(),
+				INSERT INTO entity_type(name, description, parent, synonyms, type_words, kinds, defined_by, seed,
+				                        inferred, created_at, disjoint) VALUES (?,?,?,?,?,?,?,?,?,?,?)""", e.name(),
 				e.description(), e.parent(), Vocabulary.json(e.synonyms()), Vocabulary.json(e.typeWords()),
-				e.definedBy(), e.seed() ? 1 : 0, e.inferred() ? 1 : 0, Instant.now().toString(), e.disjoint() ? 1 : 0));
+				Vocabulary.json(e.kinds()), e.definedBy(), e.seed() ? 1 : 0, e.inferred() ? 1 : 0,
+				Instant.now().toString(), e.disjoint() ? 1 : 0));
 		index(e);
 	}
 

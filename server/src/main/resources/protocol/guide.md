@@ -28,6 +28,13 @@ text.
   store assumed. State what you know in the same proposal (`predicates`, `event_types`, `entity_types`),
   correct an assumption you can see is wrong (`correct('pred:name', {...})`), or answer the question the
   store asks about what it means.
+- A type spelled with a word in a registered type's `kinds` (a hotel is a kind of place, a clinic of
+  organization, a dog of animal) is placed under it from its first use, reported, not asked about; so is a
+  plural of a registered type. Teach the store a family at once by giving a type its `kinds`
+  (`entity_types: [{name: vehicle, parent: thing, kinds: [car, van, truck]}]`, or
+  `correct('type:vehicle', {kinds: [...]})`, which replaces the list, so repeat what should stay) rather
+  than answering one kind at a time; `inspect('type:place')` shows a type's kinds. The reply's `definitions`
+  says what placed a type (`placed_by`) and which waiting types a definition placed (`placed`).
 - Name the `groups` a new predicate belongs to (the kinship predicates are in `family`), so one word in a
   question reaches it with its kin. A new group registers itself; `correct('group:pets', {...})` gives it
   words, a description, or outer groups.

@@ -57,7 +57,8 @@ final class Migrations {
 			"V017__language.sql", "V018__retired_observation.sql", "V019__vocabularies.sql", "V020__event_render.sql",
 			"V021__inferred.sql", "V022__from_use.sql", "V023__partners.sql", "V024__derived.sql", "V025__gender.sql",
 			"V026__gender_fact.sql", "V027__implies.sql", "V028__containment.sql", "V029__groups.sql",
-			"V030__lasting.sql", "V031__group_lexicon.sql", "V032__lasting_stated.sql", "V033__event_source.sql");
+			"V030__lasting.sql", "V031__group_lexicon.sql", "V032__lasting_stated.sql", "V033__event_source.sql",
+			"V034__preference_qualifiers.sql", "V035__kinds.sql");
 
 	private static final Pattern NAME = Pattern.compile("^V(\\d+)__(.+)\\.sql$");
 

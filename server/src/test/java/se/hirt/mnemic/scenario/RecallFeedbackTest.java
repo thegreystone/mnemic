@@ -505,6 +505,9 @@ class RecallFeedbackTest {
 		try (Engine e = engine("f19-kinds")) {
 			remember(e, "I own a Yamaha FZ6-S.",
 					proposal().entity("e1", "Yamaha FZ6-S", "vehicle").fact("self", "owns", "e1"));
+			// "vehicle" is a kind of thing from its first use (a seed kind); "conveyance" is a word nobody placed.
+			remember(e, "I own a Segway.",
+					proposal().entity("e1", "the Segway", "conveyance").fact("self", "owns", "e1"));
 			remember(e, "I own a Toyota Sienna.",
 					proposal().entity("e1", "Toyota Sienna", "thing").fact("self", "owns", "e1"));
 			remember(e, "I own the Sonnefeld apartment.",
@@ -515,29 +518,29 @@ class RecallFeedbackTest {
 			// A kind the store never heard of cannot narrow or deny: the verdict says so beside the facts.
 			RecallResult bikes = recall(e, "what motorcycles does Mattias own");
 			assertEquals("matched", bikes.structured().state(), bikes.text());
-			assertEquals(3, bikes.structured().facts().size(), bikes.text());
+			assertEquals(4, bikes.structured().facts().size(), bikes.text());
 			assertTrue(
 					bikes.text()
-							.contains("'motorcycles' names no kind of thing on record; the 3 facts under owns "
+							.contains("'motorcycles' names no kind of thing on record; the 4 facts under owns "
 									+ "for Mattias Sandell are everything recorded, none of them classified so"),
 					bikes.text());
 			// A kind on record narrows: a vehicle registered from use, the thing, the place.
 			RecallResult vehicles = recall(e, "what vehicles does Mattias own");
 			assertEquals("matched", vehicles.structured().state(), vehicles.text());
 			assertEquals(List.of("Yamaha FZ6-S"), objects(vehicles.structured().facts()), vehicles.text());
-			assertEquals(2, vehicles.structured().nearMisses().size(), vehicles.text());
-			assertTrue(vehicles.text().contains("2 facts under owns for Mattias Sandell of other kinds than vehicle"),
+			assertEquals(3, vehicles.structured().nearMisses().size(), vehicles.text());
+			assertTrue(vehicles.text().contains("3 facts under owns for Mattias Sandell of other kinds than vehicle"),
 					vehicles.text());
 			// What the store cannot classify (a kind nobody has placed) is a near-miss that says so, not an answer.
 			RecallResult things = recall(e, "which things does Mattias own");
-			assertEquals(List.of("Toyota Sienna"), objects(things.structured().facts()), things.text());
-			assertTrue(things.text().contains("may be one: Yamaha FZ6-S (vehicle, a kind nobody has placed)"),
+			assertEquals(List.of("Yamaha FZ6-S", "Toyota Sienna"), objects(things.structured().facts()), things.text());
+			assertTrue(things.text().contains("may be one: the Segway (conveyance, a kind nobody has placed)"),
 					things.text());
 			RecallResult places = recall(e, "what places does Mattias own");
 			assertEquals(List.of("Sonnefeld apartment"), objects(places.structured().facts()), places.text());
-			assertTrue(places.text().contains("may be one: Yamaha FZ6-S"), places.text());
+			assertTrue(places.text().contains("may be one: the Segway"), places.text());
 			// No kind asked for, a kind that is the predicate's own word, a literal object: unchanged.
-			assertEquals(3, recall(e, "what does Mattias own").structured().facts().size());
+			assertEquals(4, recall(e, "what does Mattias own").structured().facts().size());
 			RecallResult company = recall(e, "which company does Mattias work at");
 			assertEquals("matched", company.structured().state(), company.text());
 			assertEquals(List.of("Mattias Sandell works at Hooli"),
@@ -551,7 +554,7 @@ class RecallFeedbackTest {
 			assertEquals("miss", none.structured().state(), none.text());
 			assertTrue(none.text().contains("nothing under owns for Mattias Sandell is recorded as a organization"),
 					none.text());
-			assertEquals(3, none.structured().nearMisses().size(), none.text());
+			assertEquals(4, none.structured().nearMisses().size(), none.text());
 		}
 	}
 

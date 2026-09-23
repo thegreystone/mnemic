@@ -69,28 +69,28 @@ class DuplicateEntityTest {
 			remember(e, "I ordered a Polestar 4 Long Range Dual Motor Prime.",
 					proposal().entity("e1", CAR, "thing", "Polestar 4").fact("self", "owns", "e1"));
 			long car = e.entities().byRef("Polestar 4").orElseThrow().id();
-			// The same name, typed as a kind the store has never heard of: 'vehicle' cannot tell it apart.
+			// The same name, typed as a kind the store has never heard of: 'conveyance' cannot tell it apart.
 			RememberOutcome o = remember(e, "The Polestar 4 is my only vehicle.",
-					proposal().entity("e1", CAR, "vehicle").fact("self", "prefers", "e1"));
+					proposal().entity("e1", CAR, "conveyance").fact("self", "prefers", "e1"));
 			assertEquals("alias", o.applied().entities().getFirst().resolution(), o.applied().toString());
 			assertEquals(car, e.entities().byRef(CAR).orElseThrow().id(), "one car, not two");
 			assertEquals(1, e.entities().spot("Polestar 4").size());
 			assertTrue(o.applied().warnings().stream().anyMatch(w -> w.contains("nobody has placed")),
 					"said, not silent: " + o.applied().warnings());
 			// The word is registered from use and asked about, so the user can place it.
-			assertTrue(e.entityTypes().unplaced("vehicle"));
+			assertTrue(e.entityTypes().unplaced("conveyance"));
 			Map<String, Object> q = o.applied().questions().stream().filter(x -> "type_kind".equals(x.get("kind")))
 					.findFirst().orElseThrow(() -> new AssertionError(o.applied().questions().toString()));
-			assertEquals("vehicle", q.get("subject"), q.toString());
+			assertEquals("conveyance", q.get("subject"), q.toString());
 			e.answer(List.of(new Resolve(q.get("id").toString(), "thing")));
-			assertFalse(e.entityTypes().unplaced("vehicle"));
+			assertFalse(e.entityTypes().unplaced("conveyance"));
 			// Placed under thing, a vehicle is a thing: the next mention resolves without a word, and the more
 			// specific kind wins.
 			RememberOutcome again = remember(e, "The Polestar 4 is a vehicle I like.",
-					proposal().entity("e1", CAR, "vehicle").fact("self", "prefers", "e1"));
+					proposal().entity("e1", CAR, "conveyance").fact("self", "prefers", "e1"));
 			assertEquals("alias", again.applied().entities().getFirst().resolution());
 			assertTrue(again.applied().warnings().isEmpty(), again.applied().warnings().toString());
-			assertEquals("vehicle", e.entities().byRef(CAR).orElseThrow().type());
+			assertEquals("conveyance", e.entities().byRef(CAR).orElseThrow().type());
 			assertEquals(1, e.entities().spot("Polestar 4").size());
 			// The same name resolves without a type too, as it always did.
 			RememberOutcome untyped = remember(e, "The Polestar 4 again.",

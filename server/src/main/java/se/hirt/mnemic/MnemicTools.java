@@ -865,6 +865,9 @@ public class MnemicTools {
 		if (!t.typeWords().isEmpty()) {
 			m.put("type_words", t.typeWords());
 		}
+		if (!t.kinds().isEmpty()) {
+			m.put("kinds", t.kinds());
+		}
 		if (t.disjoint()) {
 			m.put("disjoint", true);
 		}

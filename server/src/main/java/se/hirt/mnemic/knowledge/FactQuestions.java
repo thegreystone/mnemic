@@ -161,11 +161,14 @@ final class FactQuestions {
 		}
 		var c = new ArrayList<Map<String, Object>>();
 		int n = 1;
-		for (Predicate p : fitting) {
+		// One participant: nothing to open or close between two things, so the only effect on offer is an ending;
+		// "does medical_checkup start owns?" was asked of a check-up on 2026-09-23.
+		List<Predicate> between = participants.size() < 2 ? List.of() : fitting;
+		for (Predicate p : between) {
 			c.add(choice(n++, "opens:" + p.name(),
 					"the event starts " + p.name() + (p.functional() ? " and replaces its earlier value" : ""), null));
 		}
-		for (Predicate p : fitting) {
+		for (Predicate p : between) {
 			c.add(choice(n++, "closes:" + p.name(), "the event ends " + p.name(), null));
 		}
 		if (participants.size() == 1) {
@@ -174,10 +177,15 @@ final class FactQuestions {
 		c.add(choice(n, "none", "a plain occurrence with no effect on facts", null));
 		String who = participants.isEmpty() ? "its participants"
 				: String.join(" and ", participants.stream().map(Entity::name).toList());
-		String message = "'" + t.name() + "' is a new event type; the event is stored as an occurrence with no effect "
-				+ "on facts. Does it start or end a relation between " + who + "? Answer opens:<predicate>, "
-				+ "closes:<predicate>, ends_entity, or none. The answer applies to every event of this type, "
-				+ "including those already stored.";
+		String message = participants.size() == 1
+				? "'" + t.name() + "' is a new event type; the event is stored as an occurrence with no effect on "
+						+ "facts. Does it end " + who
+						+ " (ends_entity), or is it a plain occurrence (none)? The answer "
+						+ "applies to every event of this type, including those already stored."
+				: "'" + t.name() + "' is a new event type; the event is stored as an occurrence with no effect "
+						+ "on facts. Does it start or end a relation between " + who + "? Answer opens:<predicate>, "
+						+ "closes:<predicate>, ends_entity, or none. The answer applies to every event of this type, "
+						+ "including those already stored.";
 		String payload = Json.write(Map.of("event_type", t.name(), "event", "evt-" + eventId));
 		return Optional.of(questions.create("event_effect", obs.id(), null, t.name(), null, c, payload, message));
 	}

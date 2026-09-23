@@ -295,21 +295,21 @@ class VocabularyStabilityTest {
 	void partialDefinitionsCompleteEventAndEntityTypes() {
 		try (Engine e = TestHomes.engine("stab-partial-types")) {
 			RememberOutcome first = remember(e, "I inherited the cabin in Kanton Schwyz in 2019.",
-					proposal().entity("e1", "the cabin", "place").entity("e2", "Kanton Schwyz", "canton").event("ev1",
+					proposal().entity("e1", "the cabin", "place").entity("e2", "Kanton Schwyz", "shire").event("ev1",
 							"inherited", "2019", "self", "e1"));
 			assertEquals(2, first.applied().questions().size(), "event_effect and type_kind");
 			// A bare definition changes nothing.
 			RememberOutcome bare = remember(e, "Names only.", proposal()
 					.eventType(new EventTypeDef("inherited", null, List.of(), List.of(), List.of(), null, List.of()))
-					.entityType(new EntityTypeDef("canton", null, null, List.of(), List.of())));
+					.entityType(new EntityTypeDef("shire", null, null, List.of(), List.of())));
 			assertEquals(List.of("exists", "exists"),
 					bare.applied().definitions().stream().map(d -> d.get("resolution")).toList());
 			assertTrue(e.eventTypes().get("inherited").orElseThrow().inferred());
 			// A partial one completes the term and has the consequences an answer would have.
-			RememberOutcome partial = remember(e, "Inheriting is owning; a canton is a place.", proposal()
+			RememberOutcome partial = remember(e, "Inheriting is owning; a shire is a place.", proposal()
 					.eventType(
 							new EventTypeDef("inherited", null, List.of("owns"), List.of(), List.of(), null, List.of()))
-					.entityType(new EntityTypeDef("canton", null, "place", List.of(), List.of())));
+					.entityType(new EntityTypeDef("shire", null, "place", List.of(), List.of())));
 			assertEquals(List.of("defined", "defined"),
 					partial.applied().definitions().stream().map(d -> d.get("resolution")).toList());
 			@SuppressWarnings("unchecked")
@@ -320,8 +320,8 @@ class VocabularyStabilityTest {
 			assertEquals(List.of("owns"), e.eventTypes().get("inherited").orElseThrow().opens());
 			assertEquals(List.of("Mattias Sandell owns the cabin (since 2019)"),
 					renderings(e, e.entities().owner().id()));
-			assertEquals("place", e.entityTypes().get("canton").orElseThrow().parent());
-			assertFalse(e.entityTypes().get("canton").orElseThrow().inferred());
+			assertEquals("place", e.entityTypes().get("shire").orElseThrow().parent());
+			assertFalse(e.entityTypes().get("shire").orElseThrow().inferred());
 			assertEquals(0, e.questions().openCount(), "the definitions answered the open questions");
 			assertEquals(List.of(), e.consolidate(true).inferredVocabulary());
 		}

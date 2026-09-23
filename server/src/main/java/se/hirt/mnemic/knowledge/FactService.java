@@ -344,10 +344,15 @@ public final class FactService {
 				String resolution = before.isEmpty() ? "registered"
 						: before.get().inferred() && !EntityTypeRegistry.bare(d) ? "defined" : "exists";
 				String name = types.register(d, a.obs.id()).name();
+				List<String> placedKinds = placeNamedKinds(name);
 				if ("defined".equals(resolution)) {
 					settle("type_kind", name);
 				}
-				a.definitions.add(definition("entity_type", name, resolution));
+				var m = definition("entity_type", name, resolution);
+				if (!placedKinds.isEmpty()) {
+					m.put("placed", placedKinds);
+				}
+				a.definitions.add(m);
 			} catch (MnemicException e) {
 				skipped(a, e, "Entity type '" + d.name() + "'");
 			}
@@ -411,18 +416,36 @@ public final class FactService {
 		registerTypeFromUse(a, e.type(), e);
 	}
 
-	/** Registers {@code type} from its use for {@code e}, and asks what kind of thing it is. */
+	/**
+	 * Registers {@code type} from its use for {@code e}. A spelling that says where the type goes (a word in a
+	 * registered type's kinds such as hotel, clinic, or dog; a plural of a registered type; a compound headed by such a
+	 * word) places it at once, reported under definitions with what placed it and how to move it: ten of a usage run's
+	 * questions were "is a hotel a kind of place?" (2026-09-23). Any other new type is asked about, once.
+	 */
 	private void registerTypeFromUse(Application a, String type, Entity e) {
 		if (EntityTypeRegistry.UNKNOWN.equals(type) || types.get(type).isPresent()) {
 			return;
 		}
-		EntityTypeRegistry.EntityType t = types.registerInferred(type, a.obs.id());
+		Optional<EntityTypeRegistry.Placement> placed = types.placeFromUse(type, a.obs.id());
+		if (placed.isPresent() && !placed.get().created()) {
+			// A plural of a type on record: that type, and the spelling noted as its synonym. Nothing new.
+			var m = definition("entity_type", placed.get().type().name(), "exists");
+			m.put("placed_by", placed.get().how());
+			a.definitions.add(m);
+			return;
+		}
+		EntityTypeRegistry.EntityType t = placed.map(EntityTypeRegistry.Placement::type)
+				.orElseGet(() -> types.registerInferred(type, a.obs.id()));
 		var inferred = new LinkedHashMap<String, Object>();
-		inferred.put("parent", null);
+		inferred.put("parent", t.parent());
+		placed.ifPresent(p -> inferred.put("placed_by", p.how()));
 		inferred.put("type_words", List.of());
-		inferred.put("correct", "correct(\"type:" + t.name() + "\", {parent, description, synonyms, type_words})");
+		inferred.put("correct",
+				"correct(\"type:" + t.name() + "\", {parent, description, synonyms, type_words, kinds})");
 		a.defined("entity_type", t.name(), "inferred", inferred);
-		asks.typeKind(a.obs, t, e, types.roots()).ifPresent(a::ask);
+		if (placed.isEmpty()) {
+			asks.typeKind(a.obs, t, e, types.roots()).ifPresent(a::ask);
+		}
 	}
 
 	/** A definition of the term answers the question that asked what it means. */
@@ -432,6 +455,18 @@ public final class FactService {
 				questions.answer(q.id(), "defined");
 			}
 		}
+	}
+
+	/**
+	 * Places the unplaced types a type's kinds name, after a definition or a correction gave it kinds, and settles the
+	 * questions that asked what they were. Returns what was placed.
+	 */
+	public List<String> placeNamedKinds(String typeName) {
+		List<String> placed = types.adoptKinds(typeName);
+		for (String name : placed) {
+			settle("type_kind", name);
+		}
+		return placed;
 	}
 
 	private static Map<String, Object> definition(String kind, String name, String resolution) {

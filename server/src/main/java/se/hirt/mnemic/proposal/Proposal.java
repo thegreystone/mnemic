@@ -186,7 +186,7 @@ Integer specVersion, List<EntityRef> entities, List<EventRef> events, List<FactR
 			"closures", Set.of("subject", "predicate", "type"), "valid_time", Set.of("start", "end", "precision"),
 			"derivation", Set.of("kind"), "event_types",
 			Set.of("name", "description", "opens", "closes", "supersedes", "ends_entity", "lexicon", "render"),
-			"entity_types", Set.of("name", "description", "parent", "synonyms", "type_words", "disjoint"));
+			"entity_types", Set.of("name", "description", "parent", "synonyms", "type_words", "kinds", "disjoint"));
 
 	/**
 	 * Keys the spec does not define are ignored by the reader; every ignored key is named, with the keys that exist
@@ -476,18 +476,28 @@ Integer specVersion, List<EntityRef> entities, List<EventRef> events, List<FactR
 	 * one, and the kind it nests within (a canton is a place).
 	 */
 	@JsonIgnoreProperties(ignoreUnknown = true)
-	/** {@code disjoint}: two different things of this type never overlap (countries), which decides containment. */
+	/**
+	 * {@code disjoint}: two different things of this type never overlap (countries), which decides containment.
+	 * {@code kinds}: words that name a kind of this type (for a vehicle type: car, van, truck), so that a type proposed
+	 * under one of them is placed here without a question.
+	 */
 	public record EntityTypeDef(String name, String description, String parent, List<String> synonyms,
 			@JsonProperty("type_words")
-			List<String> typeWords, Boolean disjoint) {
+			List<String> typeWords, Boolean disjoint, List<String> kinds) {
 		public EntityTypeDef(String name, String description, String parent, List<String> synonyms,
 				List<String> typeWords) {
-			this(name, description, parent, synonyms, typeWords, null);
+			this(name, description, parent, synonyms, typeWords, null, null);
+		}
+
+		public EntityTypeDef(String name, String description, String parent, List<String> synonyms,
+				List<String> typeWords, Boolean disjoint) {
+			this(name, description, parent, synonyms, typeWords, disjoint, null);
 		}
 
 		public EntityTypeDef {
 			synonyms = synonyms == null ? List.of() : synonyms;
 			typeWords = typeWords == null ? List.of() : typeWords;
+			kinds = kinds == null ? List.of() : kinds;
 		}
 	}
 

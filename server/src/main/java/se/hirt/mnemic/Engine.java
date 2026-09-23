@@ -702,6 +702,9 @@ public final class Engine implements AutoCloseable {
 		out.put("entity_type", after.name());
 		out.put("before", typeMap(before));
 		out.put("after", typeMap(after));
+		if (replacement.containsKey("kinds")) {
+			out.put("placed", knowledge.factService().placeNamedKinds(after.name()));
+		}
 		out.put("changes", knowledge.entityTypes().changes(after.name()));
 		return out;
 	}
@@ -739,6 +742,7 @@ public final class Engine implements AutoCloseable {
 		m.put("parent", t.parent());
 		m.put("synonyms", t.synonyms());
 		m.put("type_words", t.typeWords());
+		m.put("kinds", t.kinds());
 		return m;
 	}
 
