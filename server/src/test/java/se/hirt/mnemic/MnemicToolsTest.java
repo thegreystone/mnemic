@@ -786,6 +786,12 @@ class MnemicToolsTest {
 				Optional.of("both-5"), List.of(Map.of("question_id", q, "choice", "both")));
 		assertFalse(both.isError(), text(both));
 		assertTrue(text(both).contains("\"status\":\"answered\""), text(both));
+		// Through inspect: the question shows what answered it, the fact's changes say a person did.
+		String question = text(tools.inspect(q, Optional.empty(), NONE));
+		assertTrue(question.contains("\"answer\":\"both\""), question);
+		String pendingRef = questions.getFirst().get("pending").toString();
+		String fact = text(tools.inspect(pendingRef, Optional.empty(), NONE));
+		assertTrue(fact.contains("\"kind\":\"nested\"") && fact.contains("user: both; stands beside"), fact);
 		String block = text(tools.recall(Optional.of("where does Ossian Nyberg live"), NONE, Optional.of(600),
 				Optional.empty(), Optional.empty()));
 		assertTrue(block.contains("lives in Küssnacht am Rigi") && block.contains("lives in Gschweighusweg 20b"),

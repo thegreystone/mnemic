@@ -193,6 +193,24 @@ class UsageTest {
 	}
 
 	@Test
+	void aStoppedRunResumesAfterItsFinishedScenarios() {
+		// Two scenarios of two steps: the first finished, the second cut off after one step (an API limit, say).
+		var a = new Usage.Scenario("a", "Mattias Sandell", "",
+				List.of(new Usage.Step("x", null, null, "fact", false), new Usage.Step(null, "q", "e", "fact", false)));
+		var b = new Usage.Scenario("b", "Mattias Sandell", "",
+				List.of(new Usage.Step("x", null, null, "fact", false), new Usage.Step(null, "q", "e", "fact", false)));
+		List<Map<String, Object>> trace = List.of(Map.of("scenario", "a", "kind", "say", "step", 0),
+				Map.of("scenario", "a", "kind", "ask", "step", 1), Map.of("scenario", "b", "kind", "say", "step", 0));
+		assertEquals(Set.of("a"), Usage.completedScenarios(trace, List.of(a, b)),
+				"the finished one is kept, the half-done one is played again");
+		// A script that grew since the run: the old scenario's record count no longer matches, so it is replayed.
+		var grown = new Usage.Scenario("a", "Mattias Sandell", "",
+				List.of(new Usage.Step("x", null, null, "fact", false), new Usage.Step("y", null, null, "fact", false),
+						new Usage.Step(null, "q", "e", "fact", false)));
+		assertEquals(Set.of(), Usage.completedScenarios(trace, List.of(grown, b)));
+	}
+
+	@Test
 	void questionsAfterABreakAreCountedOnTheirOwn() {
 		List<Map<String, Object>> records = List.of(Map.of("scenario", "a", "kind", "say", "tool_calls", 1,
 				"parse_failures", 0, "remembered", true, "remembered_with_reading", true),

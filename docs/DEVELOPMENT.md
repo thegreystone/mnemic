@@ -150,8 +150,10 @@ repository. Local models need no key.
 
 `bench usage` measures something the retrieval bench cannot: whether an assistant that is handed the server's own
 tool descriptions and the memory protocol actually gets a memory in and out. A model plays the assistant over the
-scripted conversations in `bench/usage/scenarios.json` (the fictional owner Mattias Sandell; twelve scenarios,
-forty steps). Each scenario starts a real server over stdio on a fresh data home, exactly as a client would, and
+scripted conversations in `bench/usage/scenarios.json` (the fictional owner Mattias Sandell; twenty-three
+scenarios, 114 steps, 63 questions: family, jobs over time, negation, corrections, decisions, a pasted email,
+work on a code base, a car, a home, a wedding timeline, health, travel, a child's school; eight span a session
+break). Each scenario starts a real server over stdio on a fresh data home, exactly as a client would, and
 the assistant is given what a real client gives it: the server's instructions from the initialize reply and the
 tools it publishes (the proposal guide is not pasted in; the assistant fetches it with `inspect('guide')`). At each step the model either calls a tool (`{"tool": ...,
 "arguments": {...}}`) or answers the user (`{"reply": ...}`); a judge grades the answers against the script's
@@ -167,6 +169,10 @@ Options: `--server` (the runner jar or the native binary), `--assistant MODEL`, 
 `--api-key-env NAME`, `--limit N` (first N scenarios), `--only ID` (one scenario), `--embed on|off` (default
 off: the semantic channel is not what is measured), `--max-calls N` (tool calls allowed per step, default 8),
 `--reasoning-effort` as for `run`.
+
+A run that stopped (an API limit, a crash) goes on from its first unfinished scenario with `--resume true`
+on the same `--out`: finished scenarios keep their records, a half-done one is played again, and the
+summary covers the whole; `api_usage` then counts the resumed process only.
 
 The run writes `config.json`, `usage.jsonl` (one record per step: every call with its arguments and the head of
 its result, the reply, the recall verdict, the judge's verdict), and `summary.json`. The summary's numbers say how

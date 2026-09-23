@@ -83,6 +83,12 @@ public record Question(long id, String kind, String status, Long observationId, 
 		if (observationId != null) {
 			m.put("observation", "obs-" + observationId);
 		}
+		if (answer != null) {
+			m.put("answer", answer);
+		}
+		if (answeredAt != null) {
+			m.put("answered_at", answeredAt);
+		}
 		return m;
 	}
 

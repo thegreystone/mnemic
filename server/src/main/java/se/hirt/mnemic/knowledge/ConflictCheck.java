@@ -49,10 +49,12 @@ final class ConflictCheck {
 
 	/**
 	 * The outcome: the fact the new one conflicts with and why (null when it stands), containment gaps to ask about
-	 * ({@code top, bound, servedFactId}, the last -1 for the fact being stored), facts a superseding event closes, and
-	 * the bounds and ended flag the row takes.
+	 * ({@code top, bound, servedFactId}, the last -1 for the fact being stored), facts a superseding event closes, the
+	 * bounds and ended flag the row takes, and the current value the new one stands beside because one lies within the
+	 * other (null otherwise).
 	 */
-	record Outcome(Fact conflictWith, String why, List<long[]> asks, List<Fact> toClose, Bounds row, boolean rowEnded) {
+	record Outcome(Fact conflictWith, String why, List<long[]> asks, List<Fact> toClose, Bounds row, boolean rowEnded,
+			Fact besides) {
 		boolean pending() {
 			return conflictWith != null;
 		}
@@ -78,6 +80,13 @@ final class ConflictCheck {
 		return nested(tx, op.object().id(), other.objectId());
 	}
 
+	/** The ledger reason for a fact that stands beside another: one place at two granularities. */
+	static String besideReason(Tx tx, Fact fact, Fact other, String prefix) {
+		return prefix + "stands beside " + other.ref() + " \"" + other.rendering() + "\": "
+				+ FactRenderer.nameIn(tx, fact.objectId()) + " and " + FactRenderer.nameIn(tx, other.objectId())
+				+ " are one place at two granularities, one within the other";
+	}
+
 	boolean nested(Tx tx, long a, long b) {
 		if (a == b) {
 			return false;
@@ -91,6 +100,7 @@ final class ConflictCheck {
 		var asks = new ArrayList<long[]>();
 		Fact conflictWith = null;
 		String why = null;
+		Fact besides = null;
 		Bounds row = bounds;
 		boolean rowEnded = ended;
 		if (op.asserted() && op.predicate().functional()) {
@@ -113,6 +123,9 @@ final class ConflictCheck {
 				} else if (nested(tx, op, other)) {
 					// "lives in Gschweighusweg 20b" beside "lives in Küssnacht", with 20b located in Küssnacht:
 					// one place at two granularities, not two places. Both stand (2026-09-22).
+					if (besides == null) {
+						besides = other;
+					}
 					continue;
 				} else {
 					conflictWith = other;
@@ -199,7 +212,7 @@ final class ConflictCheck {
 			}
 			}
 		}
-		return new Outcome(conflictWith, why, asks, toClose, row, rowEnded);
+		return new Outcome(conflictWith, why, asks, toClose, row, rowEnded, besides);
 	}
 
 	private static boolean disjoint(Fact other, Bounds b) {

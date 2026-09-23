@@ -332,6 +332,22 @@ final class StructuredProbe {
 		}
 		String state = decidedBy != null ? "known_false"
 				: matched.isEmpty() ? (future.isEmpty() ? "miss" : "future") : "matched";
+		if ("miss".equals(state) && near.isEmpty() && ended.isEmpty()) {
+			// "who owns the parser module" when the record says responsible_for: the miss is real, and the reader
+			// should know which relations the thing does have, so a near synonym is not read as "nothing known"
+			// (2026-09-23). The owner's own record is long and mostly beside the point, so it is left out.
+			for (Entity e : subjects) {
+				if (e.id() == entities.owner().id()) {
+					continue;
+				}
+				List<String> under = facts.factsOf(e.id()).stream().filter(Fact::current).map(Fact::predicate)
+						.filter(p -> !p.equals(cue.predicate().name())).distinct().sorted().limit(6).toList();
+				if (!under.isEmpty()) {
+					notes.add(e.name() + " is on record under " + String.join(", ", under) + ", not "
+							+ cue.predicate().name());
+				}
+			}
+		}
 		List<Fact> chain = matched.isEmpty() ? List.of() : chain(matched, asOf, now);
 		return new Structured(state, entity.ref(), entity.name(), cue.predicate().name(), cue.qualifier(),
 				List.copyOf(matched), List.copyOf(near), chain, List.copyOf(bounds), decidedBy, basis,

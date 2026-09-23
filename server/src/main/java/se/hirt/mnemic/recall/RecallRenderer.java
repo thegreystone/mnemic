@@ -299,9 +299,11 @@ final class RecallRenderer {
 				sb.append(events.size()).append(events.size() == 1 ? " event on the next line touches the question"
 						: " events on the next line touch the question").append(POLAR_NOTE);
 			} else {
+				// "what colour did I order" cues the order: the events answer only what they carry (2026-09-23).
 				sb.append(events.size())
-						.append(events.size() == 1 ? " event on the next line matches the question and is the answer"
-								: " events on the next line match the question and are the answer");
+						.append(events.size() == 1 ? " event on the next line matches the question and answers it"
+								: " events on the next line match the question and answer it")
+						.append(" as far as it states what is asked; a detail it does not carry is not known");
 			}
 		}
 		case "entity" -> sb.append("entity ").append(s.entityName()).append(" resolved, no predicate cue; ")

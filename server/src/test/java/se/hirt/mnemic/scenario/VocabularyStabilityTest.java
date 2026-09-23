@@ -241,7 +241,9 @@ class VocabularyStabilityTest {
 							"2026-09-11", "e1", "self"));
 			assertEquals("confirmed_payment", typed.applied().events().getFirst().type());
 			assertEquals(1, typed.applied().definitions().size());
-			assertEquals(1, typed.applied().questions().size());
+			// A dealer and a buyer: no one-valued relation joins them, so the type's effect is not asked about
+			// (2026-09-23); the definition says how to give it one.
+			assertEquals(0, typed.applied().questions().size(), typed.applied().questions().toString());
 			// Types are spelled one way whatever the caller's punctuation.
 			assertTrue(EventTypeRegistry.typeLike("co-founded") && EventTypeRegistry.typeLike("Purchased Property"));
 			assertFalse(EventTypeRegistry.typeLike("swiss 2025 tax return deadline"));

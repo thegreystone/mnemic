@@ -611,13 +611,32 @@ public final class FactService {
 			}
 			opened.addAll(openedBy(a, ev, type, participants, key));
 			if (et != null && et.inferred()) {
-				asks.eventEffect(a.obs, et, participants, stored.id(), fitting(participants)).ifPresent(a::ask);
+				List<Predicate> fit = fitting(participants);
+				if (effectWorthAsking(participants, fit)) {
+					asks.eventEffect(a.obs, et, participants, stored.id(), fit).ifPresent(a::ask);
+				}
 			}
 		}
 		return opened;
 	}
 
+	/**
+	 * Whether a new event type's effect is worth a question now: a one-valued relation between its participants that
+	 * the event could replace or close (a move and lives_in), or a single person it could end. A renewal, a release, a
+	 * fix between things that no one-valued relation joins is a plain occurrence; asking whether it "starts owns" cost
+	 * a mortgage email three questions (2026-09-23), and the type's effects can be set later with correct. Kinship is
+	 * left out: a marriage, an engagement, a death are seeded events, and a rehearsal dinner between two people was
+	 * asked whether it "starts spouse_of" at every step of a wedding (2026-09-23).
+	 */
+	private boolean effectWorthAsking(List<Entity> participants, List<Predicate> fitting) {
+		if (fitting.stream().anyMatch(p -> p.functional() && !p.groups().contains("family"))) {
+			return true;
+		}
+		return participants.size() == 1 && types.isA(participants.getFirst().type(), "person");
+	}
+
 	/** The predicates an event between these participants could open or close: those whose types fit them. */
+
 	private List<Predicate> fitting(List<Entity> participants) {
 		if (participants.isEmpty()) {
 			return List.of();
@@ -862,6 +881,14 @@ public final class FactService {
 					a.obs.observedAt().toString(), Instant.now().toString(), c.row().startSource(), c.row().endSource(),
 					op.mode());
 			FactLedger.link(tx, id, a.obs.id(), "stated");
+			if (c.besides() != null) {
+				// Decided here, not by a person: the ledger says so, and the reply names it.
+				Fact fresh = Fact.from(tx.queryOne("SELECT * FROM fact WHERE id = ?", id).orElseThrow());
+				String reason = ConflictCheck.besideReason(tx, fresh, c.besides(), "store: ");
+				FactLedger.supersession(tx, id, null, "nested", reason, null, a.obs.id(), null);
+				a.warnings.add(
+						"\"" + rowRendering + "\" " + reason.substring("store: ".length()) + "; both are current.");
+			}
 			// A participant whose record had already ended when this was said (a death on record): the fact ends
 			// with them, as it would have had the death come later, unless the relation is lasting or the fact
 			// began after the end (K41).

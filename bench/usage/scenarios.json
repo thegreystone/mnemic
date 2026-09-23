@@ -65,7 +65,7 @@
       "about": "A decision recorded in one conversation and asked about in the next.",
       "steps": [
         {"say": "For the Mnemic project we decided to use SQLite as the store, one file per data home."},
-        {"say": "Also, the benchmark data lives under bench/data."},
+        {"say": "Also, we decided to keep the benchmark data out of the repository and fetch it on first run."},
         {"ask": "Which database did we decide on for Mnemic?", "expect": "SQLite"}
       ]
     },
@@ -146,6 +146,111 @@
         {"break": true},
         {"ask": "Where do I live?", "expect": "Schübelbach", "type": "update"},
         {"ask": "Did I ever say I lived somewhere else?", "expect": "Yes, Zürich, which was corrected to Schübelbach."}
+      ]
+    },
+    {
+      "id": "email-mortgage",
+      "about": "A personal email pasted in: names, dates, and a figure to keep; the figure changes in a later email.",
+      "steps": [
+        {"say": "Here is an email I got today. \"Dear Mr Sandell, your mortgage on Bergstrasse 7 in Schübelbach comes up for renewal on 1 March 2027. We can offer a five-year fixed rate of 1.85%. Please confirm by 15 January 2027. Kind regards, Petra Holm, Nordbank Hypotheken, Zug.\""},
+        {"ask": "When does my mortgage come up for renewal?", "expect": "1 March 2027", "type": "temporal"},
+        {"ask": "Who is my contact at Nordbank for the mortgage?", "expect": "Petra Holm, Nordbank Hypotheken in Zug"},
+        {"ask": "By when do I have to confirm the mortgage rate?", "expect": "15 January 2027", "type": "temporal"},
+        {"ask": "What is the outstanding balance on the mortgage?", "expect": "Not known: nothing about the outstanding mortgage balance has been recorded.", "type": "abstention"},
+        {"break": true},
+        {"say": "Another email from Petra Holm: \"Following our call, Nordbank can improve the five-year fixed rate on Bergstrasse 7 to 1.75%. The confirmation deadline stays 15 January 2027.\""},
+        {"ask": "What fixed rate has Nordbank offered on my mortgage?", "expect": "1.75% for five years, improved from the 1.85% first offered", "type": "update"}
+      ]
+    },
+    {
+      "id": "codebase-people-and-plans",
+      "about": "Working in a code base: who owns what, what was decided and when, what a bug turned out to be. Not conventions, which belong in the repository.",
+      "steps": [
+        {"say": "On the Kestrel project, Tobias owns the parser module; ask him before changing anything in it. Milo owns the profiler integration."},
+        {"say": "We decided to drop Java 21 support in Kestrel 3.0, which we plan to release in December 2026."},
+        {"say": "The flaky Kestrel integration test turned out to be clock skew between the build agents; Milo fixed it on 10 September 2026."},
+        {"ask": "Who should I talk to before changing the Kestrel parser?", "expect": "Tobias, who owns the parser module"},
+        {"ask": "When do we plan to release Kestrel 3.0, and what did we decide about Java 21?", "expect": "December 2026; Java 21 support is dropped in 3.0", "type": "fact"},
+        {"ask": "What was behind the flaky Kestrel test?", "expect": "Clock skew between the build agents; Milo fixed it on 10 September 2026"},
+        {"ask": "Which continuous integration service does Kestrel use?", "expect": "Not known: nothing about Kestrel's CI service has been recorded.", "type": "abstention"}
+      ]
+    },
+    {
+      "id": "car-purchase",
+      "about": "A car: a leaning in one conversation, an order the next, with the people and dates that come with it.",
+      "steps": [
+        {"say": "I'm leaning toward a Zenit 4 to replace the Volvo V60, but I haven't decided yet."},
+        {"ask": "Have I decided on a new car?", "expect": "No decision yet; you were leaning toward a Zenit 4 to replace the Volvo V60"},
+        {"break": true},
+        {"say": "I ordered the Zenit 4 on 15 September 2026 from Auto Wyss in Zug. My contact there is Reto Steiner. Delivery is expected in January 2027, and I paid a deposit of 5,000 francs."},
+        {"ask": "Have I decided on a new car?", "expect": "Yes: you ordered a Zenit 4 on 15 September 2026 from Auto Wyss in Zug", "type": "update"},
+        {"ask": "When is the car expected?", "expect": "January 2027", "type": "temporal"},
+        {"ask": "Who is my contact at the dealer?", "expect": "Reto Steiner at Auto Wyss in Zug"},
+        {"ask": "What colour did I order the car in?", "expect": "Not known: nothing about the car's colour has been recorded.", "type": "abstention"}
+      ]
+    },
+    {
+      "id": "property-purchase",
+      "about": "Buying a home: price, notary date, handover, and a handover that moves.",
+      "steps": [
+        {"say": "Anna and I are buying the Lindenhof apartment in Willisau. The offer of 1.2 million francs was accepted on 1 September 2026. The notary appointment is on 20 November 2026 at Notariat Willisau, and the handover is on 1 February 2027."},
+        {"ask": "What did we agree to pay for the Lindenhof apartment?", "expect": "1.2 million francs, accepted on 1 September 2026"},
+        {"ask": "When is the notary appointment for the apartment?", "expect": "20 November 2026 at Notariat Willisau", "type": "temporal"},
+        {"say": "The handover of the Lindenhof apartment has moved to 1 March 2027; the sellers need another month."},
+        {"ask": "When do we take over the Lindenhof apartment?", "expect": "1 March 2027, moved from 1 February 2027", "type": "update"},
+        {"ask": "Who is the estate agent for the Lindenhof purchase?", "expect": "Not known: nothing about an estate agent has been recorded.", "type": "abstention"}
+      ]
+    },
+    {
+      "id": "wedding-timeline",
+      "about": "A wedding planned over several conversations: the date, the milestones, what is still open, and a date that moves.",
+      "steps": [
+        {"say": "Anna and I are getting married on 12 June 2027 in Sälen. The venue is Sälens Högfjällshotell; we paid the deposit on 5 September 2026."},
+        {"say": "Invitations have to go out by 15 January 2027. Anna's dress fitting is on 3 April 2027. The rehearsal dinner is the evening before the wedding, on 11 June 2027."},
+        {"say": "We haven't chosen a photographer yet; we're deciding between two in Malmö."},
+        {"ask": "When is our wedding, and where?", "expect": "12 June 2027 at Sälens Högfjällshotell in Sälen"},
+        {"ask": "By when do the invitations have to go out?", "expect": "15 January 2027", "type": "temporal"},
+        {"ask": "Have we booked a photographer?", "expect": "No, not yet; you were deciding between two in Malmö"},
+        {"break": true},
+        {"ask": "When is Anna's dress fitting?", "expect": "3 April 2027", "type": "temporal"},
+        {"say": "The hotel double-booked, so the wedding moves one week to 19 June 2027, and the rehearsal dinner to 18 June."},
+        {"ask": "When is our wedding now?", "expect": "19 June 2027, moved from 12 June", "type": "update"},
+        {"ask": "When is the rehearsal dinner?", "expect": "18 June 2027", "type": "update"},
+        {"ask": "Who is doing the flowers for the wedding?", "expect": "Not known: nothing about a florist has been recorded.", "type": "abstention"}
+      ]
+    },
+    {
+      "id": "doctor-and-allergy",
+      "about": "Health facts worth never getting wrong, and a question that must not be guessed.",
+      "steps": [
+        {"say": "My GP is Dr. Eva Lindgren at Praxis am Bahnhof in Schübelbach. I'm allergic to penicillin. My next check-up is on 10 February 2027."},
+        {"ask": "What am I allergic to?", "expect": "Penicillin"},
+        {"ask": "Who is my doctor?", "expect": "Dr. Eva Lindgren at Praxis am Bahnhof in Schübelbach"},
+        {"ask": "When is my next check-up?", "expect": "10 February 2027", "type": "temporal"},
+        {"ask": "What is my blood type?", "expect": "Not known: nothing about blood type has been recorded.", "type": "abstention"}
+      ]
+    },
+    {
+      "id": "travel-plans",
+      "about": "A trip with dates and a hotel, asked about after the conversation that planned it.",
+      "steps": [
+        {"say": "I'm flying to Tokyo for work from 3 to 12 November 2026. I'm staying at Hotel Gracery in Shinjuku, and Bo Berg is coming along for the first week."},
+        {"break": true},
+        {"ask": "When am I in Tokyo?", "expect": "3 to 12 November 2026", "type": "temporal"},
+        {"ask": "Where am I staying in Tokyo?", "expect": "Hotel Gracery in Shinjuku"},
+        {"ask": "Is anyone coming with me to Tokyo?", "expect": "Yes, Bo Berg, for the first week"},
+        {"ask": "Which airline am I flying with?", "expect": "Not known: nothing about the airline has been recorded.", "type": "abstention"}
+      ]
+    },
+    {
+      "id": "school-start",
+      "about": "A child's milestone with a date and a person, and a step-change stated later.",
+      "steps": [
+        {"say": "Our son Viggo starts at the Primarschule in Schübelbach in August 2027. His teacher will be Frau Meier."},
+        {"ask": "When does Viggo start school?", "expect": "August 2027, at the Primarschule in Schübelbach", "type": "temporal"},
+        {"ask": "Who will Viggo's teacher be?", "expect": "Frau Meier"},
+        {"say": "Correction: Viggo's teacher will be Herr Baumann, not Frau Meier; she is moving to another school."},
+        {"ask": "Who will Viggo's teacher be?", "expect": "Herr Baumann, corrected from Frau Meier", "type": "update"}
       ]
     }
   ]

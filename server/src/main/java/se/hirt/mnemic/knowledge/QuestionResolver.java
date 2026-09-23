@@ -313,6 +313,8 @@ public final class QuestionResolver {
 						+ "ended, supersede, reject, reinterpret, or wrong.");
 			}
 			tx.update("UPDATE fact SET status = 'current' WHERE id = ?", pendingId);
+			FactLedger.supersession(tx, pendingId, null, "nested",
+					ConflictCheck.besideReason(tx, pending, existing, "user: both; "), null, obs.id(), null);
 			return null;
 		});
 		default -> throw MnemicException.invalidArgument("'" + choice + "' is not an answer to " + q.ref()

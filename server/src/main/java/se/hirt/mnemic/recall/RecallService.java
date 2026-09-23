@@ -33,6 +33,7 @@ import se.hirt.mnemic.embed.EmbedderHolder;
 import se.hirt.mnemic.embed.VectorStore;
 import se.hirt.mnemic.knowledge.Containment;
 import se.hirt.mnemic.knowledge.Entity;
+import se.hirt.mnemic.knowledge.Names;
 import se.hirt.mnemic.knowledge.EntityService;
 import se.hirt.mnemic.knowledge.EntityTypeRegistry;
 import se.hirt.mnemic.knowledge.Event;
@@ -383,7 +384,7 @@ public final class RecallService {
 	 * structured channel and take the verdict unless a directed or functional fact answered already.
 	 */
 	private Structured eventCue(Query q, Structured s, Gates g, Instant asOf, Channels ch) {
-		Optional<String> cue = events.cue(q.terms());
+		Optional<String> cue = events.cue(eventTerms(q));
 		if (cue.isEmpty()) {
 			return s;
 		}
@@ -417,6 +418,20 @@ public final class RecallService {
 		boolean answered = ("matched".equals(s.state()) && g.answerCue()) || s.knownFalse()
 				|| "future".equals(s.state());
 		return answered ? s : s.withState("events");
+	}
+
+	/**
+	 * The query's terms without the words that name a thing it spotted or that thing's kind: in "the balance on the
+	 * mortgage", "mortgage" is the loan, not the mortgage_renewal event whose type shares the word (2026-09-23). The
+	 * event's own words ("renewal", "confirm") still cue it.
+	 */
+	private static List<String> eventTerms(Query q) {
+		var own = new HashSet<String>();
+		for (Entity e : q.spotted()) {
+			own.addAll(Names.tokens(e.name()));
+			own.addAll(Names.tokens(e.type().replace('_', ' ')));
+		}
+		return q.terms().stream().filter(t -> !own.contains(t)).toList();
 	}
 
 	/** Channel 3: BM25 over observation text, observed by {@code asOf}. */

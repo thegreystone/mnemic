@@ -46,7 +46,9 @@ import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -286,6 +288,33 @@ public final class Usage {
 		}) : Map.of();
 	}
 
+	/** The records of an earlier run's trace, one per line. */
+	static List<Map<String, Object>> readTrace(Path trace) throws IOException {
+		var out = new ArrayList<Map<String, Object>>();
+		for (String line : Files.readAllLines(trace, StandardCharsets.UTF_8)) {
+			if (!line.isBlank()) {
+				out.add(JSON.readValue(line, new TypeReference<Map<String, Object>>() {
+				}));
+			}
+		}
+		return out;
+	}
+
+	/** The scenarios an earlier trace finished: every step recorded, in the script's current shape. */
+	static Set<String> completedScenarios(List<Map<String, Object>> records, List<Scenario> scenarios) {
+		var counts = new HashMap<String, Integer>();
+		for (Map<String, Object> r : records) {
+			counts.merge(String.valueOf(r.get("scenario")), 1, Integer::sum);
+		}
+		var done = new LinkedHashSet<String>();
+		for (Scenario sc : scenarios) {
+			if (counts.getOrDefault(sc.id(), 0) == sc.steps().size()) {
+				done.add(sc.id());
+			}
+		}
+		return done;
+	}
+
 	static void run(Map<String, String> o) throws Exception {
 		Path script = Path.of(o.getOrDefault("script", "usage/scenarios.json"));
 		Path server = Path.of(Bench.require(o, "server"));
@@ -298,6 +327,7 @@ public final class Usage {
 		String only = o.get("only");
 		boolean embed = "on".equals(o.getOrDefault("embed", "off"));
 		int maxCalls = Integer.parseInt(o.getOrDefault("max-calls", "8"));
+		boolean resume = "true".equals(o.getOrDefault("resume", "false"));
 		Bench.reasoningEffort(o);
 
 		Files.createDirectories(out);
@@ -309,15 +339,38 @@ public final class Usage {
 		config.put("embed", embed);
 		config.put("max_calls", maxCalls);
 		config.put("started_at", Instant.now().toString());
-		Files.writeString(out.resolve("config.json"), JSON.writeValueAsString(config), StandardCharsets.UTF_8);
-
 		List<Scenario> scenarios = load(script);
 		var records = new ArrayList<Map<String, Object>>();
+		Set<String> completed = Set.of();
+		Path tracePath = out.resolve("usage.jsonl");
+		if (resume && Files.exists(tracePath)) {
+			// A run that stopped (an API limit, say) goes on from the first scenario it did not finish: the finished
+			// ones keep their records and are not paid for twice; a half-done one is played again from the start.
+			List<Map<String, Object>> prior = readTrace(tracePath);
+			completed = completedScenarios(prior, scenarios);
+			for (Map<String, Object> r : prior) {
+				if (completed.contains(String.valueOf(r.get("scenario")))) {
+					records.add(r);
+				}
+			}
+			config.put("resumed", true);
+			config.put("resumed_after", completed);
+			System.err.println("resuming after " + completed.size() + " finished scenarios");
+		}
+		Files.writeString(out.resolve("config.json"), JSON.writeValueAsString(config), StandardCharsets.UTF_8);
 		int done = 0;
-		try (BufferedWriter trace = Files.newBufferedWriter(out.resolve("usage.jsonl"), StandardCharsets.UTF_8,
+		try (BufferedWriter trace = Files.newBufferedWriter(tracePath, StandardCharsets.UTF_8,
 				StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
+			for (Map<String, Object> r : records) {
+				trace.write(LINE.writeValueAsString(r));
+				trace.newLine();
+			}
+			trace.flush();
 			for (Scenario sc : scenarios) {
 				if (only != null && !only.equals(sc.id())) {
+					continue;
+				}
+				if (completed.contains(sc.id())) {
 					continue;
 				}
 				if (limit > 0 && done >= limit) {
@@ -367,6 +420,10 @@ public final class Usage {
 		Map<String, Long> apiUsage = AnthropicHttpProvider.usage();
 		if (apiUsage.get("requests") > 0) {
 			summary.put("api_usage", apiUsage);
+			if (!completed.isEmpty()) {
+				summary.put("api_usage_note", "this process only; the " + completed.size()
+						+ " scenarios taken over from the earlier run were billed then");
+			}
 		}
 		Files.writeString(out.resolve("summary.json"), JSON.writeValueAsString(summary), StandardCharsets.UTF_8);
 		System.out.println(JSON.writeValueAsString(summary));

@@ -473,6 +473,13 @@ class QuestionsTest {
 			assertTrue(house.applied().questions().isEmpty(), house.applied().questions().toString());
 			assertEquals("current", stored(e, house, 0).status());
 			assertEquals(0, e.questions().openCount());
+			// The decision is on the record, marked as the store's, and named in the reply.
+			var decided = e.facts().supersessionsOf(stored(e, house, 0).id());
+			assertEquals(1, decided.size(), decided.toString());
+			assertEquals("nested", decided.getFirst().kind());
+			assertTrue(decided.getFirst().reason().startsWith("store: stands beside f-"), decided.getFirst().reason());
+			assertTrue(house.applied().warnings().stream().anyMatch(w -> w.contains("one place at two granularities")),
+					house.applied().warnings().toString());
 			List<String> where = e.facts().factsOf(e.entities().owner().id()).stream()
 					.filter(f -> "lives_in".equals(f.predicate()) && f.current()).map(Fact::rendering).sorted()
 					.toList();
@@ -497,6 +504,14 @@ class QuestionsTest {
 			assertEquals("answered", both.resolved().getFirst().get("status"), both.resolved().toString());
 			assertEquals("current", stored(e, elsewhere, 0).status(), "the held fact stands beside the other");
 			assertEquals(0, e.questions().openCount());
+			// An audit tells a person's answer from the store's own decision: the question keeps its answer, and
+			// the fact's ledger says who released it.
+			Question answered = e.questions().get(Long.parseLong(q.substring(2))).orElseThrow();
+			assertEquals("both", answered.toMap().get("answer"), answered.toMap().toString());
+			var released = e.facts().supersessionsOf(stored(e, elsewhere, 0).id());
+			assertEquals("nested", released.getLast().kind(), released.toString());
+			assertTrue(released.getLast().reason().startsWith("user: both; stands beside f-"),
+					released.getLast().reason());
 		}
 	}
 
