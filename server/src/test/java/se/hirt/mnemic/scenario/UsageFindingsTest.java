@@ -267,6 +267,30 @@ class UsageFindingsTest {
 	}
 
 	@Test
+	void aMissSaysWhomTheObservationsBelowMention() {
+		try (Engine e = engine("usage-miss-mentions")) {
+			// A reading that reversed the parent relation: no step-parent is derived, so "stepmother" is a miss. The
+			// marriage is in the text below all the same; the verdict says whom that text mentions, so a reader can
+			// answer from it instead of taking the miss for the whole truth (Haiku, 2026-09-23).
+			// (The text carries the word, as the semantic channel would find it in a configured store.)
+			remember(e, "My father Konrad Nyberg married Lena Berg in 2015, so she is my stepmother.",
+					proposal().entity("e1", "Konrad Nyberg", "person").entity("e2", "Lena Berg", "person")
+							.fact(se.hirt.mnemic.TestHomes.fact("self", "parent_of", "e1", "father", null, null, null,
+									null, null, null))
+							.fact("e1", "spouse_of", "e2"));
+			RecallResult r = recall(e, "Mattias's stepmother");
+			assertEquals("miss", r.structured().state(), r.text());
+			assertTrue(r.text().contains("no such fact on record"), r.text());
+			assertTrue(r.text().contains("mention") && r.text().contains("Konrad Nyberg")
+					&& r.text().contains("Lena Berg"), r.text());
+			assertTrue(r.text().contains("read them before saying not known"), r.text());
+			// Nothing to mention: the miss stands alone, as an honest not-known should.
+			RecallResult bare = recall(e, "Mattias's dentist");
+			assertFalse(bare.text().contains("read them before saying not known"), bare.text());
+		}
+	}
+
+	@Test
 	void aQualifierOnAPreferenceIsShown() {
 		try (Engine e = engine("usage-prefers-qualifier")) {
 			RememberOutcome o = remember(e, "I prefer WhatsApp over email for anything urgent.",

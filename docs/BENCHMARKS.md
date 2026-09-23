@@ -735,7 +735,14 @@ an event type's list fields take. Step 4 folds the four proposal rules into the 
 effect question while a participant's kind is open, and has the briefing say how much of the record it
 shows. Step 5 renames the inconsistent parameters: `correct(ref, changes, reason)` and `forget(ref,
 keep_entities)` name the thing as `inspect` does, a predicate is always `pred:<name>` in `correct` (a bare
-name is an entity everywhere), and the facts a re-reading replaces say `standing` like stored ones.
+name is an entity everywhere), and the facts a re-reading replaces say `standing` like stored ones. Step 6 is
+the first of the four design points from the "right kind of store" discussion, in its precise form: a MISS
+says "no such fact on record" and names whom the observations below mention, so a reader whose own reading
+mis-filed a relation (Haiku reversed parent_of and so had no derived step-parent) can still answer from the
+text, while a miss with nothing to mention stays an honest not-known; the instructions say to answer only
+what the shown observations state, that the reply to remember is complete (no inspecting what was just
+stored or the questions it lists), to define vocabulary in the proposal, and to keep status and consolidate
+out of the middle of a turn.
 
 | Step | Opus 5.5 correct / cap hits / answer-only calls | Haiku 4.5 | Qwen 9B |
 |------|------|------|------|
@@ -743,6 +750,7 @@ name is an entity everywhere), and the facts a re-reading replaces say `standing
 | 2 | 63/63, 4, 10 (3 event corrections used) | 62/63, 0, 10 (3 used) | 49/63, 20, 13 |
 | 3 | 63/63, 3, 8 (effect candidates 8, were ~40) | 62/63, 0, 20 | 48/63, 12, 10 |
 | 4 | 63/63, 3, 10 (guide fetched once, not 26; input tokens −28%) | 56/63, 0, 6; rerun with the fixed harness 60/63, 1, 8 | 54/63, 12, 9 |
+| 5 | 63/63, 4, 9 (no tool errors from the renames) | 60/63, 1, 9 | 51/63, 13, 9 |
 
 "Cap hits" are statement turns that ran out of the eight tool calls and gave the user no reply. Qwen's
 numbers swing by ten between runs of the same code and are read only for large effects. At step 2 both

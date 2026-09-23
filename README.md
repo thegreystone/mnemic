@@ -218,7 +218,7 @@ entry of its own. `consolidate` can rebuild every fact and event from the observ
 only copy.
 
 Every answer from `recall` starts with a verdict the assistant can rely on: *matched* (the fact is known),
-*MISS* (the question was understood and no such fact is known, which is not the same as no), *KNOWN FALSE*
+*MISS* (the question was understood and no such fact is on record, which is not the same as no), *KNOWN FALSE*
 (something you said rules it out), or *NOT YET* (a plan whose date has not come). A second line says which
 of the four ways of searching had their say, so an answer given while the model is still downloading is
 marked as partial rather than passed off as complete. Facts come with their source, their period, their

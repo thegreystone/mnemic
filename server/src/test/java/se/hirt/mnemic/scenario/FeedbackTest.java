@@ -268,7 +268,7 @@ class FeedbackTest {
 			assertEquals(2, r.structured().ended().size(), "both ended jobs are named");
 			assertTrue(r.text().contains("no current value; 2 ended facts:"), r.text());
 			assertTrue(r.text().contains("Initrode") && r.text().contains("Hooli"), r.text());
-			assertFalse(r.text().contains("no such fact is known"), r.text());
+			assertFalse(r.text().contains("no such fact on record"), r.text());
 			// With history asked for, they are the answer; as of a date, the one then current is.
 			RecallResult h = e.recall().recall("where does Anna work", null, 800, 10, true);
 			assertEquals("matched", h.structured().state(), h.text());
@@ -279,7 +279,7 @@ class FeedbackTest {
 					then.structured().facts().getFirst().rendering());
 			// A predicate with nothing at all says so as before.
 			RecallResult none = recall(e, "where does Anna live");
-			assertTrue(none.text().contains("no such fact is known"), none.text());
+			assertTrue(none.text().contains("no such fact on record"), none.text());
 		}
 	}
 

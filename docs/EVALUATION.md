@@ -2741,7 +2741,7 @@ recall(query: "where does Anna work")
 
 Expect: the verdict is MISS, worded "no current value; 1 ended fact:
 Anna Lindqvist works at Initrode (2019 – 2022) [f-1]; pass include_history
-to have them returned", never "no such fact is known" while an ended fact
+to have them returned", never "no such fact on record" while an ended fact
 of that subject and predicate exists; with `include_history` the ended
 facts are the match, and `as_of` a date inside the interval matches the
 one then current. In every reply a fact carries one `standing`: current,
