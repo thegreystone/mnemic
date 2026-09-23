@@ -800,6 +800,37 @@ class MnemicToolsTest {
 	}
 
 	@Test
+	@SuppressWarnings("unchecked")
+	void aQuestionOpenedWhileAnsweringIsReportedWithTheAnswer() {
+		// A held fact applied by an answer can open a question of its own (here a conflict): it is reported at the top
+		// of the reply that answered, not left for status to reveal (2026-09-23).
+		remember("Ylva Strand lives in Lund.",
+				Map.of("entities",
+						List.of(Map.of("ref", "e1", "name", "Ylva Strand", "type", "person"),
+								Map.of("ref", "e2", "name", "Lund", "type", "place")),
+						"facts", List.of(Map.of("subject", "e1", "predicate", "lives_in", "object", "e2"))),
+				"opened-1");
+		ToolResponse held = remember("Ylva lives in Malmö now.",
+				Map.of("entities",
+						List.of(Map.of("ref", "e1", "name", "Ylva", "type", "person"),
+								Map.of("ref", "e2", "name", "Malmö", "type", "place")),
+						"facts", List.of(Map.of("subject", "e1", "predicate", "lives_in", "object", "e2"))),
+				"opened-2");
+		List<Map<String, Object>> asked = (List<Map<String, Object>>) result(held).get("questions");
+		Map<String, Object> who = asked.stream().filter(q -> "entity_resolution".equals(q.get("kind"))).findFirst()
+				.orElseThrow(() -> new AssertionError(text(held)));
+		String candidate = ((List<Map<String, Object>>) who.get("candidates")).stream().map(c -> c.get("id").toString())
+				.filter(id -> id.startsWith("ent-")).findFirst().orElseThrow();
+		ToolResponse answered = tools.remember(NONE, NONE, NONE, NONE, Optional.empty(), NONE, NONE, null,
+				Optional.empty(), Optional.of("opened-3"),
+				List.of(Map.of("question_id", who.get("id").toString(), "choice", candidate)));
+		assertFalse(answered.isError(), text(answered));
+		List<Map<String, Object>> opened = (List<Map<String, Object>>) result(answered).get("questions");
+		assertTrue(opened != null && opened.stream().anyMatch(q -> "conflict".equals(q.get("kind"))),
+				"the conflict the applied fact opened is in the answer's reply: " + text(answered));
+	}
+
+	@Test
 	void asOfTakesAYearOrAMonthAndMeansItsEnd() {
 		assertEquals("2015-12-31T23:59:59Z", MnemicTools.instant("2015").toString());
 		assertEquals("2016-02-29T23:59:59Z", MnemicTools.instant("2016-02").toString());

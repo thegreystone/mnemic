@@ -71,6 +71,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 import java.util.Set;
 
 /**
@@ -132,22 +133,29 @@ public class MnemicTools {
 				// Answers given with a re-reading are given first, so that what they create (a new entity, an alias)
 				// is there when the new reading resolves its names. Ignoring them silently sent one assistant round
 				// the same question three times (2026-09-22).
+				Set<Long> before = openQuestionIds();
 				List<Map<String, Object>> answered = resolves.isEmpty() ? List.of() : engine.answer(resolves);
 				Map<String, Object> out = attached(parseId(observation_id.get(), "obs-"), parsed);
 				if (!answered.isEmpty()) {
 					out.put("resolved", answered);
 				}
+				questionsOpened(out, before);
 				return out;
 			}
 			if ((text.isEmpty() || text.get().isBlank()) && parsed == null && !resolves.isEmpty()) {
-				// Answers alone: nothing to observe, the answers live on the questions.
+				// Answers alone: nothing to observe, the answers live on the questions. What an answer opens (a held
+				// fact that conflicts, a predicate it names) is reported here like any other question: an assistant
+				// found one only through status (2026-09-23).
+				Set<Long> before = openQuestionIds();
 				var out = new LinkedHashMap<String, Object>();
 				out.put("resolved", engine.answer(resolves));
+				questionsOpened(out, before);
 				out.put("pending_proposals", engine.observations().pendingProposals());
 				return out;
 			}
 			Source source = new Source(source_kind.orElse("user"), source_ref.orElse(null), source_chunk.orElse(null),
 					null, session.orElse(null));
+			Set<Long> before = openQuestionIds();
 			RememberOutcome o = engine.remember(text.orElse(null), source,
 					observed_at.map(MnemicTools::instant).orElse(null), parsed == null ? null : parsed.proposal(),
 					spec_version.orElse(null), idempotency_key.orElse(null), resolves);
@@ -170,9 +178,37 @@ public class MnemicTools {
 			}
 			warnings.addAll(a.warnings());
 			out.put("warnings", warnings);
+			questionsOpened(out, before);
 			out.put("pending_proposals", o.observation().pendingProposals());
 			return out;
 		});
+	}
+
+	/** The ids of the questions open now, taken before a call so that what the call opens can be reported. */
+	private Set<Long> openQuestionIds() {
+		return engine.questions().open(500).stream().map(Question::id).collect(Collectors.toSet());
+	}
+
+	/**
+	 * Puts every question open now that was not open before the call under 'questions', beside those the reply already
+	 * lists: one place to look, whatever opened them (a proposal, an answer applying a held fact, a correction).
+	 */
+	@SuppressWarnings("unchecked")
+	private void questionsOpened(Map<String, Object> out, Set<Long> before) {
+		var listed = new ArrayList<Map<String, Object>>();
+		Object already = out.get("questions");
+		if (already instanceof List<?> l) {
+			l.forEach(q -> listed.add((Map<String, Object>) q));
+		}
+		Set<Object> ids = listed.stream().map(q -> q.get("id")).collect(Collectors.toSet());
+		for (Question q : engine.questions().open(500)) {
+			if (!before.contains(q.id()) && !ids.contains(q.ref())) {
+				listed.add(q.toMap());
+			}
+		}
+		if (!listed.isEmpty() || out.containsKey("questions")) {
+			out.put("questions", listed);
+		}
 	}
 
 	/** A reading for an observation: its first, or one that replaces what it had. */
@@ -277,8 +313,8 @@ public class MnemicTools {
 
 	@Tool(name = "correct", description = ToolDescriptions.CORRECT, annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
 	ToolResponse correct(
-		@ToolArg(description = "What to correct: f-12, obs-51, ent-12, pred:parent_of (or a bare predicate name), "
-				+ "event:purchased, type:canton")
+		@ToolArg(description = "What to correct: f-12, obs-51, ent-12, evt-3, pred:parent_of (or a bare predicate "
+				+ "name), event:purchased, type:canton, group:family")
 		String target,
 		@ToolArg(description = "The changed keys for the target; {\"wrong\": true} withdraws a fact, {\"retired\": "
 				+ "true|false} retires or reinstates an observation")
@@ -287,34 +323,47 @@ public class MnemicTools {
 		return ToolSupport.json("correct", () -> {
 			String t = target == null ? "" : target.trim();
 			String why = reason.orElse(null);
-			if (t.startsWith("f-")) {
-				return correctedFact(parseId(t, "f-"), replacement, why);
-			}
-			if (t.startsWith("obs-")) {
-				return correctedObservation(parseId(t, "obs-"), replacement, why);
-			}
-			if (t.startsWith("ent-")) {
-				return engine.correctEntity(parseId(t, "ent-"), replacement, why);
-			}
-			if (t.startsWith("pred:")) {
-				return engine.correctPredicate(t.substring(5), replacement, why);
-			}
-			if (t.startsWith("event:")) {
-				return engine.correctEventType(t.substring(6), replacement, why);
-			}
-			if (t.startsWith("type:")) {
-				return engine.correctEntityType(t.substring(5), replacement, why);
-			}
-			if (t.startsWith("group:")) {
-				return engine.correctGroup(t.substring(6), replacement, why);
-			}
-			if (!t.isEmpty() && engine.predicates().get(t).isPresent()) {
-				return engine.correctPredicate(t, replacement, why);
-			}
-			throw MnemicException
-					.invalidArgument("'" + t + "' names nothing to correct; pass f-12, obs-51, ent-12, pred:parent_of, "
-							+ "event:purchased, type:canton, or group:family.");
+			Set<Long> before = openQuestionIds();
+			Map<String, Object> out = corrected(t, replacement, why);
+			questionsOpened(out, before);
+			return out;
 		});
+	}
+
+	private Map<String, Object> corrected(String t, Map<String, Object> replacement, String why) {
+		if (t.startsWith("f-")) {
+			return correctedFact(parseId(t, "f-"), replacement, why);
+		}
+		if (t.startsWith("obs-")) {
+			return correctedObservation(parseId(t, "obs-"), replacement, why);
+		}
+		if (t.startsWith("evt-")) {
+			return engine.correctEvent(parseId(t, "evt-"), replacement, why);
+		}
+		if (t.startsWith("evt-")) {
+			return engine.correctEvent(parseId(t, "evt-"), replacement, why);
+		}
+		if (t.startsWith("ent-")) {
+			return engine.correctEntity(parseId(t, "ent-"), replacement, why);
+		}
+		if (t.startsWith("pred:")) {
+			return engine.correctPredicate(t.substring(5), replacement, why);
+		}
+		if (t.startsWith("event:")) {
+			return engine.correctEventType(t.substring(6), replacement, why);
+		}
+		if (t.startsWith("type:")) {
+			return engine.correctEntityType(t.substring(5), replacement, why);
+		}
+		if (t.startsWith("group:")) {
+			return engine.correctGroup(t.substring(6), replacement, why);
+		}
+		if (!t.isEmpty() && engine.predicates().get(t).isPresent()) {
+			return engine.correctPredicate(t, replacement, why);
+		}
+		throw MnemicException
+				.invalidArgument("'" + t + "' names nothing to correct; pass f-12, obs-51, ent-12, pred:parent_of, "
+						+ "evt-3, event:purchased, type:canton, or group:family.");
 	}
 
 	private Map<String, Object> correctedFact(long factId, Map<String, Object> replacement, String reason) {

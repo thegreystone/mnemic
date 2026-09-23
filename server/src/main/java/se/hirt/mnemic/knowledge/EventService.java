@@ -32,6 +32,7 @@ import se.hirt.mnemic.knowledge.EventTypeRegistry.EventType;
 import se.hirt.mnemic.observation.Observation;
 import se.hirt.mnemic.persistence.Database;
 import se.hirt.mnemic.persistence.Row;
+import se.hirt.mnemic.protocol.MnemicException;
 import se.hirt.mnemic.persistence.Tx;
 
 import java.time.Instant;
@@ -262,6 +263,60 @@ public final class EventService {
 					+ "\", {\"lasting\": true}) keeps such facts open past the end of a participant");
 		}
 		return out;
+	}
+
+	/** What moving an event to another date did: the facts it had opened and closed, moved with it. */
+	public record Redated(String before, String after, List<Long> opened, List<Long> closed) {
+	}
+
+	/** The event on record with this type, exactly these participants, and this start, if any. */
+	public Optional<Event> find(String type, List<Long> participantIds, String start) {
+		List<Long> candidates = db.read(tx -> tx.query(
+				"SELECT id FROM event WHERE type = ? AND COALESCE(valid_start, '') = COALESCE(?, '') ORDER BY id", type,
+				start)).stream().map(r -> r.lng("id")).toList();
+		for (long id : candidates) {
+			Optional<Event> e = get(id);
+			if (e.isPresent() && e.get().participants().size() == participantIds.size()
+					&& e.get().participants().containsAll(participantIds)) {
+				return e;
+			}
+		}
+		return Optional.empty();
+	}
+
+	/**
+	 * Moves an event to another date. The facts its effects opened took their start from it and the facts they closed
+	 * their end: those move with it, so "the wedding is a week later" is one correction, not three. The correction
+	 * observation becomes a source of the event, the one that dated it. Renderings of the moved facts are the caller's
+	 * to refresh.
+	 */
+	public Redated redate(long eventId, Bounds b, long correctionObservationId) {
+		Event ev = get(eventId).orElseThrow(() -> MnemicException.notFound("No event evt-" + eventId));
+		return db.write(tx -> {
+			List<String> names = ev.participants().stream().map(id -> FactRenderer.nameIn(tx, id)).toList();
+			String rendering = render(ev.type(), names, b);
+			tx.update("""
+					UPDATE event SET valid_start = ?, valid_start_precision = ?, valid_end = ?, valid_end_precision = ?,
+					                 rendering = ? WHERE id = ?""", b.start(), b.startPrecision(), b.end(),
+					b.endPrecision(), rendering, eventId);
+			tx.update("INSERT OR IGNORE INTO event_source(event_id, observation_id, kind) VALUES (?,?,'dated')",
+					eventId, correctionObservationId);
+			var opened = new ArrayList<Long>();
+			for (Row r : tx.query("SELECT id FROM fact WHERE event_id = ? AND start_source = 'event'", eventId)) {
+				tx.update("UPDATE fact SET valid_start = ?, valid_start_precision = ? WHERE id = ?", b.start(),
+						b.startPrecision(), r.lng("id"));
+				opened.add(r.lng("id"));
+			}
+			var closed = new ArrayList<Long>();
+			for (Row r : tx.query("SELECT id, fact_id FROM supersession WHERE event_id = ? AND closed_at IS NOT NULL",
+					eventId)) {
+				tx.update("UPDATE fact SET valid_end = ?, valid_end_precision = ? WHERE id = ?", b.start(),
+						b.startPrecision(), r.lng("fact_id"));
+				tx.update("UPDATE supersession SET closed_at = ? WHERE id = ?", b.start(), r.lng("id"));
+				closed.add(r.lng("fact_id"));
+			}
+			return new Redated(ev.rendering(), rendering, opened, closed);
+		});
 	}
 
 	private Optional<Event> sameEvent(String type, List<Entity> participants, String start) {

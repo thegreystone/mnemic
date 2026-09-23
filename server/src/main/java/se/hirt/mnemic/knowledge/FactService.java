@@ -1540,8 +1540,30 @@ public final class FactService {
 	 * matches, what the user stated still stands: the replacement is stored as a fact of the record, with nothing
 	 * marked corrected, and the rebuild reports the record for a person to check. False then.
 	 */
+	/**
+	 * Moves an event and the facts that hang on its date, and refreshes their renderings. The correction record's
+	 * reading names the event by its key (type, participants, old start), since ids do not survive a rebuild.
+	 */
+	public EventService.Redated redate(long eventId, Bounds b, Observation record) {
+		EventService.Redated moved = events.redate(eventId, b, record.id());
+		var predicates = new LinkedHashSet<String>();
+		for (Long id : moved.opened()) {
+			queries.get(id).ifPresent(f -> predicates.add(f.predicate()));
+		}
+		for (Long id : moved.closed()) {
+			queries.get(id).ifPresent(f -> predicates.add(f.predicate()));
+		}
+		for (String p : predicates) {
+			renderer.rerender(p);
+		}
+		return moved;
+	}
+
 	public String replayCorrection(Observation record) {
 		Map<String, Object> reading = Json.readMap(record.proposalJson());
+		if (reading.get("redates") instanceof Map<?, ?> key) {
+			return replayRedating(record, key, reading);
+		}
 		boolean retraction = reading.get("retracts") instanceof Map<?, ?>;
 		boolean retirement = reading.get("retires") instanceof Map<?, ?>;
 		Object key = retraction ? reading.get("retracts")
@@ -1575,6 +1597,34 @@ public final class FactService {
 		}
 		correctWith(target.get(), p.facts().getFirst(), reason, record);
 		return "replayed";
+	}
+
+	/** A re-dating replayed: the event found by its key (type, participant names, the start it had) is moved again. */
+	@SuppressWarnings("unchecked")
+	private String replayRedating(Observation record, Map<?, ?> key, Map<String, Object> reading) {
+		String type = String.valueOf(key.get("type"));
+		var ids = new ArrayList<Long>();
+		for (Object name : (List<Object>) key.get("participants")) {
+			Optional<Entity> e = entities.byRef(String.valueOf(name));
+			if (e.isEmpty()) {
+				return "unmatched";
+			}
+			ids.add(e.get().id());
+		}
+		Optional<Event> ev = events.find(type, ids,
+				key.get("valid_start") == null ? null : String.valueOf(key.get("valid_start")));
+		if (ev.isEmpty()) {
+			return "unmatched";
+		}
+		Map<String, Object> vt = (Map<String, Object>) reading.get("valid_time");
+		Bounds b = Bounds.of(new ValidTime(text(vt.get("start")), text(vt.get("end")), text(vt.get("precision"))),
+				record.observedAt(), new ArrayList<>());
+		redate(ev.get().id(), b, record);
+		return "replayed";
+	}
+
+	private static String text(Object o) {
+		return o == null ? null : String.valueOf(o);
 	}
 
 	/**

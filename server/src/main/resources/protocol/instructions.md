@@ -14,8 +14,9 @@ Mnemic keeps what the user tells you across conversations. It is local and never
    holds the rules for time, negation, kinship, and new vocabulary.
 4. ANSWER THE STORE'S QUESTIONS. A reply's `questions` are answered with `resolve` on your next `remember`.
    Answer what is plain yourself; bring real doubt to the user. Never resolve silently.
-5. FIX, DO NOT RE-ADD. "No, that was wrong" is `correct` with the fact id and what changes. "That changed"
-   is a new `remember` with its time and the event behind it.
+5. FIX, DO NOT RE-ADD. "No, that was wrong" is `correct` with the fact id and what changes; a date that
+   moved is `correct` on the event (evt-N). "That changed" is a new `remember` with its time and the event
+   behind it.
 6. TIDY AT THE END. Call `consolidate` and act on what it lists.
 
 Assume interruption: what is not in Mnemic is lost. Memory calls are bookkeeping; the user's complete answer
