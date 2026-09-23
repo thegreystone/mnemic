@@ -193,6 +193,29 @@ class UsageTest {
 	}
 
 	@Test
+	void templateAndTagWrappersAroundACallAreReadThrough() {
+		// What Haiku 4.5 wrote on 2026-09-23 in place of the wrapper the harness asks for: three dialects, one call.
+		Set<String> tools = Set.of("recall", "remember");
+		Usage.Action jinja = Usage.parse("{% call_tool \"recall\", {\"query\": \"where does Bo Berg work\"} %}", tools);
+		assertEquals("recall", jinja.tool(), jinja.toString());
+		assertEquals("where does Bo Berg work", jinja.arguments().get("query"));
+		assertTrue(jinja.slip());
+		Usage.Action raw = Usage.parse(
+				"{% raw %}\n{\"tool\": \"recall\", \"arguments\": {\"query\": \"who owns the parser\"}}\n{% endraw %}",
+				tools);
+		assertEquals("recall", raw.tool(), raw.toString());
+		assertEquals("who owns the parser", raw.arguments().get("query"));
+		Usage.Action tagged = Usage
+				.parse("I'll store this.\n<function_calls>\n[{\"tool\": \"remember\", \"arguments\": "
+						+ "{\"text\": \"I'm flying to Tokyo.\"}}]\n</function_calls>", tools);
+		assertEquals("remember", tagged.tool(), tagged.toString());
+		assertEquals("I'm flying to Tokyo.", tagged.arguments().get("text"));
+		// A reply that merely mentions a template tag in prose is still a reply.
+		Usage.Action prose = Usage.parse("{\"reply\": \"Use {% raw %} in Jinja to escape.\"}", tools);
+		assertEquals("Use {% raw %} in Jinja to escape.", prose.reply());
+	}
+
+	@Test
 	void aStoppedRunResumesAfterItsFinishedScenarios() {
 		// Two scenarios of two steps: the first finished, the second cut off after one step (an API limit, say).
 		var a = new Usage.Scenario("a", "Mattias Sandell", "",

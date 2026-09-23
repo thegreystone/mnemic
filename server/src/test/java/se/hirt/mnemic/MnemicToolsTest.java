@@ -643,6 +643,11 @@ class MnemicToolsTest {
 		// Claude Code puts every server's instructions in one block of about 4 KB and cuts the rest silently
 		// (anthropics/claude-code#43474), so with other servers configured only a short text arrives whole.
 		assertTrue(served.length() <= 2000, "instructions are " + served.length() + " chars; keep them under 2000");
+		// The four rules a proposal cannot do without ride in the instructions, so the guide is optional reading.
+		assertTrue(served.contains("considering") && served.contains("negated") && served.contains("ISO")
+				&& served.contains("kinship"), served);
+		assertTrue(Protocol.guide().length() <= 4500, "the guide is " + Protocol.guide().length() + " chars; a "
+				+ "session fetches it whole, keep it under 4500");
 		// The guide is fetched through inspect, and is the other file whole.
 		ToolResponse guide = tools.inspect("guide", Optional.empty(), NONE);
 		assertFalse(guide.isError(), text(guide));
@@ -828,6 +833,61 @@ class MnemicToolsTest {
 		List<Map<String, Object>> opened = (List<Map<String, Object>>) result(answered).get("questions");
 		assertTrue(opened != null && opened.stream().anyMatch(q -> "conflict".equals(q.get("kind"))),
 				"the conflict the applied fact opened is in the answer's reply: " + text(answered));
+	}
+
+	@Test
+	void anEventIsMovedThroughCorrect() {
+		ToolResponse stored = remember("Pelle Wiklund moved to Tjörn in 2021.",
+				Map.of("entities",
+						List.of(Map.of("ref", "e1", "name", "Pelle Wiklund", "type", "person"),
+								Map.of("ref", "e2", "name", "Tjörn", "type", "place")),
+						"events", List.of(Map.of("ref", "ev1", "type", "moved", "participants", List.of("e1", "e2"),
+								"valid_time", Map.of("start", "2021")))),
+				"evt-move-1");
+		assertFalse(stored.isError(), text(stored));
+		@SuppressWarnings("unchecked")
+		String evt = ((List<Map<String, Object>>) ((Map<String, Object>) result(stored).get("stored")).get("events"))
+				.getFirst().get("id").toString();
+		ToolResponse moved = tools.correct(evt, Map.of("valid_time", Map.of("start", "2020-09")),
+				Optional.of("it was the autumn before"));
+		assertFalse(moved.isError(), text(moved));
+		assertTrue(text(moved).contains("\"after\"") && text(moved).contains("2020-09"), text(moved));
+		String inspected = text(tools.inspect(evt, Optional.empty(), NONE));
+		assertTrue(inspected.contains("2020-09"), inspected);
+		String home = text(tools.recall(Optional.of("where does Pelle Wiklund live"), NONE, Optional.of(400),
+				Optional.empty(), Optional.empty()));
+		assertTrue(home.contains("Tjörn") && home.contains("2020-09"), home);
+		ToolResponse refused = tools.correct(evt, Map.of("type", "relocated"), NONE);
+		assertTrue(refused.isError() && text(refused).contains("valid_time"), text(refused));
+	}
+
+	@Test
+	void aNameIsAnEntityInEveryToolAndAPredicateIsAlwaysPrefixed() {
+		// inspect reads a bare name as an entity; correct did too, except when it was a predicate. One rule now: a
+		// predicate is pred:<name> in both, and a bare predicate name is refused with the prefix (2026-09-23).
+		ToolResponse bare = tools.correct("works_at", Map.of("lexicon", List.of("job")), NONE);
+		assertTrue(bare.isError() && text(bare).contains("pred:works_at"), text(bare));
+		ToolResponse prefixed = tools.correct("pred:works_at", Map.of("lexicon", List.of("work", "works", "job")),
+				Optional.of("one more cue word"));
+		assertFalse(prefixed.isError(), text(prefixed));
+		// The replaced facts of a re-reading are described with the same word as stored facts: 'standing'.
+		ToolResponse first = remember("Nils Vik lives in Gävle.",
+				Map.of("entities",
+						List.of(Map.of("ref", "e1", "name", "Nils Vik", "type", "person"),
+								Map.of("ref", "e2", "name", "Gävle", "type", "place")),
+						"facts", List.of(Map.of("subject", "e1", "predicate", "lives_in", "object", "e2"))),
+				"rename-1");
+		String obs = result(first).get("observation_id").toString();
+		ToolResponse reread = tools.remember(NONE, Optional.of(obs), NONE, NONE, Optional.empty(), NONE, NONE,
+				Map.of("entities",
+						List.of(Map.of("ref", "e1", "name", "Nils Vik", "type", "person"),
+								Map.of("ref", "e2", "name", "Gävle", "type", "place")),
+						"facts", List.of(Map.of("subject", "e1", "predicate", "born_in", "object", "e2"))),
+				Optional.empty(), Optional.of("rename-2"), null);
+		assertFalse(reread.isError(), text(reread));
+		assertTrue(text(reread).contains("\"replaced\"") && text(reread).contains("\"standing\""), text(reread));
+		assertFalse(text(reread).contains("\"status\":\"current\""),
+				"no second word for the same thing: " + text(reread));
 	}
 
 	@Test

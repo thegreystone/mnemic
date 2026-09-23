@@ -577,7 +577,7 @@ public final class Engine implements AutoCloseable {
 			return retracted;
 		}
 		if (replacement == null || replacement.isEmpty()) {
-			throw MnemicException.invalidArgument("'replacement' must name what changes, e.g. {\"object\": "
+			throw MnemicException.invalidArgument("'changes' must name what changes, e.g. {\"object\": "
 					+ "\"Schübelbach\"} or {\"valid_time\": {\"start\": \"2014\"}} or {\"ended\": true}.");
 		}
 		Observation record = correctionRecord("Correction of " + about + why + " → " + Json.write(replacement), factId);
@@ -682,7 +682,7 @@ public final class Engine implements AutoCloseable {
 	 */
 	public Map<String, Object> correctPredicate(String name, Map<String, Object> replacement, String reason) {
 		if (replacement == null || replacement.isEmpty()) {
-			throw MnemicException.invalidArgument("'replacement' must name what changes, e.g. {\"render\": "
+			throw MnemicException.invalidArgument("'changes' must name what changes, e.g. {\"render\": "
 					+ "\"{object} is {subject}'s {qualifier|parent}\"} or {\"lexicon\": [\"mother\", \"father\"]}.");
 		}
 		var before = knowledge.predicates().get(name)
@@ -810,7 +810,7 @@ public final class Engine implements AutoCloseable {
 
 	private static void requireReplacement(Map<String, Object> replacement, String example) {
 		if (replacement == null || replacement.isEmpty()) {
-			throw MnemicException.invalidArgument("'replacement' must name what changes, e.g. " + example + ".");
+			throw MnemicException.invalidArgument("'changes' must name what changes, e.g. " + example + ".");
 		}
 	}
 

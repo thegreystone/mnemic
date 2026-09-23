@@ -301,8 +301,12 @@ public final class EventService {
 					b.endPrecision(), rendering, eventId);
 			tx.update("INSERT OR IGNORE INTO event_source(event_id, observation_id, kind) VALUES (?,?,'dated')",
 					eventId, correctionObservationId);
+			// The facts that took their start from this event: those its type opened, and those stated beside it
+			// and dated by it. One stated beside it with a date of its own keeps that date.
 			var opened = new ArrayList<Long>();
-			for (Row r : tx.query("SELECT id FROM fact WHERE event_id = ? AND start_source = 'event'", eventId)) {
+			for (Row r : tx.query(
+					"SELECT id FROM fact WHERE event_id = ? AND COALESCE(valid_start, '') = COALESCE(?, '')", eventId,
+					ev.validStart())) {
 				tx.update("UPDATE fact SET valid_start = ?, valid_start_precision = ? WHERE id = ?", b.start(),
 						b.startPrecision(), r.lng("id"));
 				opened.add(r.lng("id"));

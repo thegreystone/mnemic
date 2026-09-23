@@ -142,16 +142,53 @@ public final class Usage {
 		return parse(response, Set.of());
 	}
 
+	private static final Pattern TEMPLATE_CALL = Pattern.compile("\\{%\\s*call_tool\\s+\"([a-z_]+)\"\\s*,");
+	private static final Pattern WRAPPED = Pattern
+			.compile("(?s)(?:\\{%\\s*raw\\s*%\\}|<function_calls>|<tool_call>|<invoke_call>)\\s*(.*?)\\s*"
+					+ "(?:\\{%\\s*endraw\\s*%\\}|</function_calls>|</tool_call>|</invoke_call>)");
+	private static final Pattern EDGE_TAG = Pattern
+			.compile("^(?:\\{%\\s*/?\\s*(?:raw|endraw)\\s*%\\}|</?(?:function_calls|tool_call|invoke_call)>)\\s*|"
+					+ "\\s*(?:\\{%\\s*/?\\s*(?:raw|endraw)\\s*%\\}|</?(?:function_calls|tool_call|invoke_call)>)$");
+
 	/**
-	 * As {@link #parse(String)}, with the tool names known: a model that writes {@code {"recall": {...}}} instead of
-	 * {@code {"tool": "recall", ...}} is read as calling that tool, and a reply whose JSON is broken is salvaged as the
-	 * text after {@code "reply":}. Both count as slips, as does loose text.
+	 * The text without the wrappers a model may put around its call: the inside of a pair of template or call tags
+	 * ({@code {% raw %}...{% endraw %}}, {@code <function_calls>...</function_calls>}), a stray tag at either edge, and
+	 * a one-element array around the call object. A tag inside a reply's own text is left alone.
 	 */
+	static String unwrapped(String body) {
+		Matcher pair = WRAPPED.matcher(body);
+		String s = pair.find() ? pair.group(1) : EDGE_TAG.matcher(body).replaceAll("").strip();
+		if (s.startsWith("[") && s.endsWith("]")) {
+			try {
+				JsonNode n = JSON.readTree(s);
+				if (n.isArray() && n.size() == 1 && n.get(0).isObject()) {
+					return n.get(0).toString();
+				}
+			} catch (IOException e) {
+				// not an array of one call
+			}
+		}
+		return s;
+	}
+
 	static Action parse(String response, Set<String> tools) {
 		if (response == null) {
 			return new Action(null, null, "", "", true);
 		}
-		String body = response.strip();
+		String body = unwrapped(response.strip());
+		Matcher call = TEMPLATE_CALL.matcher(body);
+		if (call.find() && tools.contains(call.group(1))) {
+			// "{% call_tool "recall", {...} %}": a templating dialect a model fell into (Haiku, 2026-09-23).
+			int brace = body.indexOf('{', call.end());
+			String args = brace < 0 ? null : firstObject(body, brace);
+			if (args != null) {
+				try {
+					return new Action(call.group(1), arguments(JSON.readTree(args)), null, response, true);
+				} catch (IOException e) {
+					// fall through
+				}
+			}
+		}
 		Matcher invoke = INVOKE.matcher(body);
 		if (invoke.find() && tools.contains(invoke.group(1))) {
 			// The model's own tool-call syntax, which a real client would execute; here it is read as the call.

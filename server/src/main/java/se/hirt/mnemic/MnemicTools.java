@@ -313,18 +313,18 @@ public class MnemicTools {
 
 	@Tool(name = "correct", description = ToolDescriptions.CORRECT, annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
 	ToolResponse correct(
-		@ToolArg(description = "What to correct: f-12, obs-51, ent-12, evt-3, pred:parent_of (or a bare predicate "
-				+ "name), event:purchased, type:canton, group:family")
-		String target,
-		@ToolArg(description = "The changed keys for the target; {\"wrong\": true} withdraws a fact, {\"retired\": "
-				+ "true|false} retires or reinstates an observation")
-		Map<String, Object> replacement, @ToolArg(description = "Why, in the user's words")
+		@ToolArg(description = "What to correct, as inspect names it: f-12, obs-51, ent-12, evt-3, pred:parent_of, "
+				+ "event:purchased, type:canton, group:family")
+		String ref,
+		@ToolArg(description = "The keys that change and their new values; {\"wrong\": true} withdraws a fact, "
+				+ "{\"retired\": true|false} retires or reinstates an observation")
+		Map<String, Object> changes, @ToolArg(description = "Why, in the user's words")
 		Optional<String> reason) {
 		return ToolSupport.json("correct", () -> {
-			String t = target == null ? "" : target.trim();
+			String t = ref == null ? "" : ref.trim();
 			String why = reason.orElse(null);
 			Set<Long> before = openQuestionIds();
-			Map<String, Object> out = corrected(t, replacement, why);
+			Map<String, Object> out = corrected(t, changes, why);
 			questionsOpened(out, before);
 			return out;
 		});
@@ -336,9 +336,6 @@ public class MnemicTools {
 		}
 		if (t.startsWith("obs-")) {
 			return correctedObservation(parseId(t, "obs-"), replacement, why);
-		}
-		if (t.startsWith("evt-")) {
-			return engine.correctEvent(parseId(t, "evt-"), replacement, why);
 		}
 		if (t.startsWith("evt-")) {
 			return engine.correctEvent(parseId(t, "evt-"), replacement, why);
@@ -359,7 +356,8 @@ public class MnemicTools {
 			return engine.correctGroup(t.substring(6), replacement, why);
 		}
 		if (!t.isEmpty() && engine.predicates().get(t).isPresent()) {
-			return engine.correctPredicate(t, replacement, why);
+			// A bare name is an entity everywhere else; a predicate is named as inspect names it.
+			throw MnemicException.invalidArgument("'" + t + "' is a predicate: correct it as pred:" + t + ".");
 		}
 		throw MnemicException
 				.invalidArgument("'" + t + "' names nothing to correct; pass f-12, obs-51, ent-12, pred:parent_of, "
@@ -417,16 +415,15 @@ public class MnemicTools {
 
 	@Tool(name = "forget", description = ToolDescriptions.FORGET, annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = true, openWorldHint = false))
 	ToolResponse forget(
-		@ToolArg(description = "The observation id (obs-12), or an entity id (ent-12) to remove an "
-				+ "entity no fact or event names")
-		String observation_id, @ToolArg(required = false, description = ToolDescriptions.FORGET_KEEP_ENTITIES)
+		@ToolArg(description = "What to forget: an observation (obs-12), or an entity no fact or event names (ent-12)")
+		String ref, @ToolArg(required = false, description = ToolDescriptions.FORGET_KEEP_ENTITIES)
 		Optional<Boolean> keep_entities) {
 		return ToolSupport.json("forget", () -> {
-			String ref = observation_id == null ? "" : observation_id.trim();
-			if (ref.startsWith("ent-")) {
-				return engine.forgetEntity(parseId(ref, "ent-"));
+			String target = ref == null ? "" : ref.trim();
+			if (target.startsWith("ent-")) {
+				return engine.forgetEntity(parseId(target, "ent-"));
 			}
-			long id = parseId(ref, "obs-");
+			long id = parseId(target, "obs-");
 			boolean removed = engine.forget(id, keep_entities.orElse(false));
 			return Map.of("observation_id", "obs-" + id, "removed", removed, "kept_entities",
 					keep_entities.orElse(false));

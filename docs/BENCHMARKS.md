@@ -722,6 +722,44 @@ order, so the verdict now says the events answer as far as they state what is as
 `supersedes` on its own `rehearsal_dinner` type with `correct` when the date moved, unprompted, and widened
 the lexicon of a `patient_of` predicate it had registered so that "who is my doctor" would reach it.
 
+### The API review branch (`api-review`, 2026-09-23): one change, three models, per step
+
+The review of the tool API after `usage-opus-55-2` gave a ranked list; each finding goes in on its own and
+is measured on the same script with three assistants, Opus 5.5 as the judge for all: Opus 5.5 (`usage-opus55-sN`),
+Haiku 4.5 (`usage-haiku45-sN`), and the local Qwen 9B (`usage-qwen9b-sN`). Step 0 is the branch's start,
+the stored `kinds` vocabulary of entity types (schema 35). Step 2 adds `correct('evt-N', {valid_time})`,
+which moves an event and the facts it opened or closed, and reports the questions an answer opens at the
+top of the reply that answered. Step 3 drops derived relations from event-effect candidates and says what
+an event type's list fields take. Step 4 folds the four proposal rules into the instructions (1,827 of
+2,000 chars), cuts the guide to 4.4 KB, trims the tool descriptions and names the reply keys, asks no
+effect question while a participant's kind is open, and has the briefing say how much of the record it
+shows. Step 5 renames the inconsistent parameters: `correct(ref, changes, reason)` and `forget(ref,
+keep_entities)` name the thing as `inspect` does, a predicate is always `pred:<name>` in `correct` (a bare
+name is an entity everywhere), and the facts a re-reading replaces say `standing` like stored ones.
+
+| Step | Opus 5.5 correct / cap hits / answer-only calls | Haiku 4.5 | Qwen 9B |
+|------|------|------|------|
+| 0 | 63/63, 3, 7 | 62/63, 1, 12 | 54/63, 10, 11 |
+| 2 | 63/63, 4, 10 (3 event corrections used) | 62/63, 0, 10 (3 used) | 49/63, 20, 13 |
+| 3 | 63/63, 3, 8 (effect candidates 8, were ~40) | 62/63, 0, 20 | 48/63, 12, 10 |
+| 4 | 63/63, 3, 10 (guide fetched once, not 26; input tokens −28%) | 56/63, 0, 6; rerun with the fixed harness 60/63, 1, 8 | 54/63, 12, 9 |
+
+"Cap hits" are statement turns that ran out of the eight tool calls and gave the user no reply. Qwen's
+numbers swing by ten between runs of the same code and are read only for large effects. At step 2 both
+Claude models moved the wedding and its rehearsal dinner with two `correct` calls on the events, where step
+0 had run Opus out of calls on that turn. The cap hits left at step 3 are all first contact with a fresh
+store: one question per new kind of thing, and Opus inspecting each question the reply already carried.
+At step 4 Opus fetched the guide once in 23 conversations instead of 26 times and its input tokens fell by
+28 percent with accuracy unchanged. Haiku's six misses at step 4 were the harness, not the store: it wrote
+its calls as `{% call_tool ... %}`, `{% raw %}...{% endraw %}`, and `<function_calls>[...]`, which the
+lenient parser did not read, so the calls never ran; the parser now reads those three dialects. The rerun
+(`usage-haiku45-s4b`) scored 60 of 63; its three misses are the model's reasoning, not memory: it read
+"did I ever say I lived somewhere else" as no although recall showed the corrected Zürich, said the car was
+still undecided beside the order on record, and invented an estate agent's name where the store had said
+nothing, the one abstention it failed. The cap hits Opus keeps are its own habits on first contact:
+inspecting the observation and each question the reply already carried, calling `status` and
+`consolidate` mid-turn, and describing its new vocabulary through `correct` after the fact.
+
 One server finding came out of the traces and is fixed: `as_of: "2015"` was refused, and a year or
 a month is now taken as the end of that span. Cost, with the system prompt cached: 126 requests, 141k input tokens,
 889k cache reads, 17k output, about $0.65.

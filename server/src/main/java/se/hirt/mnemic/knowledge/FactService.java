@@ -664,6 +664,11 @@ public final class FactService {
 	 * asked whether it "starts spouse_of" at every step of a wedding (2026-09-23).
 	 */
 	private boolean effectWorthAsking(List<Entity> participants, List<Predicate> fitting) {
+		if (participants.stream().anyMatch(p -> types.unplaced(p.type()))) {
+			// A participant whose kind nobody has placed fits every relation: the effect question would be guessing
+			// beside the kind question. The type's effects can be set with correct once the kind is known.
+			return false;
+		}
 		if (fitting.stream().anyMatch(p -> p.functional() && !p.groups().contains("family"))) {
 			return true;
 		}
@@ -672,14 +677,22 @@ public final class FactService {
 
 	/** The predicates an event between these participants could open or close: those whose types fit them. */
 
+	/**
+	 * The predicates an event between these participants could open or close: those whose types fit them, less the
+	 * derived ones, which follow from their base facts and are never opened by an event (a question offered
+	 * "opens:aunt_uncle_of" and forty more on 2026-09-23).
+	 */
 	private List<Predicate> fitting(List<Entity> participants) {
 		if (participants.isEmpty()) {
 			return List.of();
 		}
 		List<String> subject = types.lineage(participants.getFirst().type());
 		List<String> object = participants.size() < 2 ? null : types.lineage(participants.get(1).type());
-		return predicates.all().stream().filter(p -> !p.literalRange() && p.acceptsSubject(subject)
-				&& (object == null ? p.range().contains("*") : p.acceptsObject(object))).toList();
+		return predicates.all().stream()
+				.filter(p -> !p.literalRange() && p.acceptsSubject(subject)
+						&& (object == null ? p.range().contains("*") : p.acceptsObject(object))
+						&& predicates.rulesOf(p.name()).isEmpty())
+				.toList();
 	}
 
 	/**
@@ -1751,7 +1764,8 @@ public final class FactService {
 							others.getFirst(), f.id());
 				} else {
 					goneFacts.add(f.id());
-					facts.add(Map.of("id", f.ref(), "rendering", f.rendering(), "status", f.status()));
+					facts.add(Map.of("id", f.ref(), "rendering", f.rendering(), "standing",
+							"current".equals(f.status()) ? f.state(Instant.now()) : f.status()));
 				}
 			}
 			// An event this observation stated beside others survives there: re-homed when this was its home, and
