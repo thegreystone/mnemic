@@ -1396,13 +1396,24 @@ public final class FactService {
 	 * rebuild) and the replacement, so a rebuild replays it. A superseded fact can be corrected too, since an event may
 	 * have closed it at the wrong date.
 	 */
+	/** Re-renders every fact that names the entity, after its name changed; how many. */
+	public int rerenderMentioning(long entityId) {
+		return renderer.rerenderMentioning(entityId);
+	}
+
 	public Corrected correct(long factId, Map<String, Object> replacement, String reason, Observation correction) {
 		Fact original = correctable(factId);
 		FactRef ref = readingOf(original, replacement);
 		if (sameStatement(ref, readingOf(original, Map.of()))) {
+			// A relation stated the wrong way round is fixed by giving both sides; a reader that restates one side at
+			// a time never gets there (the usage bench's family scenarios, 2026-09-24).
+			String swap = original.objectId() == null ? ""
+					: " To switch subject and object around, give both: {\"subject\": \""
+							+ entities.nameOf(original.objectId()) + "\", \"object\": \""
+							+ entities.nameOf(original.subjectId()) + "\"}.";
 			throw MnemicException.invalidArgument("The correction changes nothing about " + original.ref()
 					+ ": every key names the value on record. Name a key with a different value, {\"wrong\": true}, or "
-					+ "{\"redundant\": true}.");
+					+ "{\"redundant\": true}." + swap);
 		}
 		return correctWith(original, ref, reason, correction);
 	}
@@ -1412,10 +1423,11 @@ public final class FactService {
 	 * replacement, the fact as it stands.
 	 */
 	public FactRef readingOf(Fact original, Map<String, Object> replacement) {
-		String subject = str(replacement, "subject",
-				original.subjectId() == entities.owner().id() ? "self" : entities.nameOf(original.subjectId()));
-		String object = str(replacement, "object",
-				original.objectId() != null ? entities.nameOf(original.objectId()) : original.objectText());
+		String subject = selfOrName(str(replacement, "subject",
+				original.subjectId() == entities.owner().id() ? "self" : entities.nameOf(original.subjectId())));
+		String object = original.objectId() != null
+				? selfOrName(str(replacement, "object", entities.nameOf(original.objectId())))
+				: str(replacement, "object", original.objectText());
 		String qualifier = str(replacement, "qualifier", original.qualifier());
 		String scope = str(replacement, "scope",
 				original.scopeId() == null ? null : entities.nameOf(original.scopeId()));
@@ -1444,6 +1456,22 @@ public final class FactService {
 	}
 
 	/** Whether two readings state the same fact: the same terms and bounds, whatever the precision noted. */
+	/**
+	 * The owner under one name, so a correction that spells "self" out ("subject": "Mattias Sandell") compares equal to
+	 * the record and is refused as no change, not stored as one (Qwen restating a parent fact, 2026-09-24).
+	 */
+	private String selfOrName(String name) {
+		if (name == null || "self".equals(name)) {
+			return name;
+		}
+		Entity owner = entities.owner();
+		if (name.equalsIgnoreCase(owner.name())
+				|| entities.aliases(owner.id()).stream().anyMatch(name::equalsIgnoreCase)) {
+			return "self";
+		}
+		return name;
+	}
+
 	public static boolean sameStatement(FactRef a, FactRef b) {
 		return Objects.equals(a.subject(), b.subject()) && Objects.equals(a.predicate(), b.predicate())
 				&& Objects.equals(a.object(), b.object()) && Objects.equals(a.qualifier(), b.qualifier())

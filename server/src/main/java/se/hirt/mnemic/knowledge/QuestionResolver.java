@@ -136,6 +136,16 @@ public final class QuestionResolver {
 			switch (q.kind()) {
 			case "entity_resolution" -> {
 				Entity chosen = chooseEntity(q, choice);
+				if (!"new".equalsIgnoreCase(choice)) {
+					// "Peter Andersson" confirmed to be the "Peter" on record: the entity takes the fuller name and
+					// its renderings follow; "Peter" stays an alias (2026-09-24).
+					String from = entities.adoptFullerName(chosen.id(), q.subject());
+					if (from != null) {
+						chosen = entities.get(chosen.id()).orElseThrow();
+						result.put("renamed", Map.of("from", from, "to", chosen.name(), "rerendered_facts",
+								facts.rerenderMentioning(chosen.id())));
+					}
+				}
 				bindings.put(q.subject(), chosen);
 				pending.add(new Pending(q, choice, chosen, result, obs));
 			}

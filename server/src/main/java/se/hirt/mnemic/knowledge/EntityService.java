@@ -198,6 +198,28 @@ public final class EntityService {
 					}
 				}
 			}
+			if (match != null && "alias".equals(how)) {
+				// "Peter" on record and a "Peter Andersson" the user said was someone else: a bare "Peter" now fits
+				// either, so it is asked, once; the answer settles later mentions (2026-09-24).
+				List<Entity> rivals = distinguishedFuller(tx, name, norm, t, match, distinctFrom);
+				if (!rivals.isEmpty()) {
+					var both = new ArrayList<Entity>();
+					both.add(match);
+					both.addAll(rivals);
+					Optional<Entity> settled = answeredAmong(tx, norm, both);
+					if (settled.isPresent()) {
+						match = settled.get();
+						how = "answered";
+					} else {
+						var candidates = new ArrayList<Candidate>();
+						candidates.add(new Candidate(match, 1.0));
+						for (Entity r : rivals) {
+							candidates.add(new Candidate(r, 0.5));
+						}
+						return new Resolved(null, "ambiguous", 1.0, candidates);
+					}
+				}
+			}
 			if (match == null) {
 				List<Candidate> fuzzy = fuzzy(tx, name, norm, t, distinctFrom, want);
 				if (!fuzzy.isEmpty() && fuzzy.getFirst().score() >= MERGE) {
@@ -251,6 +273,55 @@ public final class EntityService {
 			}
 		}
 		return true;
+	}
+
+	/**
+	 * Whether {@code fuller} says more than {@code shorter} about the same thing: its identity tokens include all of
+	 * the other's and at least one more ("Peter Andersson" over "Peter"; not "Oskar Nyberg" over "Konrad Nyberg").
+	 */
+	public boolean saysMore(String fuller, String shorter, String type) {
+		List<String> more = types.identityTokens(fuller, type).stream().filter(EntityService::identity).toList();
+		List<String> less = types.identityTokens(shorter, type).stream().filter(EntityService::identity).toList();
+		return !less.isEmpty() && more.size() > less.size() && more.containsAll(less);
+	}
+
+	/**
+	 * A mention that says more than the entity's name ("Peter Andersson" confirmed to be the "Peter" on record) gives
+	 * the entity its fuller name; the old name stays an alias. The name renamed from, or null when nothing changed.
+	 */
+	public String adoptFullerName(long id, String mention) {
+		Entity e = get(id).orElseThrow(() -> MnemicException.notFound("No entity ent-" + id));
+		if (e.id() == owner.id() || !saysMore(mention, e.name(), e.type())) {
+			return null;
+		}
+		correct(id, Map.of("name", mention.trim()));
+		return e.name();
+	}
+
+	/**
+	 * Live entities of a compatible kind whose name says more than {@code name} and which an answer of "new" set apart
+	 * from it: the reason a bare mention that exactly matches {@code match} is still asked.
+	 */
+	private List<Entity> distinguishedFuller(
+		Tx tx, String name, String norm, String type, Entity match, Set<Long> distinctFrom) {
+		var out = new ArrayList<Entity>();
+		for (Row r : tx.query("SELECT subject FROM question WHERE kind = 'entity_resolution' "
+				+ "AND status = 'answered' AND lower(answer) = 'new' ORDER BY id DESC")) {
+			String subject = r.str("subject");
+			if (subject == null || Names.norm(subject).equals(norm)) {
+				continue;
+			}
+			Optional<Entity> other = byAlias(tx, Names.norm(subject), type);
+			if (other.isEmpty() || other.get().id() == match.id() || other.get().id() == owner.id()
+					|| distinctFrom.contains(other.get().id()) || !types.compatible(other.get().type(), type)
+					|| out.stream().anyMatch(e -> e.id() == other.get().id())) {
+				continue;
+			}
+			if (saysMore(other.get().name(), name, other.get().type())) {
+				out.add(other.get());
+			}
+		}
+		return out;
 	}
 
 	/** The entity an earlier answer to the same question named, if it is one of {@code among}: asked once. */

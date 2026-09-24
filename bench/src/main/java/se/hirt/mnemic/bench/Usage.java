@@ -34,6 +34,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import se.hirt.mnemic.model.AnthropicHttpProvider;
 import se.hirt.mnemic.model.ChatModel;
+import se.hirt.mnemic.model.ChatModel.AssistantMessage;
+import se.hirt.mnemic.model.ChatModel.Message;
+import se.hirt.mnemic.model.ChatModel.ToolCall;
+import se.hirt.mnemic.model.ChatModel.ToolResultMessage;
+import se.hirt.mnemic.model.ChatModel.ToolSpec;
+import se.hirt.mnemic.model.ChatModel.Turn;
+import se.hirt.mnemic.model.ChatModel.UserMessage;
 import se.hirt.mnemic.model.ModelProvider;
 import se.hirt.mnemic.protocol.Protocol;
 
@@ -52,6 +59,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -142,6 +150,13 @@ public final class Usage {
 		return parse(response, Set.of());
 	}
 
+	/** The argument a bare string stands for when a model writes {@code {"recall": "..."}}. */
+	private static final Map<String, String> MAIN_PARAMETER = Map.of("recall", "query", "inspect", "ref", "remember",
+			"text", "forget", "ref");
+
+	private static final Pattern FLAT_CALL = Pattern
+			.compile("(?s)\\{\\s*\"([a-z_]+)\"\\s*:\\s*\"([a-z_]+)\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"\\s*\\}");
+
 	private static final Pattern TEMPLATE_CALL = Pattern.compile("\\{%\\s*call_tool\\s+\"([a-z_]+)\"\\s*,");
 	private static final Pattern WRAPPED = Pattern
 			.compile("(?s)(?:\\{%\\s*raw\\s*%\\}|<function_calls>|<tool_call>|<invoke_call>)\\s*(.*?)\\s*"
@@ -208,6 +223,13 @@ public final class Usage {
 			}
 			return new Action(invoke.group(1), args, null, response, true);
 		}
+		Matcher flat = FLAT_CALL.matcher(body);
+		if (flat.matches() && tools.contains(flat.group(1))) {
+			// {"recall":"query":"..."}: a call with its argument object's braces dropped (Qwen, 2026-09-24).
+			var args = new LinkedHashMap<String, Object>();
+			args.put(flat.group(2), flat.group(3).replace("\\\"", "\""));
+			return new Action(flat.group(1), args, null, response, true);
+		}
 		int start = body.indexOf('{');
 		Matcher lead = LEADING_TOOL.matcher(body);
 		if (lead.find() && tools.contains(lead.group(1))) {
@@ -246,6 +268,13 @@ public final class Usage {
 						String key = n.fieldNames().next();
 						if (tools.contains(key) && n.get(key).isObject()) {
 							return new Action(key, arguments(n.get(key)), null, response, true);
+						}
+						if (tools.contains(key) && n.get(key).isTextual() && MAIN_PARAMETER.containsKey(key)) {
+							// {"recall": "who is my mother"}: the tool's one main argument as a bare string (Qwen,
+							// 2026-09-24); read as that argument, not as the reply.
+							var args = new LinkedHashMap<String, Object>();
+							args.put(MAIN_PARAMETER.get(key), n.get(key).asText());
+							return new Action(key, args, null, response, true);
 						}
 					}
 				} catch (IOException e) {
@@ -364,6 +393,16 @@ public final class Usage {
 		String only = o.get("only");
 		boolean embed = "on".equals(o.getOrDefault("embed", "off"));
 		int maxCalls = Integer.parseInt(o.getOrDefault("max-calls", "8"));
+		boolean repeatGuard = "on".equals(o.getOrDefault("repeat-guard", "off"));
+		// The model holds the server's tools as tools (its vendor's native tool calling) unless asked for the older
+		// text protocol, where it writes one JSON object a turn and the harness parses it.
+		String protocol = o.getOrDefault("protocol", assistant.supportsTools() ? "tools" : "text");
+		if ("tools".equals(protocol) && !assistant.supportsTools()) {
+			throw new IllegalArgumentException(assistant.id() + " has no tool calling; use --protocol text");
+		}
+		if (!"tools".equals(protocol) && !"text".equals(protocol)) {
+			throw new IllegalArgumentException("--protocol takes tools or text, not " + protocol);
+		}
 		boolean resume = "true".equals(o.getOrDefault("resume", "false"));
 		Bench.reasoningEffort(o);
 
@@ -375,6 +414,8 @@ public final class Usage {
 		config.put("judge", judge == null ? "none" : judge.model());
 		config.put("embed", embed);
 		config.put("max_calls", maxCalls);
+		config.put("repeat_guard", repeatGuard);
+		config.put("protocol", protocol);
 		config.put("started_at", Instant.now().toString());
 		List<Scenario> scenarios = load(script);
 		var records = new ArrayList<Map<String, Object>>();
@@ -419,9 +460,12 @@ public final class Usage {
 				McpClient client = McpClient.start(server, home, sc.owner(), embed);
 				try {
 					List<Map<String, Object>> tools = client.listTools();
-					String system = systemPrompt(tools);
+					boolean native_ = "tools".equals(protocol);
+					String system = systemPrompt(tools, !native_);
 					Set<String> toolNames = tools.stream().map(t -> (String) t.get("name")).collect(Collectors.toSet());
+					List<ToolSpec> specs = toolSpecs(tools);
 					var transcript = new StringBuilder();
+					var messages = new ArrayList<Message>();
 					boolean afterBreak = false;
 					boolean recalledInConversation = false;
 					for (int i = 0; i < sc.steps().size(); i++) {
@@ -432,6 +476,7 @@ public final class Usage {
 							client.close();
 							client = McpClient.start(server, home, sc.owner(), embed);
 							transcript.setLength(0);
+							messages.clear();
 							afterBreak = true;
 							recalledInConversation = false;
 							rec = new LinkedHashMap<>();
@@ -439,8 +484,11 @@ public final class Usage {
 							rec.put("step", i);
 							rec.put("kind", "break");
 						} else {
-							rec = step(sc, i, st, assistant, judge, client, system, toolNames, transcript, maxCalls,
-									afterBreak, recalledInConversation);
+							rec = native_
+									? stepWithTools(sc, i, st, assistant, judge, client, system, specs, messages,
+											maxCalls, repeatGuard, afterBreak, recalledInConversation)
+									: step(sc, i, st, assistant, judge, client, system, toolNames, transcript, maxCalls,
+											repeatGuard, afterBreak, recalledInConversation);
 							recalledInConversation |= Boolean.TRUE.equals(rec.get("recalled_in_conversation"));
 						}
 						records.add(rec);
@@ -468,11 +516,27 @@ public final class Usage {
 
 	/** The protocol the assistant is given: the guide, how to act in this harness, and the server's own tools. */
 	static String systemPrompt(List<Map<String, Object>> tools) throws IOException {
+		return systemPrompt(tools, true);
+	}
+
+	/**
+	 * With {@code textProtocol} the tools are listed in the prompt and the model writes one JSON object a turn; without
+	 * it the tools go to the model as tools, as a real client passes them, and the prompt says only how to behave.
+	 */
+	static String systemPrompt(List<Map<String, Object>> tools, boolean textProtocol) throws IOException {
 		// What a real client gets: the server's instructions from the initialize reply, then its tools. The guide
 		// is not pasted in; the assistant fetches it with inspect('guide') if it follows the instructions.
 		var sb = new StringBuilder();
 		sb.append("You are the user's assistant, with a memory server called Mnemic reachable through tools.\n\n");
 		sb.append(Protocol.instructions()).append("\n\n");
+		if (!textProtocol) {
+			sb.append("HOW TO ACT IN THIS HARNESS\n");
+			sb.append("The memory server's tools are given to you as tools: call one at a time and act on each ");
+			sb.append("result; your reply to the user is plain text. When the user only tells you something, record ");
+			sb.append("what is worth keeping and reply in a sentence. ");
+			sb.append("Today's date is ").append(Instant.now().toString(), 0, 10).append(".\n");
+			return sb.toString();
+		}
 		sb.append("TOOLS (name, description, input schema)\n");
 		for (Map<String, Object> t : tools) {
 			sb.append("\n### ").append(t.get("name")).append('\n').append(t.get("description")).append('\n');
@@ -496,8 +560,8 @@ public final class Usage {
 
 	private static Map<String, Object> step(
 		Scenario sc, int index, Step st, ChatModel assistant, Judge judge, McpClient client, String system,
-		Set<String> toolNames, StringBuilder transcript, int maxCalls, boolean afterBreak, boolean recalledEarlier)
-			throws Exception {
+		Set<String> toolNames, StringBuilder transcript, int maxCalls, boolean repeatGuard, boolean afterBreak,
+		boolean recalledEarlier) throws Exception {
 		String said = st.question() ? st.ask() : st.say();
 		transcript.append("User: ").append(said).append('\n');
 		var calls = new ArrayList<Map<String, Object>>();
@@ -506,6 +570,8 @@ public final class Usage {
 		var slipped = new ArrayList<String>();
 		String lastVerdict = null;
 		boolean rememberedWithReading = false;
+		int repeats = 0;
+		Action previous = null;
 		for (int n = 0; n <= maxCalls; n++) {
 			String prompt = "Conversation so far, oldest first. Act on the last user turn.\n\n" + tail(transcript);
 			String response = assistant.chat(system, prompt);
@@ -523,6 +589,29 @@ public final class Usage {
 				reply = "(no reply: the tool-call limit was reached)";
 				transcript.append("Assistant: ").append(reply).append('\n');
 				break;
+			}
+			boolean repeat = previous != null && previous.tool().equals(a.tool())
+					&& Objects.equals(previous.arguments(), a.arguments());
+			previous = a;
+			if (repeat) {
+				repeats++;
+			}
+			if (repeat && repeatGuard) {
+				// The same call as the one before it, with nothing written in between: the store would answer the
+				// same, so the harness says so instead of executing it (an experiment on Qwen's loops, 2026-09-24).
+				// It still counts toward the cap. A client-side courtesy, off by default so the bench measures the
+				// store as a real client would use it.
+				String note = "(the same call as the one above, with nothing changed since: its result is the one "
+						+ "already shown; reply to the user from it, or make a different call)";
+				var call = new LinkedHashMap<String, Object>();
+				call.put("tool", a.tool());
+				call.put("arguments", a.arguments());
+				call.put("result_head", note);
+				call.put("repeat", true);
+				calls.add(call);
+				transcript.append("Tool ").append(a.tool()).append(' ').append(LINE.writeValueAsString(a.arguments()))
+						.append("\nResult: ").append(note).append('\n');
+				continue;
 			}
 			String result = client.call(a.tool(), a.arguments());
 			var call = new LinkedHashMap<String, Object>();
@@ -552,6 +641,7 @@ public final class Usage {
 		rec.put("text", said);
 		rec.put("calls", calls);
 		rec.put("tool_calls", calls.size());
+		rec.put("repeated_calls", repeats);
 		rec.put("parse_failures", parseFailures);
 		if (!slipped.isEmpty()) {
 			rec.put("slipped", slipped);
@@ -577,6 +667,150 @@ public final class Usage {
 			rec.put("remembered_with_reading", rememberedWithReading);
 		}
 		return rec;
+	}
+
+	@SuppressWarnings("unchecked")
+	static List<ToolSpec> toolSpecs(List<Map<String, Object>> tools) {
+		var out = new ArrayList<ToolSpec>();
+		for (Map<String, Object> t : tools) {
+			out.add(new ToolSpec((String) t.get("name"), (String) t.get("description"),
+					(Map<String, Object>) t.get("input_schema")));
+		}
+		return out;
+	}
+
+	private static final String NOT_EXECUTED = "(not executed: the tool-call limit was reached)";
+	private static final String REPEAT_NOTE = "(the same call as the one above, with nothing changed since: its "
+			+ "result is the one already shown; reply to the user from it, or make a different call)";
+
+	/**
+	 * One step of a scenario with the model holding the tools natively: the user's turn goes in, the model calls tools
+	 * and gets their results as tool messages until it answers in text. Up to {@code maxCalls} calls are executed; a
+	 * turn that calls again after that ends with no reply and its calls answered "not executed", so the conversation
+	 * stays well-formed for the next step.
+	 */
+	private static Map<String, Object> stepWithTools(
+		Scenario sc, int index, Step st, ChatModel assistant, Judge judge, McpClient client, String system,
+		List<ToolSpec> tools, List<Message> messages, int maxCalls, boolean repeatGuard, boolean afterBreak,
+		boolean recalledEarlier) throws Exception {
+		String said = st.question() ? st.ask() : st.say();
+		messages.add(new UserMessage(said));
+		var calls = new ArrayList<Map<String, Object>>();
+		String reply = null;
+		String lastVerdict = null;
+		boolean rememberedWithReading = false;
+		int repeats = 0;
+		int used = 0;
+		ToolCall previous = null;
+		while (true) {
+			Turn turn = assistant.chat(system, trimmed(messages), tools);
+			messages.add(new AssistantMessage(turn));
+			if (!turn.hasCalls()) {
+				reply = turn.text() == null || turn.text().isBlank() ? "(no reply: the model said nothing)"
+						: turn.text().trim();
+				break;
+			}
+			if (used >= maxCalls) {
+				reply = "(no reply: the tool-call limit was reached)";
+				for (ToolCall c : turn.calls()) {
+					messages.add(new ToolResultMessage(c.id(), c.name(), NOT_EXECUTED));
+				}
+				break;
+			}
+			for (ToolCall c : turn.calls()) {
+				boolean repeat = previous != null && previous.name().equals(c.name())
+						&& Objects.equals(previous.arguments(), c.arguments());
+				previous = c;
+				if (repeat) {
+					repeats++;
+				}
+				String result;
+				var call = new LinkedHashMap<String, Object>();
+				call.put("tool", c.name());
+				call.put("arguments", c.arguments());
+				if (used >= maxCalls) {
+					result = NOT_EXECUTED;
+				} else if (repeat && repeatGuard) {
+					result = REPEAT_NOTE;
+					call.put("repeat", true);
+					used++;
+				} else {
+					result = client.call(c.name(), c.arguments());
+					used++;
+					if ("recall".equals(c.name())) {
+						lastVerdict = verdictOf(result);
+					}
+					if (("remember".equals(c.name()) && c.arguments().get("proposal") != null)
+							|| "correct".equals(c.name()) || "forget".equals(c.name())) {
+						rememberedWithReading = true;
+					}
+				}
+				call.put("result_head", head(result, 600));
+				if (turn.text() != null && !turn.text().isBlank()) {
+					call.put("said_alongside", head(turn.text(), 200));
+				}
+				calls.add(call);
+				messages.add(new ToolResultMessage(c.id(), c.name(), head(result, TOOL_RESULT_CHARS)));
+			}
+		}
+		var rec = new LinkedHashMap<String, Object>();
+		rec.put("scenario", sc.id());
+		rec.put("step", index);
+		rec.put("kind", st.question() ? "ask" : "say");
+		if (afterBreak) {
+			rec.put("after_break", true);
+		}
+		rec.put("text", said);
+		rec.put("calls", calls);
+		rec.put("tool_calls", calls.size());
+		rec.put("repeated_calls", repeats);
+		rec.put("parse_failures", 0);
+		rec.put("reply", reply);
+		if (st.question()) {
+			rec.put("expect", st.expect());
+			rec.put("type", st.type());
+			boolean recalledNow = calls.stream().anyMatch(c -> "recall".equals(c.get("tool")));
+			rec.put("recalled_before_answer", recalledNow);
+			rec.put("recalled_in_conversation", recalledNow || recalledEarlier);
+			rec.put("last_verdict", lastVerdict);
+			if (judge != null) {
+				String qid = sc.id() + "-" + index;
+				rec.put("correct", judge.correct(qid, judgeType(st.type()), st.ask(), st.expect(), reply));
+			}
+		} else {
+			rec.put("remembered", calls.stream()
+					.anyMatch(c -> Set.of("remember", "correct", "forget").contains((String) c.get("tool"))));
+			rec.put("remembered_with_reading", rememberedWithReading);
+		}
+		return rec;
+	}
+
+	/**
+	 * The conversation within the transcript budget: whole user turns are dropped from the front, oldest first, so what
+	 * remains starts with a user message and every result still follows its call.
+	 */
+	static List<Message> trimmed(List<Message> messages) {
+		var out = new ArrayList<Message>(messages);
+		while (out.size() > 1 && size(out) > TRANSCRIPT_CHARS) {
+			out.remove(0);
+			while (!out.isEmpty() && !(out.get(0) instanceof UserMessage)) {
+				out.remove(0);
+			}
+		}
+		return out.isEmpty() ? new ArrayList<>(messages.subList(messages.size() - 1, messages.size())) : out;
+	}
+
+	private static int size(List<Message> messages) {
+		int n = 0;
+		for (Message m : messages) {
+			n += switch (m) {
+			case UserMessage u -> u.text().length();
+			case ToolResultMessage r -> r.content().length();
+			case AssistantMessage a -> (a.turn().text() == null ? 0 : a.turn().text().length())
+					+ (a.turn().hasCalls() ? a.turn().calls().toString().length() : 0);
+			};
+		}
+		return n;
 	}
 
 	private static String judgeType(String type) {
@@ -630,6 +864,7 @@ public final class Usage {
 		int recalledFirst = 0;
 		int answeredOnMiss = 0;
 		int calls = 0;
+		int repeats = 0;
 		int parseFailures = 0;
 		int asksAfterBreak = 0;
 		int recalledFirstAfterBreak = 0;
@@ -642,6 +877,7 @@ public final class Usage {
 				continue;
 			}
 			calls += (int) r.getOrDefault("tool_calls", 0);
+			repeats += (int) r.getOrDefault("repeated_calls", 0);
 			parseFailures += (int) r.getOrDefault("parse_failures", 0);
 			if ("say".equals(r.get("kind"))) {
 				says++;
@@ -696,6 +932,7 @@ public final class Usage {
 		m.put("accuracy_after_break", rate(correctAfterBreak, judgedAfterBreak));
 		m.put("tool_calls", calls);
 		m.put("tool_calls_per_step", records.isEmpty() ? 0 : Math.round(10.0 * calls / records.size()) / 10.0);
+		m.put("repeated_calls", repeats);
 		m.put("protocol_slips", parseFailures);
 		var per = new LinkedHashMap<String, Object>();
 		for (Map.Entry<String, int[]> e : byScenario.entrySet()) {

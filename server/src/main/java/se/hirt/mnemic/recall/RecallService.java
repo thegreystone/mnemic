@@ -202,12 +202,13 @@ public final class RecallService {
 		List<Hit> hits = budget(ranking, ch, q, s, maxTokens, limit, includeHistory);
 		if ("miss".equals(s.state()) && !hits.isEmpty()) {
 			// A miss is about the record's facts; the observations below may still say it in words (a marriage the
-			// reading mis-filed, so no step-parent was derived). Naming whom they mention lets the reader judge
-			// whether to read them or to say not known (Haiku on the stepmother, 2026-09-23).
+			// reading mis-filed, so no step-parent was derived). Naming whom they mention lets the reader judge. A
+			// fact, never a nudge: told to "read them before saying not known", a weaker model invented a second
+			// marriage and stored it (Haiku on the stepmother, 2026-09-23).
 			List<String> mentioned = mentioned(hits, s, 6);
 			if (!mentioned.isEmpty()) {
 				s = s.withNote("the " + hits.size() + (hits.size() == 1 ? " observation" : " observations")
-						+ " below mention " + String.join(", ", mentioned) + ": read them before saying not known");
+						+ " below mention " + String.join(", ", mentioned));
 			}
 		}
 		String text = renderer.render(query, asOf, now, s, ch.events, hits, ranking.order.size(), ranking.used,

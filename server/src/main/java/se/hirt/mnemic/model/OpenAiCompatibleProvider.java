@@ -30,6 +30,13 @@ package se.hirt.mnemic.model;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import se.hirt.mnemic.model.ChatModel.AssistantMessage;
+import se.hirt.mnemic.model.ChatModel.Message;
+import se.hirt.mnemic.model.ChatModel.ToolCall;
+import se.hirt.mnemic.model.ChatModel.ToolResultMessage;
+import se.hirt.mnemic.model.ChatModel.ToolSpec;
+import se.hirt.mnemic.model.ChatModel.Turn;
+import se.hirt.mnemic.model.ChatModel.UserMessage;
 
 import java.io.IOException;
 import java.net.URI;
@@ -165,6 +172,82 @@ public final class OpenAiCompatibleProvider implements ModelProvider {
 		return THINK.matcher(content).replaceAll("").trim();
 	}
 
+	/** The tools in the OpenAI shape: a function per tool, its input schema as the parameters. */
+	static List<Map<String, Object>> wireTools(List<ToolSpec> tools) {
+		var out = new java.util.ArrayList<Map<String, Object>>();
+		for (ToolSpec t : tools) {
+			var fn = new LinkedHashMap<String, Object>();
+			fn.put("name", t.name());
+			fn.put("description", t.description() == null ? "" : t.description());
+			fn.put("parameters", t.inputSchema() == null ? Map.of("type", "object") : t.inputSchema());
+			out.add(Map.of("type", "function", "function", fn));
+		}
+		return out;
+	}
+
+	/**
+	 * The conversation in the OpenAI shape: an assistant turn carries its calls as {@code tool_calls} with the
+	 * arguments as a JSON string, and each result is a {@code tool} message addressed by the call's id.
+	 */
+	static List<Map<String, Object>> wireMessages(List<Message> messages) throws IOException {
+		var out = new java.util.ArrayList<Map<String, Object>>();
+		for (Message m : messages) {
+			switch (m) {
+			case UserMessage u -> out.add(Map.of("role", "user", "content", u.text()));
+			case AssistantMessage a -> {
+				var msg = new LinkedHashMap<String, Object>();
+				msg.put("role", "assistant");
+				msg.put("content", a.turn().text() == null ? "" : a.turn().text());
+				if (a.turn().hasCalls()) {
+					var calls = new java.util.ArrayList<Map<String, Object>>();
+					for (ToolCall c : a.turn().calls()) {
+						calls.add(Map.of("id", c.id(), "type", "function", "function",
+								Map.of("name", c.name(), "arguments", MAPPER.writeValueAsString(c.arguments()))));
+					}
+					msg.put("tool_calls", calls);
+				}
+				out.add(msg);
+			}
+			case ToolResultMessage r ->
+				out.add(Map.of("role", "tool", "tool_call_id", r.callId(), "name", r.name(), "content", r.content()));
+			}
+		}
+		return out;
+	}
+
+	/**
+	 * The model's turn from a chat completion message: its text with any thinking stripped, and its tool calls with the
+	 * arguments parsed. Arguments that are not JSON (a local model can still garble them) become an empty map under a
+	 * {@code _unparsed} key, so the call still reaches the server and its error tells the model.
+	 */
+	static Turn turnOf(JsonNode message) {
+		String content = stripThinking(message.path("content").asText(""));
+		var calls = new java.util.ArrayList<ToolCall>();
+		int n = 0;
+		for (JsonNode c : message.path("tool_calls")) {
+			n++;
+			String id = c.path("id").asText("");
+			if (id.isEmpty()) {
+				id = "call_" + n;
+			}
+			JsonNode fn = c.path("function");
+			String name = fn.path("name").asText("");
+			Map<String, Object> args = new LinkedHashMap<>();
+			JsonNode raw = fn.path("arguments");
+			try {
+				if (raw.isObject()) {
+					args = MAPPER.convertValue(raw, Map.class);
+				} else if (!raw.asText("").isBlank()) {
+					args = MAPPER.readValue(raw.asText(), Map.class);
+				}
+			} catch (IOException | IllegalArgumentException e) {
+				args = new LinkedHashMap<>(Map.of("_unparsed", raw.asText("")));
+			}
+			calls.add(new ToolCall(id, name, args));
+		}
+		return new Turn(content, calls);
+	}
+
 	static final class Client implements ChatModel {
 		private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(30)).build();
 		private final String id;
@@ -189,16 +272,9 @@ public final class OpenAiCompatibleProvider implements ModelProvider {
 
 		@Override
 		public String chat(String system, String user) throws IOException, InterruptedException {
-			boolean withReasoning = local && !reasoningFieldRejected;
-			HttpResponse<String> resp = send(system, user, withReasoning);
-			if (withReasoning && resp.statusCode() == 400 && resp.body().contains("reasoning")) {
-				reasoningFieldRejected = true; // this server does not know the field; never send it again
-				resp = send(system, user, false);
-			}
-			if (resp.statusCode() / 100 != 2) {
-				throw new IOException("Model endpoint returned " + resp.statusCode() + ": " + resp.body());
-			}
-			JsonNode root = MAPPER.readTree(resp.body());
+			JsonNode root = complete(
+					List.of(Map.of("role", "system", "content", system), Map.of("role", "user", "content", user)),
+					null);
 			JsonNode message = root.path("choices").path(0).path("message");
 			String content = stripThinking(message.path("content").asText());
 			String finish = root.path("choices").path(0).path("finish_reason").asText("");
@@ -209,7 +285,38 @@ public final class OpenAiCompatibleProvider implements ModelProvider {
 			return content;
 		}
 
-		private HttpResponse<String> send(String system, String user, boolean withReasoning)
+		@Override
+		public boolean supportsTools() {
+			return true;
+		}
+
+		@Override
+		public Turn chat(String system, List<Message> messages, List<ToolSpec> tools)
+				throws IOException, InterruptedException {
+			var wire = new java.util.ArrayList<Map<String, Object>>();
+			wire.add(Map.of("role", "system", "content", system));
+			wire.addAll(wireMessages(messages));
+			JsonNode root = complete(wire, wireTools(tools));
+			return turnOf(root.path("choices").path(0).path("message"));
+		}
+
+		/** One request, with the reasoning field dropped for good once a server has rejected it. */
+		private JsonNode complete(List<Map<String, Object>> messages, List<Map<String, Object>> tools)
+				throws IOException, InterruptedException {
+			boolean withReasoning = local && !reasoningFieldRejected;
+			HttpResponse<String> resp = send(messages, tools, withReasoning);
+			if (withReasoning && resp.statusCode() == 400 && resp.body().contains("reasoning")) {
+				reasoningFieldRejected = true; // this server does not know the field; never send it again
+				resp = send(messages, tools, false);
+			}
+			if (resp.statusCode() / 100 != 2) {
+				throw new IOException("Model endpoint returned " + resp.statusCode() + ": " + resp.body());
+			}
+			return MAPPER.readTree(resp.body());
+		}
+
+		private HttpResponse<String> send(
+			List<Map<String, Object>> messages, List<Map<String, Object>> tools, boolean withReasoning)
 				throws IOException, InterruptedException {
 			var payload = new LinkedHashMap<String, Object>();
 			payload.put("model", model);
@@ -218,8 +325,10 @@ public final class OpenAiCompatibleProvider implements ModelProvider {
 			if (withReasoning) {
 				payload.put("reasoning_effort", reasoningEffort());
 			}
-			payload.put("messages",
-					List.of(Map.of("role", "system", "content", system), Map.of("role", "user", "content", user)));
+			payload.put("messages", messages);
+			if (tools != null && !tools.isEmpty()) {
+				payload.put("tools", tools);
+			}
 			String body = MAPPER.writeValueAsString(payload);
 			HttpRequest.Builder req = HttpRequest.newBuilder(endpoint).timeout(Duration.ofMinutes(10))
 					.header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(body));

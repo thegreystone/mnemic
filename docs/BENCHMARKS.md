@@ -742,7 +742,77 @@ mis-filed a relation (Haiku reversed parent_of and so had no derived step-parent
 text, while a miss with nothing to mention stays an honest not-known; the instructions say to answer only
 what the shown observations state, that the reply to remember is complete (no inspecting what was just
 stored or the questions it lists), to define vocabulary in the proposal, and to keep status and consolidate
-out of the middle of a turn.
+out of the middle of a turn. The instructions did what they were meant to for Opus: no call-cap hits, no
+re-inspecting, 1.6 calls a step, input tokens 40 percent below step 0, accuracy unchanged. The MISS note
+taught something too. Its first form ended "read them before saying not known"; shown that beside the
+mis-filed marriage, Haiku did not read them, it invented a second marriage ("Konrad married again in 2021,
+to Ingrid Holm"), stored it with remember, and answered from its own invention. A nudge to answer makes a
+weak model fabricate and pollute the store; the note is now a plain fact ("the 3 observations below
+mention Konrad Nyberg, Lena Berg"), and the rule stays: answer only what the shown observations state. On
+the neutral note Haiku answered the stepmother question, then invented a check-up date and a doctor's name
+with the right event on the screen in front of it, which is the model, not the store: Haiku 4.5 reads
+the recall block carelessly, and a store can only make the block plain. Its other misses are its reversed
+parent_of readings (it writes self as the parent when the text says "my mother is X"), which no derivation
+survives.
+
+Step 7 (2026-09-24) takes that reversal on. Counted over the step 6 runs, Opus wrote the parent as the subject
+9 times in 9, Haiku 1 in 9, Qwen 1 in 13: the seed vocabulary is speaker-first almost everywhere (works_at,
+lives_in, owns, prefers), parent_of is the one place where "my father is X" makes self the object, and the
+weaker models apply the dominant pattern. Both saw the wrong rendering ("Mattias Sandell is Konrad Nyberg's
+father"), both knew it was wrong, and both spent every call restating one side at a time, because the
+correction that fixes a direction names both sides and nothing said so. The reply now says it: a fact whose
+relation has a direction (an entity on each side, not symmetric, types that admit the swap, read from the
+registry so a user-defined predicate is covered like the seed) carries `direction: to switch to the other way
+around use correct("f-1", {"subject": "Konrad Nyberg", "object": "Mattias Sandell"})`, and the no-change
+error names the same move. Stated, never urged: a model that got it right has nothing to act on. The owner
+spelled out by name in a correction now compares as "self", so restating both sides as they stand is refused
+as no change instead of stored as one. On the local Qwen run (Qwen judging too, verdicts hand-checked) the
+family scenarios went from 0/3 to 3/3, the stepmother and the 3D-printer leaning were answered, cap hits
+fell from 13 to 8; Qwen still wrote 6 of 10 parent facts the wrong way and turned every one of them around
+on the hint. Its remaining misses are its own: the identical recall repeated to the cap (55 times in the run,
+0 for either Claude model), and four mortgage answers emitted as `{"recall": "..."}` text that the harness
+does not read as a call.
+
+The loop was then tried on. Qwen repeats a call after three kinds of result: one that does not look like an
+answer ("no predicate cue, name a relation"), a MISS with the answer in the observations below it, and a
+result that plainly answers ("Tobias owns parser_module"); the model does not recognise that it is done. The
+harness gained a `--repeat-guard` (off by default, so the bench measures the store as a client uses it): an
+identical consecutive call is not executed, and the transcript says its result is the one already shown and
+to reply or call something else. On the same tree Qwen answered after that note 15 times, made a different
+call 4 times, and repeated twice; cap hits 8 → 4, judged 52/63 → 55/63, wrong answers on a miss 4 → 1. So
+a store can do something about the loop, and the check now lives in the store, on by default: recall and
+inspect keep the last read per MCP session with the store's write generation, a verbatim repeat of it gets
+the note in place of the block, any write in any session clears the memo, and an errored read is never
+memoised (its message is what says what to change). Two runs against it (usage-qwen9b-s8, s8b): on the
+scenarios comparable with the harness run, 51/59 and 52/59 right against 51/59, cap hits 5 and 6 against 4
+(8 with no check at all); after the note Qwen replied or changed its call about half the time, against four
+in five with the harness note, the same words. The other four questions of those runs were lost upstream:
+Qwen wrote the three codebase statements as remember calls with a bracket missing after the events array,
+which no parser reads, so the store was empty when the questions came and the model looped on nothing.
+The stronger models never repeat a read, so the check costs them nothing. The harness also now reads two
+more of Qwen's shapes, `{"recall": "..."}` (a bare
+string as the tool's main argument) and `{"recall":"query":"..."}` (the argument object's braces dropped),
+which had cost four answers each in the two runs; the remaining misses are a strict judge on partial
+answers and one turn lost to resolving type-mismatch questions the model had caused itself.
+
+Step 8 (2026-09-24) takes the JSON out of the model's hands. Every dialect the harness had learned was a
+shape Qwen wrote once, and the run after each fix brought a new one; the codebase statements died on a
+bracket no parser should guess at. The harness now hands the model the server's tools as tools, through
+its vendor's native tool calling (the OpenAI wire's `tool_calls` and `tool` messages, the Messages API's
+`tool_use` and `tool_result` blocks), keeps the conversation as messages rather than a text transcript,
+and answers calls cut off by the cap with "not executed" so the next turn is well-formed. The system prompt
+shrinks to the server's instructions and four lines of conduct; the tool descriptions and schemas travel
+in the tools field, as a real client sends them. The text protocol remains behind `--protocol text`. On
+Qwen the change is the largest of the branch: 61/63 judged, 0 parse failures, 0 cap hits, 0 repeated
+calls, 91 tool calls where the text protocol took 268. The two misses were the car decision (the order on
+record, "no record of a final decision") and one lost to the new failure the format brings: the model says
+"I've recorded that" without calling remember. Six of 43 statements went unstored that way (the text
+protocol, which made every turn an explicit action, lost none), one of them the SQLite decision, which was
+then unknown after the break. Recall before answering fell to 60 percent, but every question after a break
+that was answered without a call had a recall earlier in the same conversation, and all 20 post-break
+answers were 90 percent right; within a conversation the model answers from what it has already seen, which
+the protocol allows. The unstored statements are the thing to watch: a memory assistant that narrates a
+write it did not make is worse than one that asks.
 
 | Step | Opus 5.5 correct / cap hits / answer-only calls | Haiku 4.5 | Qwen 9B |
 |------|------|------|------|
@@ -751,6 +821,9 @@ out of the middle of a turn.
 | 3 | 63/63, 3, 8 (effect candidates 8, were ~40) | 62/63, 0, 20 | 48/63, 12, 10 |
 | 4 | 63/63, 3, 10 (guide fetched once, not 26; input tokens −28%) | 56/63, 0, 6; rerun with the fixed harness 60/63, 1, 8 | 54/63, 12, 9 |
 | 5 | 63/63, 4, 9 (no tool errors from the renames) | 60/63, 1, 9 | 51/63, 13, 9 |
+| 6 | 63/63, 0, 8 (no re-inspecting; input tokens −40% vs step 0) | 58/63 with the nudge, 59/63 without | 51/63, 13; 53/63 without |
+| 7 | not yet run | not yet run | 52/63, 8 (family scenarios 3/3, were 0/3; 4 misses are a reply dialect the harness did not read); 55/63, 4 with the repeat guard in the harness; 51/63, 9 and 52/63, 10 with the check in the store (three codebase statements lost to the model's own JSON in both) |
+| 8 | not yet run | not yet run | 61/63, 0 (native tool calls: 0 parse failures, 0 repeats, 91 calls; 6 statements narrated as recorded but never sent) |
 
 "Cap hits" are statement turns that ran out of the eight tool calls and gave the user no reply. Qwen's
 numbers swing by ten between runs of the same code and are read only for large effects. At step 2 both

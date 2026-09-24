@@ -283,10 +283,10 @@ class UsageFindingsTest {
 			assertTrue(r.text().contains("no such fact on record"), r.text());
 			assertTrue(r.text().contains("mention") && r.text().contains("Konrad Nyberg")
 					&& r.text().contains("Lena Berg"), r.text());
-			assertTrue(r.text().contains("read them before saying not known"), r.text());
+			assertFalse(r.text().contains("read them"), "a fact about the text, never a nudge to answer: " + r.text());
 			// Nothing to mention: the miss stands alone, as an honest not-known should.
 			RecallResult bare = recall(e, "Mattias's dentist");
-			assertFalse(bare.text().contains("read them before saying not known"), bare.text());
+			assertFalse(bare.text().contains("below mention"), bare.text());
 		}
 	}
 
