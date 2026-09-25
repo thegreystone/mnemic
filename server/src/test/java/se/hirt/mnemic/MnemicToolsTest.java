@@ -70,7 +70,7 @@ class MnemicToolsTest {
 		assertTrue(result.get("observation_id").toString().startsWith("obs-"), result.toString());
 
 		ToolResponse recalled = tools.recall(Optional.of("SQLite"), NONE, Optional.of(400), Optional.empty(),
-				Optional.empty());
+				Optional.empty(), null);
 		assertFalse(recalled.isError(), text(recalled));
 		String block = text(recalled);
 		assertTrue(block.startsWith("recall: \"SQLite\""), block);
@@ -86,7 +86,7 @@ class MnemicToolsTest {
 		assertTrue(error(blank).get("message").toString().contains("Example"), "fix-it text");
 
 		ToolResponse badDate = tools.recall(Optional.of("x"), Optional.of("last spring"), Optional.empty(),
-				Optional.empty(), Optional.empty());
+				Optional.empty(), Optional.empty(), null);
 		assertTrue(badDate.isError());
 		assertEquals("INVALID_ARGUMENT", error(badDate).get("code"));
 
@@ -123,7 +123,7 @@ class MnemicToolsTest {
 		assertTrue(nothing.isError());
 		assertTrue(error(nothing).get("message").toString().contains("pred:"), text(nothing));
 
-		ToolResponse noRef = tools.inspect("", Optional.empty(), NONE);
+		ToolResponse noRef = tools.inspect("", Optional.empty(), NONE, null);
 		assertTrue(noRef.isError());
 		assertEquals("INVALID_ARGUMENT", error(noRef).get("code"));
 	}
@@ -190,7 +190,7 @@ class MnemicToolsTest {
 		assertEquals(0, replaced.get("reopened_facts"));
 		assertEquals(1, ((List<?>) ((Map<?, ?>) result(reread).get("stored")).get("facts")).size());
 		assertEquals(obs, result(reread).get("observation_id"));
-		assertFalse(text(tools.inspect(obs, Optional.empty(), NONE)).contains("evt-"), "the old event is gone");
+		assertFalse(text(tools.inspect(obs, Optional.empty(), NONE, null)).contains("evt-"), "the old event is gone");
 		// Text and observation_id together are refused, and so is an observation_id without a proposal.
 		assertTrue(tools.remember(Optional.of("x"), Optional.of(obs), NONE, NONE, Optional.empty(), NONE, NONE,
 				proposal, Optional.empty(), NONE, null).isError());
@@ -220,9 +220,9 @@ class MnemicToolsTest {
 		assertTrue(result(r).containsKey("note"));
 		assertEquals(1L, ((Number) result(tools.status()).get("observations_retired")).longValue());
 		// The fact's history marks the observation as retired, and the observation says so itself.
-		ToolResponse h = tools.inspect("Mattias Sandell", Optional.of(true), Optional.of("uses"));
+		ToolResponse h = tools.inspect("Mattias Sandell", Optional.of(true), Optional.of("uses"), null);
 		assertTrue(text(h).contains("observations_retired"), text(h));
-		ToolResponse o = tools.inspect(obs, Optional.empty(), NONE);
+		ToolResponse o = tools.inspect(obs, Optional.empty(), NONE, null);
 		assertEquals(true, result(o).get("retired"), text(o));
 		assertEquals("it was WhatsApp", result(o).get("retired_reason"));
 		// Undo.
@@ -249,7 +249,7 @@ class MnemicToolsTest {
 		assertEquals("corrected", ((Map<?, ?>) result(r).get("original")).get("standing"));
 		// Once withdrawn, it cannot be withdrawn or corrected again; inspect shows the reason.
 		assertTrue(tools.correct(factId, Map.of("wrong", true), NONE).isError());
-		ToolResponse f = tools.inspect(factId, Optional.empty(), NONE);
+		ToolResponse f = tools.inspect(factId, Optional.empty(), NONE, null);
 		assertFalse(f.isError(), text(f));
 		assertEquals("corrected", result(f).get("standing"));
 		assertTrue(text(f).contains("it was a leaning, never a decision"), text(f));
@@ -264,7 +264,7 @@ class MnemicToolsTest {
 		ToolResponse again = remember("As I said, I work at Hooli.", proposal, "tools-history-2");
 		assertFalse(again.isError(), text(again));
 
-		ToolResponse history = tools.inspect("Hooli", Optional.of(true), Optional.of("works_at"));
+		ToolResponse history = tools.inspect("Hooli", Optional.of(true), Optional.of("works_at"), null);
 		assertFalse(history.isError(), text(history));
 		String h = text(history);
 		assertTrue(h.contains("\"observations\":[\"obs-"), h);
@@ -272,7 +272,7 @@ class MnemicToolsTest {
 		String list = h.substring(at, h.indexOf("]", at));
 		assertTrue(list.split("obs-").length - 1 >= 2, "two conversations behind the one fact: " + list);
 		// The same fact by its own id, with its columns.
-		ToolResponse f = tools.inspect(firstFactId(again), Optional.empty(), NONE);
+		ToolResponse f = tools.inspect(firstFactId(again), Optional.empty(), NONE, null);
 		assertFalse(f.isError(), text(f));
 		assertEquals("works_at", result(f).get("predicate"));
 		assertEquals("Hooli", ((Map<?, ?>) result(f).get("object")).get("name"));
@@ -294,7 +294,7 @@ class MnemicToolsTest {
 		assertFalse(c.isError(), text(c));
 		assertEquals(ent, result(c).get("entity"));
 		assertTrue(((Map<?, ?>) result(c).get("after")).get("aliases").toString().contains("LU"), text(c));
-		assertTrue(text(tools.inspect(ent, Optional.empty(), NONE)).contains("LU"));
+		assertTrue(text(tools.inspect(ent, Optional.empty(), NONE, null)).contains("LU"));
 		ToolResponse bad = tools.correct(ent, Map.of("remove_aliases", List.of("x")), NONE);
 		assertTrue(bad.isError());
 		assertTrue(error(bad).get("message").toString().contains("aliases"), text(bad));
@@ -366,12 +366,12 @@ class MnemicToolsTest {
 				((Map<?, ?>) ((List<?>) ((Map<?, ?>) result(stored).get("stored")).get("facts")).getFirst())
 						.get("standing"),
 				"a past interval: ended, not current");
-		ToolResponse f = tools.inspect(id, Optional.empty(), NONE);
+		ToolResponse f = tools.inspect(id, Optional.empty(), NONE, null);
 		assertEquals("ended", result(f).get("standing"));
 		assertFalse(result(f).containsKey("status") || result(f).containsKey("state"), "one field, not two");
 		// A present-tense question misses, but names the ended fact rather than claiming ignorance.
 		String recalled = text(tools.recall(Optional.of("where does Mattias work"), NONE, Optional.of(400),
-				Optional.empty(), Optional.empty()));
+				Optional.empty(), Optional.empty(), null));
 		assertTrue(recalled.contains(
 				"no current value; 1 ended fact: Mattias Sandell works at Initrode (2019 \u2013 2022) [" + id + "]"),
 				recalled);
@@ -380,7 +380,7 @@ class MnemicToolsTest {
 
 	@Test
 	void inspectNamesTheRegistryAndItsEntries() {
-		ToolResponse r = tools.inspect("registry", Optional.empty(), NONE);
+		ToolResponse r = tools.inspect("registry", Optional.empty(), NONE, null);
 		assertFalse(r.isError(), text(r));
 		Map<String, Object> result = result(r);
 		String preds = result.get("predicates").toString();
@@ -390,18 +390,18 @@ class MnemicToolsTest {
 		String types = result.get("entity_types").toString();
 		assertTrue(types.contains("name=country") && types.contains("parent=place"), types);
 
-		ToolResponse one = tools.inspect("pred:works_at", Optional.empty(), NONE);
+		ToolResponse one = tools.inspect("pred:works_at", Optional.empty(), NONE, null);
 		assertFalse(one.isError(), text(one));
 		assertEquals("works_at", result(one).get("name"));
 		assertTrue(result(one).containsKey("changes"));
-		assertFalse(tools.inspect("event:joined", Optional.empty(), NONE).isError());
-		assertFalse(tools.inspect("type:place", Optional.empty(), NONE).isError());
-		assertTrue(tools.inspect("type:spaceship", Optional.empty(), NONE).isError());
+		assertFalse(tools.inspect("event:joined", Optional.empty(), NONE, null).isError());
+		assertFalse(tools.inspect("type:place", Optional.empty(), NONE, null).isError());
+		assertTrue(tools.inspect("type:spaceship", Optional.empty(), NONE, null).isError());
 		// A vocabulary correction goes through the same id scheme.
 		ToolResponse c = tools.correct("event:joined",
 				Map.of("lexicon", List.of("joined", "join", "started", "onboarded")), Optional.of("onboarding counts"));
 		assertFalse(c.isError(), text(c));
-		assertTrue(text(tools.inspect("event:joined", Optional.empty(), NONE)).contains("onboarded"));
+		assertTrue(text(tools.inspect("event:joined", Optional.empty(), NONE, null)).contains("onboarded"));
 	}
 
 	@Test
@@ -435,6 +435,103 @@ class MnemicToolsTest {
 				.get("facts");
 		assertFalse(facts.isEmpty(), "no fact stored: " + text(stored));
 		return (String) facts.getFirst().get("id");
+	}
+
+	@Test
+	@SuppressWarnings("unchecked")
+	void aRelationWithADirectionSaysHowToTurnItAround() {
+		// "My father is Konrad" read with the parent as the object: the reply names the fact as it stands and the call
+		// that switches it, and the no-change error names the same move (usage bench, 2026-09-24).
+		ToolResponse r = remember("My father is Direction Father.", Map.of("facts", List.of(Map.of("subject", "self",
+				"predicate", "parent_of", "object", "Direction Father", "qualifier", "father"))), "tools-direction-1");
+		assertFalse(r.isError(), text(r));
+		Map<String, Object> stored = (Map<String, Object>) result(r).get("stored");
+		Map<String, Object> fact = ((List<Map<String, Object>>) stored.get("facts")).getFirst();
+		String id = fact.get("id").toString();
+		String direction = fact.get("direction").toString();
+		assertTrue(direction.startsWith("to switch to the other way around use correct(\"" + id + "\", "), direction);
+		assertTrue(direction.contains("\"subject\": \"Direction Father\""), direction);
+		assertTrue(direction.contains("\"object\": \"" + fact.get("rendering").toString().split(" is ")[0] + "\""),
+				direction);
+
+		ToolResponse same = tools.correct(id, Map.of("qualifier", "father"), NONE);
+		assertTrue(same.isError(), text(same));
+		String message = error(same).get("message").toString();
+		// The owner spelled out by name is still the owner: restating both sides as they stand is no change either.
+		ToolResponse spelled = tools.correct(id,
+				Map.of("subject", fact.get("rendering").toString().split(" is ")[0], "object", "Direction Father"),
+				NONE);
+		assertTrue(spelled.isError(), text(spelled));
+		assertTrue(error(spelled).get("message").toString().contains("changes nothing"), text(spelled));
+		assertTrue(
+				message.contains("To switch subject and object around, give both: {\"subject\": \"Direction Father\""),
+				message);
+
+		Map<String, Object> swap = Map.of("subject", "Direction Father", "object",
+				fact.get("rendering").toString().split(" is ")[0]);
+		ToolResponse turned = tools.correct(id, swap, Optional.of("the text says my father"));
+		assertFalse(turned.isError(), text(turned));
+		Map<String, Object> replacement = (Map<String, Object>) result(turned).get("replacement");
+		assertTrue(replacement.get("rendering").toString().startsWith("Direction Father is "), replacement.toString());
+		assertTrue(
+				replacement.get("direction").toString().contains("\"subject\": \""
+						+ fact.get("rendering").toString().split(" is ")[0] + "\", \"object\": \"Direction Father\""),
+				replacement.toString());
+
+		// No direction where the sides cannot swap (a person in a place) or the relation is symmetric.
+		ToolResponse job = remember("Ulla Qvist lives in Testholm.",
+				Map.of("entities",
+						List.of(Map.of("name", "Ulla Qvist", "type", "person"),
+								Map.of("name", "Testholm", "type", "place")),
+						"facts",
+						List.of(Map.of("subject", "Ulla Qvist", "predicate", "lives_in", "object", "Testholm"))),
+				"tools-direction-2");
+		assertFalse(job.isError(), text(job));
+		List<Map<String, Object>> jobFacts = (List<Map<String, Object>>) ((Map<String, Object>) result(job)
+				.get("stored")).get("facts");
+		assertFalse(jobFacts.isEmpty(), text(job));
+		Map<String, Object> jobFact = jobFacts.getFirst();
+		assertFalse(jobFact.containsKey("direction"), jobFact.toString());
+		ToolResponse wife = remember(
+				"Ulla Qvist is married to Per Brorsson.", Map.of("facts", List.of(Map.of("subject", "Per Brorsson",
+						"predicate", "spouse_of", "object", "Ulla Qvist", "qualifier", "husband"))),
+				"tools-direction-3");
+		assertFalse(wife.isError(), text(wife));
+		Map<String, Object> wifeFact = ((List<Map<String, Object>>) ((Map<String, Object>) result(wife).get("stored"))
+				.get("facts")).getFirst();
+		assertFalse(wifeFact.containsKey("direction"), wifeFact.toString());
+	}
+
+	@Test
+	void aReadRepeatedVerbatimGetsANoteUntilSomethingIsWritten() {
+		// A weaker model re-issues the same recall until it runs out of calls; the note stops it (2026-09-24).
+		assertFalse(remember("Repeat Tester likes pears.", null, "tools-repeat-1").isError());
+		ToolResponse first = tools.recall(Optional.of("Repeat Tester pears"), NONE, Optional.of(400), Optional.empty(),
+				Optional.empty(), null);
+		assertTrue(text(first).startsWith("recall: \"Repeat Tester pears\""), text(first));
+		ToolResponse again = tools.recall(Optional.of("Repeat Tester pears"), NONE, Optional.of(400), Optional.empty(),
+				Optional.empty(), null);
+		assertFalse(again.isError(), text(again));
+		assertEquals(MnemicTools.REPEATED_NOTE, text(again));
+		// A different question, or anything written since, is answered in full.
+		ToolResponse other = tools.recall(Optional.of("Repeat Tester apples"), NONE, Optional.of(400), Optional.empty(),
+				Optional.empty(), null);
+		assertTrue(text(other).startsWith("recall: \"Repeat Tester apples\""), text(other));
+		ToolResponse back = tools.recall(Optional.of("Repeat Tester pears"), NONE, Optional.of(400), Optional.empty(),
+				Optional.empty(), null);
+		assertTrue(text(back).startsWith("recall: \"Repeat Tester pears\""), "not consecutive: " + text(back));
+		assertFalse(remember("Repeat Tester likes plums too.", null, "tools-repeat-2").isError());
+		ToolResponse afterWrite = tools.recall(Optional.of("Repeat Tester pears"), NONE, Optional.of(400),
+				Optional.empty(), Optional.empty(), null);
+		assertTrue(text(afterWrite).startsWith("recall: \"Repeat Tester pears\""), text(afterWrite));
+		// inspect the same way, as a result object.
+		ToolResponse look = tools.inspect("registry", Optional.empty(), NONE, null);
+		assertFalse(look.isError(), text(look));
+		ToolResponse lookAgain = tools.inspect("registry", Optional.empty(), NONE, null);
+		assertEquals(true, result(lookAgain).get("repeated"), text(lookAgain));
+		// An error repeated is an error again: its message is what says what to change.
+		assertTrue(tools.inspect("", Optional.empty(), NONE, null).isError());
+		assertTrue(tools.inspect("", Optional.empty(), NONE, null).isError(), "an error is not memoised");
 	}
 
 	private static String text(ToolResponse r) {
@@ -482,9 +579,9 @@ class MnemicToolsTest {
 										"sister"))),
 				"tools-nibling-2");
 		assertFalse(family.isError(), text(family));
-		String aunt = text(tools.inspect("Nibtest Aunt", Optional.empty(), NONE));
+		String aunt = text(tools.inspect("Nibtest Aunt", Optional.empty(), NONE, null));
 		assertTrue(aunt.contains("Nibtest Aunt is Nibtest Kid's aunt\""), "the sister role implies female: " + aunt);
-		String kid = text(tools.inspect("Nibtest Kid", Optional.empty(), NONE));
+		String kid = text(tools.inspect("Nibtest Kid", Optional.empty(), NONE, null));
 		assertTrue(kid.contains("Nibtest Kid is Nibtest Aunt's nibling"), "no gender for the kid yet: " + kid);
 		ToolResponse nephew = remember("Nibtest Kid is Nibtest Aunt's nephew.", Map.of("entities",
 				List.of(Map.of("ref", "e1", "name", "Nibtest Kid", "type", "person"),
@@ -497,10 +594,10 @@ class MnemicToolsTest {
 		assertTrue(gaps.contains("\"attribute_unknown\":[]"), "both have a gender by implication: " + gaps);
 		// The implied values stand as facts: asked about, and shown with what implies them.
 		String asked = text(tools.recall(Optional.of("what is Nibtest Kid's gender"), NONE, Optional.of(400),
-				Optional.empty(), Optional.empty()));
+				Optional.empty(), Optional.empty(), null));
 		assertTrue(asked.contains("Nibtest Kid is male"), asked);
-		assertTrue(text(tools.inspect("Nibtest Aunt", Optional.empty(), NONE)).contains("Nibtest Aunt is female"),
-				text(tools.inspect("Nibtest Aunt", Optional.empty(), NONE)));
+		assertTrue(text(tools.inspect("Nibtest Aunt", Optional.empty(), NONE, null)).contains("Nibtest Aunt is female"),
+				text(tools.inspect("Nibtest Aunt", Optional.empty(), NONE, null)));
 	}
 
 	@Test
@@ -557,7 +654,7 @@ class MnemicToolsTest {
 		ToolResponse gone = tools.forget(lone, Optional.empty());
 		assertFalse(gone.isError(), text(gone));
 		assertEquals(true, result(gone).get("removed"), text(gone));
-		assertTrue(tools.inspect(lone, Optional.empty(), NONE).isError(), "gone for good");
+		assertTrue(tools.inspect(lone, Optional.empty(), NONE, null).isError(), "gone for good");
 	}
 
 	@Test
@@ -576,34 +673,35 @@ class MnemicToolsTest {
 		@SuppressWarnings("unchecked")
 		String evt = (String) ((List<Map<String, Object>>) ((Map<?, ?>) result(second).get("stored")).get("events"))
 				.getFirst().get("id");
-		Map<String, Object> shown = result(tools.inspect(evt, Optional.empty(), NONE));
+		Map<String, Object> shown = result(tools.inspect(evt, Optional.empty(), NONE, null));
 		assertEquals(2, ((List<?>) shown.get("observations")).size(), shown.toString());
 		assertEquals(shown.get("observation"), ((List<?>) shown.get("observations")).getFirst(), "its home first");
 	}
 
 	@Test
 	void groupsAndLastingGoThroughTheTools() {
-		Map<String, Object> registry = result(tools.inspect("registry", Optional.empty(), NONE));
+		Map<String, Object> registry = result(tools.inspect("registry", Optional.empty(), NONE, null));
 		String groups = registry.get("groups").toString();
 		assertTrue(groups.contains("id=group:family") && groups.contains("parent_of"), groups);
-		ToolResponse family = tools.inspect("group:family", Optional.empty(), NONE);
+		ToolResponse family = tools.inspect("group:family", Optional.empty(), NONE, null);
 		assertFalse(family.isError(), text(family));
 		assertTrue(result(family).get("members").toString().contains("sibling_of"), text(family));
 		ToolResponse c = tools.correct("group:family",
 				Map.of("lexicon", List.of("family", "families", "relatives", "kin", "clan")), Optional.of("clan too"));
 		assertFalse(c.isError(), text(c));
-		assertTrue(text(tools.inspect("group:family", Optional.empty(), NONE)).contains("clan"));
-		assertTrue(tools.inspect("group:nope", Optional.empty(), NONE).isError());
+		assertTrue(text(tools.inspect("group:family", Optional.empty(), NONE, null)).contains("clan"));
+		assertTrue(tools.inspect("group:nope", Optional.empty(), NONE, null).isError());
 		assertTrue(tools.correct("group:nope", Map.of("lexicon", List.of("x")), NONE).isError());
 		// A predicate's groups and its lasting flag are correctable by the same id scheme, and shown.
 		ToolResponse p = tools.correct("pred:knows", Map.of("lasting", true, "groups", List.of("acquaintance")),
 				Optional.of("a friend stays a friend"));
 		assertFalse(p.isError(), text(p));
-		Map<String, Object> knows = result(tools.inspect("pred:knows", Optional.empty(), NONE));
+		Map<String, Object> knows = result(tools.inspect("pred:knows", Optional.empty(), NONE, null));
 		assertEquals(true, knows.get("lasting"));
-		assertEquals(false, result(tools.inspect("pred:spouse_of", Optional.empty(), NONE)).get("lasting"),
+		assertEquals(false, result(tools.inspect("pred:spouse_of", Optional.empty(), NONE, null)).get("lasting"),
 				"said either way, so a client can tell not lasting from not known");
-		assertFalse(result(tools.inspect("pred:spouse_of", Optional.empty(), NONE)).containsKey("lasting_assumed"),
+		assertFalse(
+				result(tools.inspect("pred:spouse_of", Optional.empty(), NONE, null)).containsKey("lasting_assumed"),
 				"the seed decided");
 		assertFalse(knows.containsKey("lasting_assumed"), "a correction decided");
 		// A definition that says nothing about lasting is answered with what was assumed, and inspect shows it.
@@ -618,17 +716,17 @@ class MnemicToolsTest {
 		String definitions = String.valueOf(result(coached).get("definitions"));
 		assertTrue(definitions.contains("coached_by_tool") && definitions.contains("lasting=false")
 				&& definitions.contains("correct(\"pred:coached_by_tool\", {\"lasting\": true})"), definitions);
-		Map<String, Object> coachedBy = result(tools.inspect("pred:coached_by_tool", Optional.empty(), NONE));
+		Map<String, Object> coachedBy = result(tools.inspect("pred:coached_by_tool", Optional.empty(), NONE, null));
 		assertEquals(false, coachedBy.get("lasting"));
 		assertEquals(true, coachedBy.get("lasting_assumed"));
 		assertEquals(List.of("acquaintance"), knows.get("groups"));
-		assertFalse(tools.inspect("group:acquaintance", Optional.empty(), NONE).isError(),
+		assertFalse(tools.inspect("group:acquaintance", Optional.empty(), NONE, null).isError(),
 				"registered from its first mention");
 		// A comma-separated string is a list too, as everywhere else in correct.
 		ToolResponse two = tools.correct("pred:knows", Map.of("groups", "acquaintance, contacts"), NONE);
 		assertFalse(two.isError(), text(two));
 		assertEquals(List.of("acquaintance", "contacts"),
-				result(tools.inspect("pred:knows", Optional.empty(), NONE)).get("groups"));
+				result(tools.inspect("pred:knows", Optional.empty(), NONE, null)).get("groups"));
 	}
 
 	@Test
@@ -643,16 +741,21 @@ class MnemicToolsTest {
 		// Claude Code puts every server's instructions in one block of about 4 KB and cuts the rest silently
 		// (anthropics/claude-code#43474), so with other servers configured only a short text arrives whole.
 		assertTrue(served.length() <= 2000, "instructions are " + served.length() + " chars; keep them under 2000");
+		// The four rules a proposal cannot do without ride in the instructions, so the guide is optional reading.
+		assertTrue(served.contains("considering") && served.contains("negated") && served.contains("ISO")
+				&& served.contains("kinship"), served);
+		assertTrue(Protocol.guide().length() <= 4500, "the guide is " + Protocol.guide().length() + " chars; a "
+				+ "session fetches it whole, keep it under 4500");
 		// The guide is fetched through inspect, and is the other file whole.
-		ToolResponse guide = tools.inspect("guide", Optional.empty(), NONE);
+		ToolResponse guide = tools.inspect("guide", Optional.empty(), NONE, null);
 		assertFalse(guide.isError(), text(guide));
 		assertEquals(Protocol.guide(), result(guide).get("text"));
 		assertTrue(Protocol.guide().contains("## Vocabulary") && Protocol.guide().contains("lasting: true"));
 		assertFalse(Protocol.guide().contains("RECALL BEFORE YOU ANSWER"), "the loop is not repeated in the guide");
 		// An assistant that reads only the tool descriptions is still told where the guide is.
 		assertTrue(ToolDescriptions.INSPECT.contains("'guide'"), ToolDescriptions.INSPECT);
-		assertTrue(tools.inspect("", Optional.empty(), NONE).isError());
-		assertTrue(text(tools.inspect("", Optional.empty(), NONE)).contains("'guide'"), "the id list names it");
+		assertTrue(tools.inspect("", Optional.empty(), NONE, null).isError());
+		assertTrue(text(tools.inspect("", Optional.empty(), NONE, null)).contains("'guide'"), "the id list names it");
 	}
 
 	@Test
@@ -668,10 +771,10 @@ class MnemicToolsTest {
 		ToolResponse stored = tools.remember(Optional.of("Our hound is called Bello."), NONE, NONE, NONE,
 				Optional.empty(), NONE, NONE, proposal, Optional.empty(), Optional.of("type-from-predicate"), null);
 		assertFalse(stored.isError(), text(stored));
-		Map<String, Object> pred = result(tools.inspect("pred:keeps_pet", Optional.empty(), NONE));
+		Map<String, Object> pred = result(tools.inspect("pred:keeps_pet", Optional.empty(), NONE, null));
 		assertEquals(List.of("person"), pred.get("domain"), pred.toString());
 		assertEquals(List.of("critter"), pred.get("range"), pred.toString());
-		assertFalse(tools.inspect("type:critter", Optional.empty(), NONE).isError(),
+		assertFalse(tools.inspect("type:critter", Optional.empty(), NONE, null).isError(),
 				"named by the range, so it exists");
 		// The mismatch (a hound is not known to be a critter) is asked, and the offered kind can be chosen.
 		@SuppressWarnings("unchecked")
@@ -681,7 +784,7 @@ class MnemicToolsTest {
 		ToolResponse answered = tools.remember(NONE, NONE, NONE, NONE, Optional.empty(), NONE, NONE, null,
 				Optional.empty(), NONE, List.of(Map.of("question_id", mismatch.get("id"), "choice", "kind:critter")));
 		assertFalse(answered.isError(), text(answered));
-		assertEquals("critter", result(tools.inspect("type:hound", Optional.empty(), NONE)).get("parent"));
+		assertEquals("critter", result(tools.inspect("type:hound", Optional.empty(), NONE, null)).get("parent"));
 	}
 
 	@Test
@@ -709,8 +812,8 @@ class MnemicToolsTest {
 		assertTrue(out.get("resolved").toString().contains("answered"), "the answer was applied: " + out);
 		assertTrue(((List<?>) out.getOrDefault("questions", List.of())).isEmpty(),
 				"the new reading resolves to the entity the answer created: " + out);
-		Map<String, Object> ingrid = result(tools.inspect("Ingrid", Optional.empty(), NONE));
-		Map<String, Object> lund = result(tools.inspect("Ingrid Lund", Optional.empty(), NONE));
+		Map<String, Object> ingrid = result(tools.inspect("Ingrid", Optional.empty(), NONE, null));
+		Map<String, Object> lund = result(tools.inspect("Ingrid Lund", Optional.empty(), NONE, null));
 		assertNotEquals(ingrid.get("id"), lund.get("id"), "a new Ingrid, as answered: " + ingrid + " / " + lund);
 		assertTrue(ingrid.get("facts").toString().contains("works_at"), "the re-reading's fact is on her: " + ingrid);
 		assertFalse(lund.get("facts").toString().contains("works_at"), "and not on Ingrid Lund: " + lund);
@@ -733,17 +836,17 @@ class MnemicToolsTest {
 		ToolResponse stored = remember("The plate for the Polestar is SZ 121742.", plate, "namesake-2");
 		assertFalse(stored.isError(), text(stored));
 		String block = text(tools.recall(Optional.of("What is the registration plate for the Polestar again?"), NONE,
-				Optional.of(600), Optional.empty(), Optional.empty()));
+				Optional.of(600), Optional.empty(), Optional.empty(), null));
 		assertTrue(block.contains("structured: matched"), block);
 		assertTrue(block.contains("SZ 121742"), block);
 		assertTrue(block.contains("'Polestar' read as Polestar 4 Long Range Dual Motor Prime"), block);
 		// Asked about the organization with a predicate that does apply to it, the organization answers as before.
 		String org = text(tools.recall(Optional.of("what does Mattias use"), NONE, Optional.of(400), Optional.empty(),
-				Optional.empty()));
+				Optional.empty(), null));
 		assertTrue(org.contains("uses Polestar") || org.contains("uses → 1 fact"), org);
 		// And a name with no namesake of the right kind is still a MISS, not a guess.
 		String miss = text(tools.recall(Optional.of("what is the registration plate for Hooli"), NONE, Optional.of(400),
-				Optional.empty(), Optional.empty()));
+				Optional.empty(), Optional.empty(), null));
 		assertTrue(miss.contains("MISS") || miss.contains("unresolved"), miss);
 	}
 
@@ -787,16 +890,102 @@ class MnemicToolsTest {
 		assertFalse(both.isError(), text(both));
 		assertTrue(text(both).contains("\"status\":\"answered\""), text(both));
 		// Through inspect: the question shows what answered it, the fact's changes say a person did.
-		String question = text(tools.inspect(q, Optional.empty(), NONE));
+		String question = text(tools.inspect(q, Optional.empty(), NONE, null));
 		assertTrue(question.contains("\"answer\":\"both\""), question);
 		String pendingRef = questions.getFirst().get("pending").toString();
-		String fact = text(tools.inspect(pendingRef, Optional.empty(), NONE));
+		String fact = text(tools.inspect(pendingRef, Optional.empty(), NONE, null));
 		assertTrue(fact.contains("\"kind\":\"nested\"") && fact.contains("user: both; stands beside"), fact);
 		String block = text(tools.recall(Optional.of("where does Ossian Nyberg live"), NONE, Optional.of(600),
-				Optional.empty(), Optional.empty()));
+				Optional.empty(), Optional.empty(), null));
 		assertTrue(block.contains("lives in Küssnacht am Rigi") && block.contains("lives in Gschweighusweg 20b"),
 				block);
 		assertFalse(block.contains("pending"), block);
+	}
+
+	@Test
+	@SuppressWarnings("unchecked")
+	void aQuestionOpenedWhileAnsweringIsReportedWithTheAnswer() {
+		// A held fact applied by an answer can open a question of its own (here a conflict): it is reported at the top
+		// of the reply that answered, not left for status to reveal (2026-09-23).
+		remember("Ylva Strand lives in Lund.",
+				Map.of("entities",
+						List.of(Map.of("ref", "e1", "name", "Ylva Strand", "type", "person"),
+								Map.of("ref", "e2", "name", "Lund", "type", "place")),
+						"facts", List.of(Map.of("subject", "e1", "predicate", "lives_in", "object", "e2"))),
+				"opened-1");
+		ToolResponse held = remember("Ylva lives in Malmö now.",
+				Map.of("entities",
+						List.of(Map.of("ref", "e1", "name", "Ylva", "type", "person"),
+								Map.of("ref", "e2", "name", "Malmö", "type", "place")),
+						"facts", List.of(Map.of("subject", "e1", "predicate", "lives_in", "object", "e2"))),
+				"opened-2");
+		List<Map<String, Object>> asked = (List<Map<String, Object>>) result(held).get("questions");
+		Map<String, Object> who = asked.stream().filter(q -> "entity_resolution".equals(q.get("kind"))).findFirst()
+				.orElseThrow(() -> new AssertionError(text(held)));
+		String candidate = ((List<Map<String, Object>>) who.get("candidates")).stream().map(c -> c.get("id").toString())
+				.filter(id -> id.startsWith("ent-")).findFirst().orElseThrow();
+		ToolResponse answered = tools.remember(NONE, NONE, NONE, NONE, Optional.empty(), NONE, NONE, null,
+				Optional.empty(), Optional.of("opened-3"),
+				List.of(Map.of("question_id", who.get("id").toString(), "choice", candidate)));
+		assertFalse(answered.isError(), text(answered));
+		List<Map<String, Object>> opened = (List<Map<String, Object>>) result(answered).get("questions");
+		assertTrue(opened != null && opened.stream().anyMatch(q -> "conflict".equals(q.get("kind"))),
+				"the conflict the applied fact opened is in the answer's reply: " + text(answered));
+	}
+
+	@Test
+	void anEventIsMovedThroughCorrect() {
+		ToolResponse stored = remember("Pelle Wiklund moved to Tjörn in 2021.",
+				Map.of("entities",
+						List.of(Map.of("ref", "e1", "name", "Pelle Wiklund", "type", "person"),
+								Map.of("ref", "e2", "name", "Tjörn", "type", "place")),
+						"events", List.of(Map.of("ref", "ev1", "type", "moved", "participants", List.of("e1", "e2"),
+								"valid_time", Map.of("start", "2021")))),
+				"evt-move-1");
+		assertFalse(stored.isError(), text(stored));
+		@SuppressWarnings("unchecked")
+		String evt = ((List<Map<String, Object>>) ((Map<String, Object>) result(stored).get("stored")).get("events"))
+				.getFirst().get("id").toString();
+		ToolResponse moved = tools.correct(evt, Map.of("valid_time", Map.of("start", "2020-09")),
+				Optional.of("it was the autumn before"));
+		assertFalse(moved.isError(), text(moved));
+		assertTrue(text(moved).contains("\"after\"") && text(moved).contains("2020-09"), text(moved));
+		String inspected = text(tools.inspect(evt, Optional.empty(), NONE, null));
+		assertTrue(inspected.contains("2020-09"), inspected);
+		String home = text(tools.recall(Optional.of("where does Pelle Wiklund live"), NONE, Optional.of(400),
+				Optional.empty(), Optional.empty(), null));
+		assertTrue(home.contains("Tjörn") && home.contains("2020-09"), home);
+		ToolResponse refused = tools.correct(evt, Map.of("type", "relocated"), NONE);
+		assertTrue(refused.isError() && text(refused).contains("valid_time"), text(refused));
+	}
+
+	@Test
+	void aNameIsAnEntityInEveryToolAndAPredicateIsAlwaysPrefixed() {
+		// inspect reads a bare name as an entity; correct did too, except when it was a predicate. One rule now: a
+		// predicate is pred:<name> in both, and a bare predicate name is refused with the prefix (2026-09-23).
+		ToolResponse bare = tools.correct("works_at", Map.of("lexicon", List.of("job")), NONE);
+		assertTrue(bare.isError() && text(bare).contains("pred:works_at"), text(bare));
+		ToolResponse prefixed = tools.correct("pred:works_at", Map.of("lexicon", List.of("work", "works", "job")),
+				Optional.of("one more cue word"));
+		assertFalse(prefixed.isError(), text(prefixed));
+		// The replaced facts of a re-reading are described with the same word as stored facts: 'standing'.
+		ToolResponse first = remember("Nils Vik lives in Gävle.",
+				Map.of("entities",
+						List.of(Map.of("ref", "e1", "name", "Nils Vik", "type", "person"),
+								Map.of("ref", "e2", "name", "Gävle", "type", "place")),
+						"facts", List.of(Map.of("subject", "e1", "predicate", "lives_in", "object", "e2"))),
+				"rename-1");
+		String obs = result(first).get("observation_id").toString();
+		ToolResponse reread = tools.remember(NONE, Optional.of(obs), NONE, NONE, Optional.empty(), NONE, NONE,
+				Map.of("entities",
+						List.of(Map.of("ref", "e1", "name", "Nils Vik", "type", "person"),
+								Map.of("ref", "e2", "name", "Gävle", "type", "place")),
+						"facts", List.of(Map.of("subject", "e1", "predicate", "born_in", "object", "e2"))),
+				Optional.empty(), Optional.of("rename-2"), null);
+		assertFalse(reread.isError(), text(reread));
+		assertTrue(text(reread).contains("\"replaced\"") && text(reread).contains("\"standing\""), text(reread));
+		assertFalse(text(reread).contains("\"status\":\"current\""),
+				"no second word for the same thing: " + text(reread));
 	}
 
 	@Test
@@ -815,7 +1004,7 @@ class MnemicToolsTest {
 										"Tjörn Varv", "valid_time", Map.of("start", "2010", "end", "2018-03")))),
 				"as-of-year");
 		ToolResponse r = tools.recall(Optional.of("where does Pelle Wiklund work"), Optional.of("2015"),
-				Optional.empty(), Optional.empty(), Optional.empty());
+				Optional.empty(), Optional.empty(), Optional.empty(), null);
 		assertFalse(r.isError(), text(r));
 		assertTrue(text(r).contains("as of 2015-12-31"), text(r));
 	}

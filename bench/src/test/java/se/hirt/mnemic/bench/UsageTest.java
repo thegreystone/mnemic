@@ -29,6 +29,13 @@
 package se.hirt.mnemic.bench;
 
 import org.junit.jupiter.api.Test;
+import se.hirt.mnemic.model.ChatModel.AssistantMessage;
+import se.hirt.mnemic.model.ChatModel.Message;
+import se.hirt.mnemic.model.ChatModel.ToolCall;
+import se.hirt.mnemic.model.ChatModel.ToolResultMessage;
+import se.hirt.mnemic.model.ChatModel.Turn;
+import se.hirt.mnemic.model.ChatModel.UserMessage;
+import java.util.ArrayList;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -67,6 +74,16 @@ class UsageTest {
 		assertTrue(keyed.slip());
 		assertEquals("recall", keyed.tool());
 		assertEquals("my mother", keyed.arguments().get("query"));
+		Usage.Action bare = Usage.parse("{\"recall\": \"who is my mother\"}", Set.of("recall", "remember"));
+		assertTrue(bare.isCall(), "a bare string is the tool's main argument");
+		assertTrue(bare.slip());
+		assertEquals("who is my mother", bare.arguments().get("query"));
+		Usage.Action flat = Usage.parse("{\"recall\":\"query\":\"When is the Zenit 4 delivery expected?\"}",
+				Set.of("recall"));
+		assertTrue(flat.isCall(), "an argument object without its braces is still the call");
+		assertEquals("When is the Zenit 4 delivery expected?", flat.arguments().get("query"));
+		Usage.Action bareRef = Usage.parse("{\"inspect\": \"f-2\"}", Set.of("inspect"));
+		assertEquals("f-2", bareRef.arguments().get("ref"));
 		Usage.Action unknown = Usage.parse("{\"recall\": {\"query\": \"x\"}}", Set.of("remember"));
 		assertFalse(unknown.isCall(), "an unknown key is not a call");
 		Usage.Action broken = Usage.parse("{\"reply\":\"Line one.\\nIs that right?\\\"}", Set.of("recall"));
@@ -193,6 +210,29 @@ class UsageTest {
 	}
 
 	@Test
+	void templateAndTagWrappersAroundACallAreReadThrough() {
+		// What Haiku 4.5 wrote on 2026-09-23 in place of the wrapper the harness asks for: three dialects, one call.
+		Set<String> tools = Set.of("recall", "remember");
+		Usage.Action jinja = Usage.parse("{% call_tool \"recall\", {\"query\": \"where does Bo Berg work\"} %}", tools);
+		assertEquals("recall", jinja.tool(), jinja.toString());
+		assertEquals("where does Bo Berg work", jinja.arguments().get("query"));
+		assertTrue(jinja.slip());
+		Usage.Action raw = Usage.parse(
+				"{% raw %}\n{\"tool\": \"recall\", \"arguments\": {\"query\": \"who owns the parser\"}}\n{% endraw %}",
+				tools);
+		assertEquals("recall", raw.tool(), raw.toString());
+		assertEquals("who owns the parser", raw.arguments().get("query"));
+		Usage.Action tagged = Usage
+				.parse("I'll store this.\n<function_calls>\n[{\"tool\": \"remember\", \"arguments\": "
+						+ "{\"text\": \"I'm flying to Tokyo.\"}}]\n</function_calls>", tools);
+		assertEquals("remember", tagged.tool(), tagged.toString());
+		assertEquals("I'm flying to Tokyo.", tagged.arguments().get("text"));
+		// A reply that merely mentions a template tag in prose is still a reply.
+		Usage.Action prose = Usage.parse("{\"reply\": \"Use {% raw %} in Jinja to escape.\"}", tools);
+		assertEquals("Use {% raw %} in Jinja to escape.", prose.reply());
+	}
+
+	@Test
 	void aStoppedRunResumesAfterItsFinishedScenarios() {
 		// Two scenarios of two steps: the first finished, the second cut off after one step (an API limit, say).
 		var a = new Usage.Scenario("a", "Mattias Sandell", "",
@@ -208,6 +248,27 @@ class UsageTest {
 				List.of(new Usage.Step("x", null, null, "fact", false), new Usage.Step("y", null, null, "fact", false),
 						new Usage.Step(null, "q", "e", "fact", false)));
 		assertEquals(Set.of(), Usage.completedScenarios(trace, List.of(grown, b)));
+	}
+
+	@Test
+	void theConversationIsTrimmedByWholeUserTurns() {
+		// Old turns fall off the front, and what remains starts with a user message, its calls still answered.
+		var messages = new ArrayList<Message>();
+		String big = "x".repeat(9000);
+		for (int i = 0; i < 4; i++) {
+			messages.add(new UserMessage("turn " + i));
+			Turn call = new Turn("", List.of(new ToolCall("c" + i, "recall", Map.of("query", "q" + i))));
+			messages.add(new AssistantMessage(call));
+			messages.add(new ToolResultMessage("c" + i, "recall", big));
+			messages.add(new AssistantMessage(new Turn("answer " + i, List.of())));
+		}
+		List<Message> kept = Usage.trimmed(messages);
+		assertTrue(kept.size() < messages.size(), "something was dropped");
+		assertTrue(kept.getFirst() instanceof UserMessage, kept.getFirst().toString());
+		assertEquals("turn 2", ((UserMessage) kept.getFirst()).text());
+		assertEquals(8, kept.size(), "the last two turns whole");
+		// A short conversation is left alone.
+		assertEquals(4, Usage.trimmed(messages.subList(0, 4)).size());
 	}
 
 	@Test

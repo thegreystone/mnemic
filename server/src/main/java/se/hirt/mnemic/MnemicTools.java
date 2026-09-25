@@ -28,6 +28,7 @@
  */
 package se.hirt.mnemic;
 
+import io.quarkiverse.mcp.server.McpConnection;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
 import io.quarkiverse.mcp.server.ToolResponse;
@@ -71,6 +72,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import java.util.Set;
 
 /**
@@ -83,6 +88,15 @@ public class MnemicTools {
 
 	@Inject
 	Engine engine;
+
+	/** The last read each session made, with the write generation it saw; see {@link #unlessRepeated}. */
+	private final ConcurrentHashMap<String, String> lastRead = new ConcurrentHashMap<>();
+
+	/** Bumped by every write, in any session, so a read after one is never a repeat. */
+	private final AtomicLong writes = new AtomicLong();
+
+	static final String REPEATED_NOTE = "(the same call as the one above, with nothing changed since: its result is "
+			+ "the one already shown; reply to the user from it, or make a different call)";
 
 	@Inject
 	MnemicConfig config;
@@ -110,6 +124,7 @@ public class MnemicTools {
 		@ToolArg(description = "Client-generated key; repeating a call with the same key returns the same id")
 		Optional<String> idempotency_key, @ToolArg(required = false, description = ToolDescriptions.REMEMBER_RESOLVE)
 		List<Map<String, Object>> resolve) {
+		writes.incrementAndGet();
 		return ToolSupport.json("remember", () -> {
 			Proposal.Parsed parsed = Engine.proposalWithWarnings(proposal);
 			List<Resolve> resolves = (resolve == null ? List.<Map<String, Object>> of() : resolve).stream().map(m -> {
@@ -132,22 +147,29 @@ public class MnemicTools {
 				// Answers given with a re-reading are given first, so that what they create (a new entity, an alias)
 				// is there when the new reading resolves its names. Ignoring them silently sent one assistant round
 				// the same question three times (2026-09-22).
+				Set<Long> before = openQuestionIds();
 				List<Map<String, Object>> answered = resolves.isEmpty() ? List.of() : engine.answer(resolves);
 				Map<String, Object> out = attached(parseId(observation_id.get(), "obs-"), parsed);
 				if (!answered.isEmpty()) {
 					out.put("resolved", answered);
 				}
+				questionsOpened(out, before);
 				return out;
 			}
 			if ((text.isEmpty() || text.get().isBlank()) && parsed == null && !resolves.isEmpty()) {
-				// Answers alone: nothing to observe, the answers live on the questions.
+				// Answers alone: nothing to observe, the answers live on the questions. What an answer opens (a held
+				// fact that conflicts, a predicate it names) is reported here like any other question: an assistant
+				// found one only through status (2026-09-23).
+				Set<Long> before = openQuestionIds();
 				var out = new LinkedHashMap<String, Object>();
 				out.put("resolved", engine.answer(resolves));
+				questionsOpened(out, before);
 				out.put("pending_proposals", engine.observations().pendingProposals());
 				return out;
 			}
 			Source source = new Source(source_kind.orElse("user"), source_ref.orElse(null), source_chunk.orElse(null),
 					null, session.orElse(null));
+			Set<Long> before = openQuestionIds();
 			RememberOutcome o = engine.remember(text.orElse(null), source,
 					observed_at.map(MnemicTools::instant).orElse(null), parsed == null ? null : parsed.proposal(),
 					spec_version.orElse(null), idempotency_key.orElse(null), resolves);
@@ -170,9 +192,37 @@ public class MnemicTools {
 			}
 			warnings.addAll(a.warnings());
 			out.put("warnings", warnings);
+			questionsOpened(out, before);
 			out.put("pending_proposals", o.observation().pendingProposals());
 			return out;
 		});
+	}
+
+	/** The ids of the questions open now, taken before a call so that what the call opens can be reported. */
+	private Set<Long> openQuestionIds() {
+		return engine.questions().open(500).stream().map(Question::id).collect(Collectors.toSet());
+	}
+
+	/**
+	 * Puts every question open now that was not open before the call under 'questions', beside those the reply already
+	 * lists: one place to look, whatever opened them (a proposal, an answer applying a held fact, a correction).
+	 */
+	@SuppressWarnings("unchecked")
+	private void questionsOpened(Map<String, Object> out, Set<Long> before) {
+		var listed = new ArrayList<Map<String, Object>>();
+		Object already = out.get("questions");
+		if (already instanceof List<?> l) {
+			l.forEach(q -> listed.add((Map<String, Object>) q));
+		}
+		Set<Object> ids = listed.stream().map(q -> q.get("id")).collect(Collectors.toSet());
+		for (Question q : engine.questions().open(500)) {
+			if (!before.contains(q.id()) && !ids.contains(q.ref())) {
+				listed.add(q.toMap());
+			}
+		}
+		if (!listed.isEmpty() || out.containsKey("questions")) {
+			out.put("questions", listed);
+		}
 	}
 
 	/** A reading for an observation: its first, or one that replaces what it had. */
@@ -208,16 +258,17 @@ public class MnemicTools {
 		Optional<Integer> limit,
 		@ToolArg(description = "Also return ended and superseded facts (default false); past tense in the "
 				+ "question usually means yes")
-		Optional<Boolean> include_history) {
-		return ToolSupport.text("recall", () -> {
-			if (query.isEmpty() || query.get().isBlank()) {
-				return engine.briefing(max_tokens.orElse(RecallService.DEFAULT_MAX_TOKENS));
-			}
-			RecallResult r = engine.recall().recall(query.get(), as_of.map(MnemicTools::instant).orElse(null),
-					max_tokens.orElse(RecallService.DEFAULT_MAX_TOKENS), limit.orElse(10),
-					include_history.orElse(false));
-			return r.text();
-		});
+		Optional<Boolean> include_history, McpConnection connection) {
+		return unlessRepeated(connection, "recall", List.of(query, as_of, max_tokens, limit, include_history),
+				() -> ToolSupport.text("recall", () -> {
+					if (query.isEmpty() || query.get().isBlank()) {
+						return engine.briefing(max_tokens.orElse(RecallService.DEFAULT_MAX_TOKENS));
+					}
+					RecallResult r = engine.recall().recall(query.get(), as_of.map(MnemicTools::instant).orElse(null),
+							max_tokens.orElse(RecallService.DEFAULT_MAX_TOKENS), limit.orElse(10),
+							include_history.orElse(false));
+					return r.text();
+				}));
 	}
 
 	@Tool(name = "inspect", description = ToolDescriptions.INSPECT, annotations = @Tool.Annotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
@@ -229,92 +280,106 @@ public class MnemicTools {
 				+ "(default false)")
 		Optional<Boolean> history,
 		@ToolArg(description = "For an entity with history: only this predicate, e.g. works_at")
-		Optional<String> predicate) {
-		return ToolSupport.json("inspect", () -> {
-			String r = ref == null ? "" : ref.trim();
-			if (r.isEmpty()) {
-				throw MnemicException.invalidArgument("'ref' is required: ent-12, a name, f-12, obs-12, evt-3, q-3, "
-						+ "pred:works_at, event:joined, type:place, group:family, 'registry', or 'guide'.");
-			}
-			if (r.equalsIgnoreCase("registry")) {
-				return registry();
-			}
-			if (r.equalsIgnoreCase("guide")) {
-				return Map.of("title", "Mnemic proposal guide", "text", Protocol.guide());
-			}
-			if (r.startsWith("f-")) {
-				return fact(parseId(r, "f-"));
-			}
-			if (r.startsWith("obs-")) {
-				return observation(parseId(r, "obs-"));
-			}
-			if (r.startsWith("evt-")) {
-				Event ev = engine.events().get(parseId(r, "evt-"))
-						.orElseThrow(() -> MnemicException.notFound("No event " + r));
-				return event(ev);
-			}
-			if (r.startsWith("q-")) {
-				return engine.questions().get(parseId(r, "q-")).map(Question::toMap)
-						.orElseThrow(() -> MnemicException.notFound("No question " + r));
-			}
-			if (r.startsWith("pred:")) {
-				return predicateEntry(r.substring(5));
-			}
-			if (r.startsWith("event:")) {
-				return eventTypeEntry(r.substring(6));
-			}
-			if (r.startsWith("type:")) {
-				return entityTypeEntry(r.substring(5));
-			}
-			if (r.startsWith("group:")) {
-				return groupEntry(r.substring(6));
-			}
-			Entity e = engine.entities().byRef(r).orElseThrow(() -> MnemicException
-					.notFound("No entity matches '" + r + "'. Try recall with the name to see what is known."));
-			return history.orElse(false) ? entityHistory(e, predicate.orElse(null)) : entity(e);
-		});
+		Optional<String> predicate, McpConnection connection) {
+		return unlessRepeated(connection, "inspect", List.of(String.valueOf(ref), history, predicate),
+				() -> ToolSupport.json("inspect", () -> {
+					String r = ref == null ? "" : ref.trim();
+					if (r.isEmpty()) {
+						throw MnemicException
+								.invalidArgument("'ref' is required: ent-12, a name, f-12, obs-12, evt-3, q-3, "
+										+ "pred:works_at, event:joined, type:place, group:family, 'registry', or 'guide'.");
+					}
+					if (r.equalsIgnoreCase("registry")) {
+						return registry();
+					}
+					if (r.equalsIgnoreCase("guide")) {
+						return Map.of("title", "Mnemic proposal guide", "text", Protocol.guide());
+					}
+					if (r.startsWith("f-")) {
+						return fact(parseId(r, "f-"));
+					}
+					if (r.startsWith("obs-")) {
+						return observation(parseId(r, "obs-"));
+					}
+					if (r.startsWith("evt-")) {
+						Event ev = engine.events().get(parseId(r, "evt-"))
+								.orElseThrow(() -> MnemicException.notFound("No event " + r));
+						return event(ev);
+					}
+					if (r.startsWith("q-")) {
+						return engine.questions().get(parseId(r, "q-")).map(Question::toMap)
+								.orElseThrow(() -> MnemicException.notFound("No question " + r));
+					}
+					if (r.startsWith("pred:")) {
+						return predicateEntry(r.substring(5));
+					}
+					if (r.startsWith("event:")) {
+						return eventTypeEntry(r.substring(6));
+					}
+					if (r.startsWith("type:")) {
+						return entityTypeEntry(r.substring(5));
+					}
+					if (r.startsWith("group:")) {
+						return groupEntry(r.substring(6));
+					}
+					Entity e = engine.entities().byRef(r).orElseThrow(() -> MnemicException
+							.notFound("No entity matches '" + r + "'. Try recall with the name to see what is known."));
+					return history.orElse(false) ? entityHistory(e, predicate.orElse(null)) : entity(e);
+				}));
 	}
 
 	@Tool(name = "correct", description = ToolDescriptions.CORRECT, annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
 	ToolResponse correct(
-		@ToolArg(description = "What to correct: f-12, obs-51, ent-12, pred:parent_of (or a bare predicate name), "
-				+ "event:purchased, type:canton")
-		String target,
-		@ToolArg(description = "The changed keys for the target; {\"wrong\": true} withdraws a fact, {\"retired\": "
-				+ "true|false} retires or reinstates an observation")
-		Map<String, Object> replacement, @ToolArg(description = "Why, in the user's words")
+		@ToolArg(description = "What to correct, as inspect names it: f-12, obs-51, ent-12, evt-3, pred:parent_of, "
+				+ "event:purchased, type:canton, group:family")
+		String ref,
+		@ToolArg(description = "The keys that change and their new values; {\"wrong\": true} withdraws a fact, "
+				+ "{\"retired\": true|false} retires or reinstates an observation")
+		Map<String, Object> changes, @ToolArg(description = "Why, in the user's words")
 		Optional<String> reason) {
+		writes.incrementAndGet();
 		return ToolSupport.json("correct", () -> {
-			String t = target == null ? "" : target.trim();
+			String t = ref == null ? "" : ref.trim();
 			String why = reason.orElse(null);
-			if (t.startsWith("f-")) {
-				return correctedFact(parseId(t, "f-"), replacement, why);
-			}
-			if (t.startsWith("obs-")) {
-				return correctedObservation(parseId(t, "obs-"), replacement, why);
-			}
-			if (t.startsWith("ent-")) {
-				return engine.correctEntity(parseId(t, "ent-"), replacement, why);
-			}
-			if (t.startsWith("pred:")) {
-				return engine.correctPredicate(t.substring(5), replacement, why);
-			}
-			if (t.startsWith("event:")) {
-				return engine.correctEventType(t.substring(6), replacement, why);
-			}
-			if (t.startsWith("type:")) {
-				return engine.correctEntityType(t.substring(5), replacement, why);
-			}
-			if (t.startsWith("group:")) {
-				return engine.correctGroup(t.substring(6), replacement, why);
-			}
-			if (!t.isEmpty() && engine.predicates().get(t).isPresent()) {
-				return engine.correctPredicate(t, replacement, why);
-			}
-			throw MnemicException
-					.invalidArgument("'" + t + "' names nothing to correct; pass f-12, obs-51, ent-12, pred:parent_of, "
-							+ "event:purchased, type:canton, or group:family.");
+			Set<Long> before = openQuestionIds();
+			Map<String, Object> out = corrected(t, changes, why);
+			questionsOpened(out, before);
+			return out;
 		});
+	}
+
+	private Map<String, Object> corrected(String t, Map<String, Object> replacement, String why) {
+		if (t.startsWith("f-")) {
+			return correctedFact(parseId(t, "f-"), replacement, why);
+		}
+		if (t.startsWith("obs-")) {
+			return correctedObservation(parseId(t, "obs-"), replacement, why);
+		}
+		if (t.startsWith("evt-")) {
+			return engine.correctEvent(parseId(t, "evt-"), replacement, why);
+		}
+		if (t.startsWith("ent-")) {
+			return engine.correctEntity(parseId(t, "ent-"), replacement, why);
+		}
+		if (t.startsWith("pred:")) {
+			return engine.correctPredicate(t.substring(5), replacement, why);
+		}
+		if (t.startsWith("event:")) {
+			return engine.correctEventType(t.substring(6), replacement, why);
+		}
+		if (t.startsWith("type:")) {
+			return engine.correctEntityType(t.substring(5), replacement, why);
+		}
+		if (t.startsWith("group:")) {
+			return engine.correctGroup(t.substring(6), replacement, why);
+		}
+		if (!t.isEmpty() && engine.predicates().get(t).isPresent()) {
+			// A bare name is an entity everywhere else; a predicate is named as inspect names it.
+			throw MnemicException.invalidArgument("'" + t + "' is a predicate: correct it as pred:" + t + ".");
+		}
+		throw MnemicException
+				.invalidArgument("'" + t + "' names nothing to correct; pass f-12, obs-51, ent-12, pred:parent_of, "
+						+ "evt-3, event:purchased, type:canton, or group:family.");
 	}
 
 	private Map<String, Object> correctedFact(long factId, Map<String, Object> replacement, String reason) {
@@ -334,7 +399,7 @@ public class MnemicTools {
 			out.put("covered_by", c.replacement() == null ? null : factSummary(c.replacement()));
 			out.put("reason", reason == null ? "a derivation covers it" : reason);
 		}
-		default -> out.put("replacement", factSummary(c.replacement()));
+		default -> out.put("replacement", factSummaryWithDirection(c.replacement()));
 		}
 		return out;
 	}
@@ -368,16 +433,16 @@ public class MnemicTools {
 
 	@Tool(name = "forget", description = ToolDescriptions.FORGET, annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = true, openWorldHint = false))
 	ToolResponse forget(
-		@ToolArg(description = "The observation id (obs-12), or an entity id (ent-12) to remove an "
-				+ "entity no fact or event names")
-		String observation_id, @ToolArg(required = false, description = ToolDescriptions.FORGET_KEEP_ENTITIES)
+		@ToolArg(description = "What to forget: an observation (obs-12), or an entity no fact or event names (ent-12)")
+		String ref, @ToolArg(required = false, description = ToolDescriptions.FORGET_KEEP_ENTITIES)
 		Optional<Boolean> keep_entities) {
+		writes.incrementAndGet();
 		return ToolSupport.json("forget", () -> {
-			String ref = observation_id == null ? "" : observation_id.trim();
-			if (ref.startsWith("ent-")) {
-				return engine.forgetEntity(parseId(ref, "ent-"));
+			String target = ref == null ? "" : ref.trim();
+			if (target.startsWith("ent-")) {
+				return engine.forgetEntity(parseId(target, "ent-"));
 			}
-			long id = parseId(ref, "obs-");
+			long id = parseId(target, "obs-");
 			boolean removed = engine.forget(id, keep_entities.orElse(false));
 			return Map.of("observation_id", "obs-" + id, "removed", removed, "kept_entities",
 					keep_entities.orElse(false));
@@ -389,6 +454,7 @@ public class MnemicTools {
 	Optional<Boolean> dry_run, @ToolArg(required = false, description = ToolDescriptions.CONSOLIDATE_RETIRE)
 	Optional<List<String>> retire, @ToolArg(required = false, description = ToolDescriptions.CONSOLIDATE_REBUILD)
 	Optional<Boolean> rebuild) {
+		writes.incrementAndGet();
 		return ToolSupport.json("consolidate", () -> {
 			List<Long> retireIds = retire.orElse(List.of()).stream().map(r -> parseId(r, "obs-")).toList();
 			var c = engine.consolidate(dry_run.orElse(false), retireIds, rebuild.orElse(false));
@@ -527,6 +593,31 @@ public class MnemicTools {
 		});
 	}
 
+	/**
+	 * A read repeated verbatim with nothing written since returns a note in place of its result. The result would be
+	 * the same, and a weaker model that re-issues a call until it runs out of calls stops on the note where it did not
+	 * stop on the block (Qwen 9B on the usage bench, 2026-09-24: cap hits 8 to 4, and the stronger models never repeat
+	 * a call). One memo per session and read; a write in any session clears them all. A caller with no connection (the
+	 * tests) is one session.
+	 */
+	private ToolResponse unlessRepeated(
+		McpConnection connection, String tool, List<?> args, Supplier<ToolResponse> call) {
+		String session = connection == null ? "" : connection.id();
+		String signature = tool + "|" + writes.get() + "|" + args;
+		if (signature.equals(lastRead.get(session))) {
+			return "recall".equals(tool) ? ToolSupport.text(tool, () -> REPEATED_NOTE)
+					: ToolSupport.json(tool, () -> Map.of("repeated", true, "note", REPEATED_NOTE));
+		}
+		ToolResponse response = call.get();
+		// An error is worth repeating: its message is what tells the caller what to change.
+		if (response.isError()) {
+			lastRead.remove(session);
+		} else {
+			lastRead.put(session, signature);
+		}
+		return response;
+	}
+
 	// ── reply shapes ────────────────────────────────────────────────────
 
 	/**
@@ -548,11 +639,19 @@ public class MnemicTools {
 				"resolution", e.resolution(), "score", e.score())).toList());
 		stored.put("events",
 				a.events().stream().map(e -> Map.of("ref", e.ref(), "id", e.id(), "type", e.type())).toList());
-		stored.put(
-				"facts", a
-						.facts().stream().map(f -> Map.of("id", f.id(), "predicate", f.predicate(), "rendering",
-								f.rendering(), "standing", standingOf(f.id()), "corroborated", f.corroborated()))
-						.toList());
+		var facts = new ArrayList<Map<String, Object>>();
+		for (var f : a.facts()) {
+			var m = new LinkedHashMap<String, Object>();
+			m.put("id", f.id());
+			m.put("predicate", f.predicate());
+			m.put("rendering", f.rendering());
+			m.put("standing", standingOf(f.id()));
+			m.put("corroborated", f.corroborated());
+			engine.facts().get(parseId(f.id(), "f-")).map(this::otherWayRound)
+					.ifPresent(hint -> m.put("direction", hint));
+			facts.add(m);
+		}
+		stored.put("facts", facts);
 		out.put("stored", stored);
 		if (!a.predicates().isEmpty()) {
 			out.put("predicates", a.predicates().stream()
@@ -567,6 +666,45 @@ public class MnemicTools {
 
 	private Map<String, Object> factSummary(Fact f) {
 		return Map.of("id", f.ref(), "predicate", f.predicate(), "standing", standing(f), "rendering", f.rendering());
+	}
+
+	/** A fact that stands, with the call that turns it around where the relation has a direction. */
+	private Map<String, Object> factSummaryWithDirection(Fact f) {
+		var m = new LinkedHashMap<>(factSummary(f));
+		String hint = otherWayRound(f);
+		if (hint != null) {
+			m.put("direction", hint);
+		}
+		return m;
+	}
+
+	/**
+	 * For a fact that could stand the other way round, the call that switches it, or null. The relation has a direction
+	 * (an entity on each side, not symmetric) and its domain and range admit the swap, which is read from the registry,
+	 * so a predicate the user defined or one registered from first use is covered as the seed kinship is. In the usage
+	 * bench two of three models wrote "my father is Konrad" with the parent as the object; the rendering told them it
+	 * was wrong, and they spent every call restating the values on record because nothing told them the move
+	 * (2026-09-24).
+	 */
+	private String otherWayRound(Fact f) {
+		if (f.objectId() == null) {
+			return null;
+		}
+		Predicate p = engine.predicates().get(f.predicate()).orElse(null);
+		if (p == null || p.symmetric()) {
+			return null;
+		}
+		Entity subject = engine.entities().get(f.subjectId()).orElse(null);
+		Entity object = engine.entities().get(f.objectId()).orElse(null);
+		if (subject == null || object == null || subject.id() == object.id()) {
+			return null;
+		}
+		EntityTypeRegistry types = engine.entityTypes();
+		if (!p.acceptsSubject(types.lineage(object.type())) || !p.acceptsObject(types.lineage(subject.type()))) {
+			return null;
+		}
+		return "to switch to the other way around use correct(\"" + f.ref() + "\", {\"subject\": \"" + object.name()
+				+ "\", \"object\": \"" + subject.name() + "\"})";
 	}
 
 	private Map<String, Object> entity(Entity e) {

@@ -200,10 +200,42 @@ public final class RecallService {
 		upcomingChannel(q, asOf, now, ch);
 		Ranking ranking = fuse(ch);
 		List<Hit> hits = budget(ranking, ch, q, s, maxTokens, limit, includeHistory);
+		if ("miss".equals(s.state()) && !hits.isEmpty()) {
+			// A miss is about the record's facts; the observations below may still say it in words (a marriage the
+			// reading mis-filed, so no step-parent was derived). Naming whom they mention lets the reader judge. A
+			// fact, never a nudge: told to "read them before saying not known", a weaker model invented a second
+			// marriage and stored it (Haiku on the stepmother, 2026-09-23).
+			List<String> mentioned = mentioned(hits, s, 6);
+			if (!mentioned.isEmpty()) {
+				s = s.withNote("the " + hits.size() + (hits.size() == 1 ? " observation" : " observations")
+						+ " below mention " + String.join(", ", mentioned));
+			}
+		}
 		String text = renderer.render(query, asOf, now, s, ch.events, hits, ranking.order.size(), ranking.used,
 				maxTokens, ranking.truncated, q.polar());
 		return new RecallResult(query, asOf, s, List.copyOf(ch.events), List.copyOf(hits), ranking.order.size(),
 				ranking.used, maxTokens, ranking.truncated, text);
+	}
+
+	/** The things the hits mention, by their anchoring facts and their text, other than the one asked about. */
+	private List<String> mentioned(List<Hit> hits, Structured s, int limit) {
+		var names = new LinkedHashSet<String>();
+		Long asked = s.entity() == null ? null : entities.byRef(s.entity()).map(Entity::id).orElse(null);
+		for (Hit h : hits) {
+			for (Fact f : h.facts()) {
+				for (Long id : new Long[] {f.subjectId(), f.objectId()}) {
+					if (id != null && !id.equals(asked)) {
+						names.add(entities.nameOf(id));
+					}
+				}
+			}
+			for (Entity e : entities.spot(h.observation().text())) {
+				if (asked == null || e.id() != asked) {
+					names.add(e.name());
+				}
+			}
+		}
+		return names.stream().limit(limit).toList();
 	}
 
 	private Gates gates(Query q, Structured s) {

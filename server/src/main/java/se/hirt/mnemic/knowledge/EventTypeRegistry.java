@@ -281,15 +281,15 @@ public final class EventTypeRegistry {
 			}
 			case "opens" -> {
 				old = Vocabulary.json(opens);
-				opens = predicates(c.getValue(), registered);
+				opens = predicates("opens", c.getValue(), registered);
 			}
 			case "closes" -> {
 				old = Vocabulary.json(closes);
-				closes = predicates(c.getValue(), registered);
+				closes = predicates("closes", c.getValue(), registered);
 			}
 			case "supersedes" -> {
 				old = Vocabulary.json(supersedes);
-				supersedes = predicates(c.getValue(), registered);
+				supersedes = predicates("supersedes", c.getValue(), registered);
 			}
 			case "ends_entity" -> {
 				old = String.valueOf(endsEntity);
@@ -364,11 +364,19 @@ public final class EventTypeRegistry {
 		return render.trim();
 	}
 
-	private static List<String> predicates(Object value, java.util.function.Predicate<String> registered) {
+	/**
+	 * The predicate names a list field holds. A value that is not a list of registered predicates is refused with the
+	 * field's shape: {@code {supersedes: true}} was answered "'true' is not a registered predicate" (2026-09-23).
+	 */
+	private static List<String> predicates(
+		String field, Object value, java.util.function.Predicate<String> registered) {
 		List<String> names = Vocabulary.strings(value).stream().map(String::trim).filter(s -> !s.isEmpty()).toList();
 		for (String p : names) {
 			if (!registered.test(p)) {
-				throw MnemicException.invalidArgument("'" + p + "' is not a registered predicate.");
+				throw MnemicException.invalidArgument("'" + field + "' takes a list of predicate names the event "
+						+ (field.equals("opens") ? "starts" : field.equals("closes") ? "ends" : "replaces the value of")
+						+ ", e.g. [\"owns\"]; '" + p + "' is not a registered predicate. To move an event to another "
+						+ "date, correct the event itself: correct(evt-N, {valid_time: {start: ...}}).");
 			}
 		}
 		return names;

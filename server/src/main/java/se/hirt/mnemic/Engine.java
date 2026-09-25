@@ -36,6 +36,8 @@ import se.hirt.mnemic.knowledge.Containment;
 import se.hirt.mnemic.knowledge.Deriver;
 import se.hirt.mnemic.knowledge.Rule;
 import se.hirt.mnemic.knowledge.Entity;
+import se.hirt.mnemic.knowledge.Bounds;
+import se.hirt.mnemic.knowledge.Event;
 import se.hirt.mnemic.knowledge.EntityService;
 import se.hirt.mnemic.knowledge.EntityTypeRegistry;
 import se.hirt.mnemic.knowledge.EventService;
@@ -575,7 +577,7 @@ public final class Engine implements AutoCloseable {
 			return retracted;
 		}
 		if (replacement == null || replacement.isEmpty()) {
-			throw MnemicException.invalidArgument("'replacement' must name what changes, e.g. {\"object\": "
+			throw MnemicException.invalidArgument("'changes' must name what changes, e.g. {\"object\": "
 					+ "\"Schübelbach\"} or {\"valid_time\": {\"start\": \"2014\"}} or {\"ended\": true}.");
 		}
 		Observation record = correctionRecord("Correction of " + about + why + " → " + Json.write(replacement), factId);
@@ -615,12 +617,72 @@ public final class Engine implements AutoCloseable {
 	}
 
 	/**
+	 * Moves an event to another date ({@code correct(evt-3, {valid_time: {start: "2027-06-19"}})}): the facts its
+	 * effects opened or closed move with it. The reason becomes a correction observation whose reading names the event
+	 * by key and the new date, so a rebuild moves it again. An assistant tried to move a wedding through its event type
+	 * and got a refusal about predicates (2026-09-23).
+	 */
+	public Map<String, Object> correctEvent(long eventId, Map<String, Object> replacement, String reason) {
+		Event ev = knowledge.events().get(eventId)
+				.orElseThrow(() -> MnemicException.notFound("No event evt-" + eventId));
+		if (replacement == null || !(replacement.get("valid_time") instanceof Map<?, ?> vt)
+				|| !replacement.keySet().equals(Set.of("valid_time"))) {
+			throw MnemicException.invalidArgument("An event is corrected by its date: {\"valid_time\": {\"start\": "
+					+ "\"2027-06-19\"}} (a year, a month, or a day; 'end' too for a span). To change what happened or who "
+					+ "took part, re-read its observation with remember(observation_id, proposal).");
+		}
+		var warnings = new ArrayList<String>();
+		Instant now = options.clock().instant();
+		Bounds b = Bounds.of(
+				new Proposal.ValidTime(vtText(vt.get("start")), vtText(vt.get("end")), vtText(vt.get("precision"))),
+				now, warnings);
+		if (b.start() == null && b.end() == null) {
+			throw MnemicException
+					.invalidArgument("'valid_time' names no date: give 'start' (2027-06-19, 2027-06, or 2027).");
+		}
+		if (java.util.Objects.equals(b.start(), ev.validStart()) && java.util.Objects.equals(b.end(), ev.validEnd())) {
+			throw MnemicException.invalidArgument("The correction changes nothing about " + ev.ref() + ": it is dated "
+					+ ev.validStart() + " already.");
+		}
+		String why = reason == null || reason.isBlank() ? "" : ": " + reason;
+		List<String> names = ev.participants().stream().map(id -> knowledge.entities().nameOf(id)).toList();
+		var reading = new LinkedHashMap<String, Object>();
+		reading.put("redates", Map.of("type", ev.type(), "participants", names, "valid_start",
+				ev.validStart() == null ? "" : ev.validStart()));
+		reading.put("valid_time", vt);
+		if (reason != null && !reason.isBlank()) {
+			reading.put("reason", reason);
+		}
+		Remembered r = observations.remember("Re-dating of " + ev.rendering() + why + " → " + Json.write(vt),
+				new Source("correction", ev.ref(), null, null, null), now, Json.write(reading), null, null);
+		Observation record = observations.get(r.observationId()).orElseThrow();
+		EventService.Redated moved = knowledge.factService().redate(eventId, b, record);
+		derive();
+		var out = new LinkedHashMap<String, Object>();
+		out.put("event", ev.ref());
+		out.put("before",
+				Map.of("valid_start", ev.validStart() == null ? "" : ev.validStart(), "rendering", moved.before()));
+		out.put("after", Map.of("valid_start", b.start() == null ? "" : b.start(), "rendering", moved.after()));
+		out.put("facts_moved", java.util.stream.Stream.concat(moved.opened().stream(), moved.closed().stream())
+				.map(id -> "f-" + id).toList());
+		out.put("observation", record.ref());
+		if (!warnings.isEmpty()) {
+			out.put("warnings", warnings);
+		}
+		return out;
+	}
+
+	private static String vtText(Object o) {
+		return o == null ? null : String.valueOf(o);
+	}
+
+	/**
 	 * Corrects a predicate's definition (EVALUATION.md J5): the change is logged with its reason and every fact under
 	 * the predicate is re-rendered.
 	 */
 	public Map<String, Object> correctPredicate(String name, Map<String, Object> replacement, String reason) {
 		if (replacement == null || replacement.isEmpty()) {
-			throw MnemicException.invalidArgument("'replacement' must name what changes, e.g. {\"render\": "
+			throw MnemicException.invalidArgument("'changes' must name what changes, e.g. {\"render\": "
 					+ "\"{object} is {subject}'s {qualifier|parent}\"} or {\"lexicon\": [\"mother\", \"father\"]}.");
 		}
 		var before = knowledge.predicates().get(name)
@@ -748,7 +810,7 @@ public final class Engine implements AutoCloseable {
 
 	private static void requireReplacement(Map<String, Object> replacement, String example) {
 		if (replacement == null || replacement.isEmpty()) {
-			throw MnemicException.invalidArgument("'replacement' must name what changes, e.g. " + example + ".");
+			throw MnemicException.invalidArgument("'changes' must name what changes, e.g. " + example + ".");
 		}
 	}
 

@@ -92,6 +92,17 @@ public final class Briefing {
 			seen.add(f.id());
 			sb.append(line);
 		}
+		long onRecord = facts.factsOf(owner.id()).stream().filter(Fact::current).count();
+		if (onRecord > seen.size()) {
+			// A briefing is the best-known part of the record, not the whole of it: an assistant that answered from
+			// it alone could take silence for absence (2026-09-23).
+			String more = "  (" + seen.size() + " of " + onRecord + " current facts about " + owner.name()
+					+ " shown; recall by topic reaches the rest)\n";
+			if (used + tokens.estimate(more) <= maxTokens) {
+				used += tokens.estimate(more);
+				sb.append(more);
+			}
+		}
 		int sections = 0;
 		for (Entity e : entities.active(8)) {
 			if (e.id() == owner.id() || sections >= 4) {

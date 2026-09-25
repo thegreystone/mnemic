@@ -30,6 +30,13 @@ package se.hirt.mnemic.model;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import se.hirt.mnemic.model.ChatModel.AssistantMessage;
+import se.hirt.mnemic.model.ChatModel.Message;
+import se.hirt.mnemic.model.ChatModel.ToolCall;
+import se.hirt.mnemic.model.ChatModel.ToolResultMessage;
+import se.hirt.mnemic.model.ChatModel.ToolSpec;
+import se.hirt.mnemic.model.ChatModel.Turn;
+import se.hirt.mnemic.model.ChatModel.UserMessage;
 
 import java.io.IOException;
 import java.net.URI;
@@ -94,6 +101,90 @@ public final class AnthropicHttpProvider implements ModelProvider {
 		return new Client("anthropic:" + spec.model(), endpoint, spec.model(), key);
 	}
 
+	/** The tools in the Messages API shape: name, description, input_schema. */
+	static List<Map<String, Object>> wireTools(List<ToolSpec> tools) {
+		var out = new java.util.ArrayList<Map<String, Object>>();
+		for (ToolSpec t : tools) {
+			var m = new LinkedHashMap<String, Object>();
+			m.put("name", t.name());
+			m.put("description", t.description() == null ? "" : t.description());
+			m.put("input_schema", t.inputSchema() == null ? Map.of("type", "object") : t.inputSchema());
+			out.add(m);
+		}
+		return out;
+	}
+
+	/**
+	 * The conversation in the Messages API shape: an assistant turn is text and {@code tool_use} blocks, a result is a
+	 * {@code tool_result} block in a user message, and since roles must alternate, the results of one turn and any user
+	 * text that follows them share one user message.
+	 */
+	static List<Map<String, Object>> wireMessages(List<Message> messages) {
+		var out = new java.util.ArrayList<Map<String, Object>>();
+		List<Map<String, Object>> userBlocks = null;
+		for (Message m : messages) {
+			switch (m) {
+			case UserMessage u -> {
+				if (userBlocks == null) {
+					userBlocks = new java.util.ArrayList<>();
+				}
+				userBlocks.add(Map.of("type", "text", "text", u.text()));
+			}
+			case ToolResultMessage r -> {
+				if (userBlocks == null) {
+					userBlocks = new java.util.ArrayList<>();
+				}
+				userBlocks.add(Map.of("type", "tool_result", "tool_use_id", r.callId(), "content", r.content()));
+			}
+			case AssistantMessage a -> {
+				if (userBlocks != null) {
+					out.add(Map.of("role", "user", "content", userBlocks));
+					userBlocks = null;
+				}
+				var blocks = new java.util.ArrayList<Map<String, Object>>();
+				if (a.turn().text() != null && !a.turn().text().isBlank()) {
+					blocks.add(Map.of("type", "text", "text", a.turn().text()));
+				}
+				if (a.turn().hasCalls()) {
+					for (ToolCall c : a.turn().calls()) {
+						blocks.add(Map.of("type", "tool_use", "id", c.id(), "name", c.name(), "input",
+								c.arguments() == null ? Map.of() : c.arguments()));
+					}
+				}
+				if (blocks.isEmpty()) {
+					blocks.add(Map.of("type", "text", "text", "(nothing)"));
+				}
+				out.add(Map.of("role", "assistant", "content", blocks));
+			}
+			}
+		}
+		if (userBlocks != null) {
+			out.add(Map.of("role", "user", "content", userBlocks));
+		}
+		return out;
+	}
+
+	/** The model's turn from a reply: its text blocks joined, its tool_use blocks as calls. */
+	@SuppressWarnings("unchecked")
+	static Turn turnOf(JsonNode root) {
+		var sb = new StringBuilder();
+		var calls = new java.util.ArrayList<ToolCall>();
+		for (JsonNode block : root.path("content")) {
+			String type = block.path("type").asText();
+			if ("text".equals(type)) {
+				if (sb.length() > 0) {
+					sb.append('\n');
+				}
+				sb.append(block.path("text").asText());
+			} else if ("tool_use".equals(type)) {
+				Map<String, Object> input = block.path("input").isObject()
+						? MAPPER.convertValue(block.path("input"), Map.class) : new LinkedHashMap<>();
+				calls.add(new ToolCall(block.path("id").asText(""), block.path("name").asText(""), input));
+			}
+		}
+		return new Turn(sb.toString().trim(), calls);
+	}
+
 	static final class Client implements ChatModel {
 		private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(30)).build();
 		private final String id;
@@ -115,14 +206,46 @@ public final class AnthropicHttpProvider implements ModelProvider {
 
 		@Override
 		public String chat(String system, String user) throws IOException, InterruptedException {
+			JsonNode root = complete(system, List.of(Map.of("role", "user", "content", user)), null);
+			var sb = new StringBuilder();
+			for (JsonNode block : root.path("content")) {
+				if ("text".equals(block.path("type").asText())) {
+					if (sb.length() > 0) {
+						sb.append('\n');
+					}
+					sb.append(block.path("text").asText());
+				}
+			}
+			return sb.toString().trim();
+		}
+
+		@Override
+		public boolean supportsTools() {
+			return true;
+		}
+
+		@Override
+		public Turn chat(String system, List<Message> messages, List<ToolSpec> tools)
+				throws IOException, InterruptedException {
+			return turnOf(complete(system, wireMessages(messages), wireTools(tools)));
+		}
+
+		/**
+		 * One request with retries. The system prompt is the same on every call of a run: a cache breakpoint on it
+		 * makes each call after the first pay a tenth for it, and the tools, which precede it in the cached prefix,
+		 * ride along. Short prompts fall under the model's minimum and are simply not cached.
+		 */
+		private JsonNode complete(String system, List<Map<String, Object>> wire, List<Map<String, Object>> tools)
+				throws IOException, InterruptedException {
 			var payload = new LinkedHashMap<String, Object>();
 			payload.put("model", model);
 			payload.put("max_tokens", 4096);
-			// The system prompt is the same on every call of a run: a cache breakpoint on it makes each call after the
-			// first pay a tenth for it. Short prompts fall under the model's minimum and are simply not cached.
 			payload.put("system",
 					List.of(Map.of("type", "text", "text", system, "cache_control", Map.of("type", "ephemeral"))));
-			payload.put("messages", List.of(Map.of("role", "user", "content", user)));
+			if (tools != null && !tools.isEmpty()) {
+				payload.put("tools", tools);
+			}
+			payload.put("messages", wire);
 			String body = MAPPER.writeValueAsString(payload);
 			IOException last = null;
 			for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
@@ -152,16 +275,7 @@ public final class AnthropicHttpProvider implements ModelProvider {
 				if (stop.toLowerCase().contains("refusal")) {
 					throw new IOException("Model refused the request (stop_reason=refusal)");
 				}
-				var sb = new StringBuilder();
-				for (JsonNode block : root.path("content")) {
-					if ("text".equals(block.path("type").asText())) {
-						if (sb.length() > 0) {
-							sb.append('\n');
-						}
-						sb.append(block.path("text").asText());
-					}
-				}
-				return sb.toString().trim();
+				return root;
 			}
 			throw last == null ? new IOException("Anthropic: no response") : last;
 		}

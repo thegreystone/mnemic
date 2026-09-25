@@ -101,6 +101,14 @@ public record RecallResult(String query, Instant asOf, Structured structured, Li
 					decidedBy, basis, notes, future, ended, group, also);
 		}
 
+		/** The verdict with one more note appended. */
+		public Structured withNote(String note) {
+			var more = new java.util.ArrayList<>(notes);
+			more.add(note);
+			return new Structured(state, entity, entityName, predicate, qualifier, facts, nearMisses, chain, bounds,
+					decidedBy, basis, List.copyOf(more), future, ended, group, also);
+		}
+
 		public Structured withGroup(String newGroup) {
 			return new Structured(state, entity, entityName, predicate, qualifier, facts, nearMisses, chain, bounds,
 					decidedBy, basis, notes, future, ended, newGroup, also);

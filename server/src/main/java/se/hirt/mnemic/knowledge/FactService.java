@@ -664,6 +664,11 @@ public final class FactService {
 	 * asked whether it "starts spouse_of" at every step of a wedding (2026-09-23).
 	 */
 	private boolean effectWorthAsking(List<Entity> participants, List<Predicate> fitting) {
+		if (participants.stream().anyMatch(p -> types.unplaced(p.type()))) {
+			// A participant whose kind nobody has placed fits every relation: the effect question would be guessing
+			// beside the kind question. The type's effects can be set with correct once the kind is known.
+			return false;
+		}
 		if (fitting.stream().anyMatch(p -> p.functional() && !p.groups().contains("family"))) {
 			return true;
 		}
@@ -672,14 +677,22 @@ public final class FactService {
 
 	/** The predicates an event between these participants could open or close: those whose types fit them. */
 
+	/**
+	 * The predicates an event between these participants could open or close: those whose types fit them, less the
+	 * derived ones, which follow from their base facts and are never opened by an event (a question offered
+	 * "opens:aunt_uncle_of" and forty more on 2026-09-23).
+	 */
 	private List<Predicate> fitting(List<Entity> participants) {
 		if (participants.isEmpty()) {
 			return List.of();
 		}
 		List<String> subject = types.lineage(participants.getFirst().type());
 		List<String> object = participants.size() < 2 ? null : types.lineage(participants.get(1).type());
-		return predicates.all().stream().filter(p -> !p.literalRange() && p.acceptsSubject(subject)
-				&& (object == null ? p.range().contains("*") : p.acceptsObject(object))).toList();
+		return predicates.all().stream()
+				.filter(p -> !p.literalRange() && p.acceptsSubject(subject)
+						&& (object == null ? p.range().contains("*") : p.acceptsObject(object))
+						&& predicates.rulesOf(p.name()).isEmpty())
+				.toList();
 	}
 
 	/**
@@ -1383,13 +1396,24 @@ public final class FactService {
 	 * rebuild) and the replacement, so a rebuild replays it. A superseded fact can be corrected too, since an event may
 	 * have closed it at the wrong date.
 	 */
+	/** Re-renders every fact that names the entity, after its name changed; how many. */
+	public int rerenderMentioning(long entityId) {
+		return renderer.rerenderMentioning(entityId);
+	}
+
 	public Corrected correct(long factId, Map<String, Object> replacement, String reason, Observation correction) {
 		Fact original = correctable(factId);
 		FactRef ref = readingOf(original, replacement);
 		if (sameStatement(ref, readingOf(original, Map.of()))) {
+			// A relation stated the wrong way round is fixed by giving both sides; a reader that restates one side at
+			// a time never gets there (the usage bench's family scenarios, 2026-09-24).
+			String swap = original.objectId() == null ? ""
+					: " To switch subject and object around, give both: {\"subject\": \""
+							+ entities.nameOf(original.objectId()) + "\", \"object\": \""
+							+ entities.nameOf(original.subjectId()) + "\"}.";
 			throw MnemicException.invalidArgument("The correction changes nothing about " + original.ref()
 					+ ": every key names the value on record. Name a key with a different value, {\"wrong\": true}, or "
-					+ "{\"redundant\": true}.");
+					+ "{\"redundant\": true}." + swap);
 		}
 		return correctWith(original, ref, reason, correction);
 	}
@@ -1399,10 +1423,11 @@ public final class FactService {
 	 * replacement, the fact as it stands.
 	 */
 	public FactRef readingOf(Fact original, Map<String, Object> replacement) {
-		String subject = str(replacement, "subject",
-				original.subjectId() == entities.owner().id() ? "self" : entities.nameOf(original.subjectId()));
-		String object = str(replacement, "object",
-				original.objectId() != null ? entities.nameOf(original.objectId()) : original.objectText());
+		String subject = selfOrName(str(replacement, "subject",
+				original.subjectId() == entities.owner().id() ? "self" : entities.nameOf(original.subjectId())));
+		String object = original.objectId() != null
+				? selfOrName(str(replacement, "object", entities.nameOf(original.objectId())))
+				: str(replacement, "object", original.objectText());
 		String qualifier = str(replacement, "qualifier", original.qualifier());
 		String scope = str(replacement, "scope",
 				original.scopeId() == null ? null : entities.nameOf(original.scopeId()));
@@ -1431,6 +1456,22 @@ public final class FactService {
 	}
 
 	/** Whether two readings state the same fact: the same terms and bounds, whatever the precision noted. */
+	/**
+	 * The owner under one name, so a correction that spells "self" out ("subject": "Mattias Sandell") compares equal to
+	 * the record and is refused as no change, not stored as one (Qwen restating a parent fact, 2026-09-24).
+	 */
+	private String selfOrName(String name) {
+		if (name == null || "self".equals(name)) {
+			return name;
+		}
+		Entity owner = entities.owner();
+		if (name.equalsIgnoreCase(owner.name())
+				|| entities.aliases(owner.id()).stream().anyMatch(name::equalsIgnoreCase)) {
+			return "self";
+		}
+		return name;
+	}
+
 	public static boolean sameStatement(FactRef a, FactRef b) {
 		return Objects.equals(a.subject(), b.subject()) && Objects.equals(a.predicate(), b.predicate())
 				&& Objects.equals(a.object(), b.object()) && Objects.equals(a.qualifier(), b.qualifier())
@@ -1540,8 +1581,30 @@ public final class FactService {
 	 * matches, what the user stated still stands: the replacement is stored as a fact of the record, with nothing
 	 * marked corrected, and the rebuild reports the record for a person to check. False then.
 	 */
+	/**
+	 * Moves an event and the facts that hang on its date, and refreshes their renderings. The correction record's
+	 * reading names the event by its key (type, participants, old start), since ids do not survive a rebuild.
+	 */
+	public EventService.Redated redate(long eventId, Bounds b, Observation record) {
+		EventService.Redated moved = events.redate(eventId, b, record.id());
+		var predicates = new LinkedHashSet<String>();
+		for (Long id : moved.opened()) {
+			queries.get(id).ifPresent(f -> predicates.add(f.predicate()));
+		}
+		for (Long id : moved.closed()) {
+			queries.get(id).ifPresent(f -> predicates.add(f.predicate()));
+		}
+		for (String p : predicates) {
+			renderer.rerender(p);
+		}
+		return moved;
+	}
+
 	public String replayCorrection(Observation record) {
 		Map<String, Object> reading = Json.readMap(record.proposalJson());
+		if (reading.get("redates") instanceof Map<?, ?> key) {
+			return replayRedating(record, key, reading);
+		}
 		boolean retraction = reading.get("retracts") instanceof Map<?, ?>;
 		boolean retirement = reading.get("retires") instanceof Map<?, ?>;
 		Object key = retraction ? reading.get("retracts")
@@ -1575,6 +1638,34 @@ public final class FactService {
 		}
 		correctWith(target.get(), p.facts().getFirst(), reason, record);
 		return "replayed";
+	}
+
+	/** A re-dating replayed: the event found by its key (type, participant names, the start it had) is moved again. */
+	@SuppressWarnings("unchecked")
+	private String replayRedating(Observation record, Map<?, ?> key, Map<String, Object> reading) {
+		String type = String.valueOf(key.get("type"));
+		var ids = new ArrayList<Long>();
+		for (Object name : (List<Object>) key.get("participants")) {
+			Optional<Entity> e = entities.byRef(String.valueOf(name));
+			if (e.isEmpty()) {
+				return "unmatched";
+			}
+			ids.add(e.get().id());
+		}
+		Optional<Event> ev = events.find(type, ids,
+				key.get("valid_start") == null ? null : String.valueOf(key.get("valid_start")));
+		if (ev.isEmpty()) {
+			return "unmatched";
+		}
+		Map<String, Object> vt = (Map<String, Object>) reading.get("valid_time");
+		Bounds b = Bounds.of(new ValidTime(text(vt.get("start")), text(vt.get("end")), text(vt.get("precision"))),
+				record.observedAt(), new ArrayList<>());
+		redate(ev.get().id(), b, record);
+		return "replayed";
+	}
+
+	private static String text(Object o) {
+		return o == null ? null : String.valueOf(o);
 	}
 
 	/**
@@ -1701,7 +1792,8 @@ public final class FactService {
 							others.getFirst(), f.id());
 				} else {
 					goneFacts.add(f.id());
-					facts.add(Map.of("id", f.ref(), "rendering", f.rendering(), "status", f.status()));
+					facts.add(Map.of("id", f.ref(), "rendering", f.rendering(), "standing",
+							"current".equals(f.status()) ? f.state(Instant.now()) : f.status()));
 				}
 			}
 			// An event this observation stated beside others survives there: re-homed when this was its home, and

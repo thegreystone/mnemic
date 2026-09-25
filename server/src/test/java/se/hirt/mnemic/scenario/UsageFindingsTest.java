@@ -74,6 +74,12 @@ class UsageFindingsTest {
 					proposal().entity("e1", "Milo", "person").entity("e2", "the flaky test", "thing").event("ev1",
 							"fixed", "2026-09-10", "e1", "e2"));
 			assertEquals(List.of(), ofKind(fix, "event_effect"), fix.applied().questions().toString());
+			// A participant whose kind is still an open question fits every relation: no effect question beside the
+			// kind question (a mortgage renewal on 2026-09-23).
+			RememberOutcome unplaced = remember(e, "The escrow on the deal closes in March.", proposal()
+					.entity("e1", "the escrow", "escrow").event("ev1", "escrow closing", "2027-03", "self", "e1"));
+			assertEquals(1, ofKind(unplaced, "type_kind").size(), unplaced.applied().questions().toString());
+			assertEquals(List.of(), ofKind(unplaced, "event_effect"), unplaced.applied().questions().toString());
 			// Two people at a dinner: kinship is one-valued, but its changes are seeded events, not this one.
 			RememberOutcome dinner = remember(e, "Anna and I had the rehearsal dinner on 11 June 2027.",
 					proposal().entity("e1", "Anna Lindqvist", "person").event("ev1", "rehearsal dinner", "2027-06-11",
@@ -93,6 +99,13 @@ class UsageFindingsTest {
 			RememberOutcome move = remember(e, "I relocated to Willisau in 2024.",
 					proposal().entity("e1", "Willisau", "place").event("ev1", "relocated", "2024", "self", "e1"));
 			assertEquals(1, ofKind(move, "event_effect").size(), move.applied().questions().toString());
+			// The candidates are the relations the event could really open or close: nothing derived, and nothing
+			// the participants' kinds rule out.
+			String candidates = ofKind(move, "event_effect").getFirst().get("candidates").toString();
+			assertTrue(candidates.contains("opens:lives_in"), candidates);
+			assertFalse(candidates.contains("grandparent_of") || candidates.contains("aunt_uncle_of")
+					|| candidates.contains("cousin_of") || candidates.contains("in_law_of"), candidates);
+			assertFalse(candidates.contains("works_at"), "a place is not an employer: " + candidates);
 			// One person alone: the event may end them.
 			RememberOutcome gone = remember(e, "Bosse passed away in 2014.", proposal()
 					.entity("e1", "Torsten Björk", "person", "Bosse").event("ev1", "passed away", "2014", "e1"));
@@ -238,6 +251,42 @@ class UsageFindingsTest {
 			assertNotEquals(e.entities().byRef("Zürich").orElseThrow().id(),
 					e.entities().byRef("Hotel Zürich").orElseThrow().id(), "not merged: " + stay.applied());
 			assertEquals("place", e.entities().byRef("Zürich").orElseThrow().type(), "and not retyped");
+		}
+	}
+
+	@Test
+	void theBriefingSaysHowMuchOfTheRecordItShows() {
+		try (Engine e = engine("usage-briefing-footer")) {
+			// Forty-five decisions with literal objects: no entities to confuse, more facts than the briefing shows.
+			for (int i = 1; i <= 45; i++) {
+				remember(e, "Decision " + i + ".", proposal().fact("decided", "to take option number " + i));
+			}
+			String briefing = e.recall().briefing(e.questions()).render(4000);
+			assertTrue(briefing.contains("of 45 current facts about Mattias Sandell shown; recall by topic"), briefing);
+		}
+	}
+
+	@Test
+	void aMissSaysWhomTheObservationsBelowMention() {
+		try (Engine e = engine("usage-miss-mentions")) {
+			// A reading that reversed the parent relation: no step-parent is derived, so "stepmother" is a miss. The
+			// marriage is in the text below all the same; the verdict says whom that text mentions, so a reader can
+			// answer from it instead of taking the miss for the whole truth (Haiku, 2026-09-23).
+			// (The text carries the word, as the semantic channel would find it in a configured store.)
+			remember(e, "My father Konrad Nyberg married Lena Berg in 2015, so she is my stepmother.",
+					proposal().entity("e1", "Konrad Nyberg", "person").entity("e2", "Lena Berg", "person")
+							.fact(se.hirt.mnemic.TestHomes.fact("self", "parent_of", "e1", "father", null, null, null,
+									null, null, null))
+							.fact("e1", "spouse_of", "e2"));
+			RecallResult r = recall(e, "Mattias's stepmother");
+			assertEquals("miss", r.structured().state(), r.text());
+			assertTrue(r.text().contains("no such fact on record"), r.text());
+			assertTrue(r.text().contains("mention") && r.text().contains("Konrad Nyberg")
+					&& r.text().contains("Lena Berg"), r.text());
+			assertFalse(r.text().contains("read them"), "a fact about the text, never a nudge to answer: " + r.text());
+			// Nothing to mention: the miss stands alone, as an honest not-known should.
+			RecallResult bare = recall(e, "Mattias's dentist");
+			assertFalse(bare.text().contains("below mention"), bare.text());
 		}
 	}
 

@@ -252,7 +252,7 @@ final class RecallRenderer {
 		}
 		case "miss" -> {
 			if (s.ended().isEmpty()) {
-				sb.append("MISS — ").append(key).append(": entity and predicate resolved, no such fact is known");
+				sb.append("MISS — ").append(key).append(": entity and predicate resolved, no such fact on record");
 			} else {
 				sb.append("MISS — ").append(key).append(": no current value; ").append(s.ended().size())
 						.append(s.ended().size() == 1 ? " ended fact: " : " ended facts: ")
