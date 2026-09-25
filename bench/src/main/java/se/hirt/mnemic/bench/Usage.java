@@ -703,7 +703,16 @@ public final class Usage {
 		int used = 0;
 		ToolCall previous = null;
 		while (true) {
-			Turn turn = assistant.chat(system, trimmed(messages), tools);
+			Turn turn;
+			try {
+				turn = assistant.chat(system, trimmed(messages), tools);
+			} catch (java.io.IOException e) {
+				// The model failed (a local engine's context overrun, a 5xx): the step is lost, not the run. The
+				// turn is recorded as an empty one so the conversation stays well-formed (2026-09-24).
+				messages.add(new AssistantMessage(new Turn("(the model returned an error)", List.of())));
+				reply = "(no reply: the model failed: " + head(e.getMessage(), 200) + ")";
+				break;
+			}
 			messages.add(new AssistantMessage(turn));
 			if (!turn.hasCalls()) {
 				reply = turn.text() == null || turn.text().isBlank() ? "(no reply: the model said nothing)"
