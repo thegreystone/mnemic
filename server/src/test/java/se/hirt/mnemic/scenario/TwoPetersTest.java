@@ -140,4 +140,43 @@ class TwoPetersTest {
 			assertEquals(secondPeter, fullAgain.applied().entities().getFirst().id());
 		}
 	}
+
+	@Test
+	void theSameRulesHoldForAnyKindOfThing() {
+		// Organizations, not people: "Hooli" on record, "Hooli Cloud" declared another thing, then a bare "Hooli".
+		try (Engine e = engine("two-hoolis")) {
+			remember(e, "I work at Hooli.",
+					proposal().entity("h", "Hooli", "organization").fact("self", "works_at", "h"));
+			RememberOutcome full = remember(e, "Anna works at Hooli Cloud.",
+					proposal().entity("a", "Anna Lindqvist", "person").entity("hc", "Hooli Cloud", "organization")
+							.fact("a", "works_at", "hc"));
+			Map<String, Object> q = firstQuestion(full);
+			assertEquals("Hooli Cloud", q.get("subject"));
+			String hooli = candidateIds(q).getFirst();
+			RememberOutcome other = remember(e, "It is a different company.", proposal(),
+					new Resolve(String.valueOf(q.get("id")), "new"));
+			String cloud = String.valueOf(other.resolved().getFirst().get("entity"));
+			assertFalse(hooli.equals(cloud));
+			RememberOutcome bare = remember(e, "Bosse works at Hooli.", proposal().entity("b", "Bosse Berg", "person")
+					.entity("h2", "Hooli", "organization").fact("b", "works_at", "h2"));
+			Map<String, Object> again = firstQuestion(bare);
+			assertEquals("Hooli", again.get("subject"));
+			assertEquals(List.of(hooli, cloud, "new"), candidateIds(again), again.toString());
+			RememberOutcome settled = remember(e, "The original.", proposal(),
+					new Resolve(String.valueOf(again.get("id")), hooli));
+			assertEquals("answered", settled.resolved().getFirst().get("status"));
+			RememberOutcome later = remember(e, "Eva works at Hooli.", proposal().entity("ev", "Eva Berg", "person")
+					.entity("h3", "Hooli", "organization").fact("ev", "works_at", "h3"));
+			assertTrue(later.applied().questions().isEmpty(), later.applied().questions().toString());
+			// And the fuller name adopted on a "same" answer is not about people either.
+			RememberOutcome cloudFull = remember(e, "Hooli Cloud Services is the same as Hooli Cloud.",
+					proposal().entity("hcs", "Hooli Cloud Services", "organization").fact("a", "works_at", "hcs"));
+			Map<String, Object> q3 = firstQuestion(cloudFull);
+			RememberOutcome same = remember(e, "Yes, that one.", proposal(),
+					new Resolve(String.valueOf(q3.get("id")), cloud));
+			Map<?, ?> renamed = (Map<?, ?>) same.resolved().getFirst().get("renamed");
+			assertEquals("Hooli Cloud Services", renamed.get("to"), same.resolved().toString());
+		}
+	}
+
 }

@@ -126,6 +126,43 @@ public record Predicate(String name, String description, List<String> domain, Li
 		return !timeless();
 	}
 
+	private static final List<String> FEMALE_WORDS = List.of("sister", "wife", "mother", "mom", "daughter", "aunt",
+			"grandmother", "girlfriend", "fiancée", "niece", "stepmother", "female", "woman", "girl", "f");
+	private static final List<String> MALE_WORDS = List.of("brother", "husband", "father", "dad", "son", "uncle",
+			"grandfather", "boyfriend", "fiancé", "nephew", "stepfather", "male", "man", "boy", "m");
+
+	/**
+	 * The gender a role word or a gender value says ("half-sister", "paternal grandfather", "female"): "female",
+	 * "male", or null when the word says none ("sibling", "twin", "partner"). The last word decides, so a composed role
+	 * reads by its head.
+	 */
+	public static String impliedGender(String word) {
+		if (word == null || word.isBlank()) {
+			return null;
+		}
+		String[] parts = word.trim().toLowerCase(Locale.ROOT).split("[\s-]+");
+		String head = parts[parts.length - 1];
+		if (FEMALE_WORDS.contains(head)) {
+			return "female";
+		}
+		if (MALE_WORDS.contains(head)) {
+			return "male";
+		}
+		return null;
+	}
+
+	/**
+	 * The head of a role word: "sister" of "half-sister", "grandfather" of "paternal grandfather", "law" of
+	 * "mother-in-law".
+	 */
+	public static String headOf(String word) {
+		if (word == null || word.isBlank()) {
+			return null;
+		}
+		String[] parts = word.trim().toLowerCase(Locale.ROOT).split("[ -]+");
+		return parts[parts.length - 1];
+	}
+
 	public static boolean sameQualifierFamily(String a, String b) {
 		if (a == null || b == null) {
 			return false;

@@ -267,6 +267,28 @@ class UsageFindingsTest {
 	}
 
 	@Test
+	void theBriefingPutsWhatWasSaidBeforeWhatWasDerived() {
+		try (Engine e = engine("usage-briefing-derived-last")) {
+			// Parents with siblings and children: a crowd of derived aunts, uncles, and cousins about the owner.
+			var p = proposal().entity("k", "Konrad Nyberg", "person").entity("g", "Gunilla Nyberg", "person")
+					.fact(fact("k", "parent_of", "self", "father", null, null, null, null, null, null))
+					.fact(fact("g", "parent_of", "self", "mother", null, null, null, null, null, null));
+			for (int i = 1; i <= 6; i++) {
+				p = p.entity("u" + i, "Uncle " + i + " Nyberg", "person")
+						.entity("c" + i, "Cousin " + i + " Nyberg", "person").fact("u" + i, "sibling_of", "k")
+						.fact(fact("u" + i, "parent_of", "c" + i, "father", null, null, null, null, null, null));
+			}
+			remember(e, "My parents and my father's six brothers, each with a child.", p);
+			remember(e, "I own a Volvo V60.", proposal().entity("v", "Volvo V60", "car").fact("self", "owns", "v"));
+			String briefing = e.recall().briefing(e.questions()).render(4000);
+			int owns = briefing.indexOf("owns Volvo V60");
+			int cousin = briefing.indexOf("cousin");
+			assertTrue(owns > 0, briefing);
+			assertTrue(cousin < 0 || owns < cousin, "stated before derived: " + briefing);
+		}
+	}
+
+	@Test
 	void aMissSaysWhomTheObservationsBelowMention() {
 		try (Engine e = engine("usage-miss-mentions")) {
 			// A reading that reversed the parent relation: no step-parent is derived, so "stepmother" is a miss. The

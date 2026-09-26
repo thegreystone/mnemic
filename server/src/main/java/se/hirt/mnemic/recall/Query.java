@@ -43,6 +43,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.stream.Collectors;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -118,7 +119,9 @@ public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<Strin
 	/** Words that narrow nothing in a yes/no question. */
 	static final Set<String> POLAR_FILLER = Set.of("any", "anything", "anyone", "anywhere", "still", "yet", "ever",
 			"really", "actually", "currently", "now", "already", "also", "some", "something", "someone", "there",
-			"here", "just", "even", "own");
+			"here", "just", "even", "own",
+			// "does Marcus have a sister": having is the relation, not a word the fact must carry (2026-09-25)
+			"have", "has", "had", "got");
 	/** "what kind of car", "what else", "which other things": words about the asking, not the kind. */
 	static final Set<String> KIND_FILLER = Set.of("kind", "kinds", "sort", "sorts", "type", "types", "else", "other",
 			"others", "more", "many", "much", "exactly", "precisely", "all", "different", "various", "new", "old",
@@ -265,7 +268,7 @@ public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<Strin
 		// is asked once, and not at all when the same relation is asked with a subject elsewhere.
 		var kept = new ArrayList<Integer>();
 		for (int p = 0; p < placed.size(); p++) {
-			if (!subjects.get(p).isEmpty()) {
+			if (!subjects.get(p).isEmpty() && !groupCopyOfOwnWord(placed, subjects, p)) {
 				kept.add(p);
 			}
 		}
@@ -309,6 +312,27 @@ public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<Strin
 			}
 		}
 		return List.copyOf(out);
+	}
+
+	/**
+	 * Whether a group's copy of a relation ("family" reaching parent_of) asks what the relation's own word already asks
+	 * of the same subject ("Christian's children and family"): asked once. With another subject ("Alexander's children
+	 * and Christian's family") both stand.
+	 */
+	private static boolean groupCopyOfOwnWord(List<Object[]> placed, List<List<Entity>> subjects, int p) {
+		Cue c = (Cue) placed.get(p)[0];
+		if (c.group() == null) {
+			return false;
+		}
+		Set<Long> mine = subjects.get(p).stream().map(Entity::id).collect(Collectors.toSet());
+		for (int o = 0; o < placed.size(); o++) {
+			Cue other = (Cue) placed.get(o)[0];
+			if (o != p && other.group() == null && other.predicate().name().equals(c.predicate().name())
+					&& subjects.get(o).stream().map(Entity::id).collect(Collectors.toSet()).equals(mine)) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**

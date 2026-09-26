@@ -46,6 +46,8 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
@@ -377,27 +379,124 @@ final class StructuredProbe {
 			if ("object".equals(direction) && (f.objectId() == null || f.objectId() != e.id())) {
 				continue; // "Mattias's father": Mattias is the child, the object
 			}
-			// A symmetric relation is stored once with the qualifier describing the subject; asked from the
-			// other side ("Mattias's half-sister" against "Mattias is Clara's half-brother") the family matches
-			// and the gender, which is not on record, is not invented.
-			boolean qualifierOk = cue.qualifier() == null || cue.qualifier().equalsIgnoreCase(f.qualifier())
-					|| Predicate.qualifierWithin(cue.qualifier(), f.qualifier())
-					|| (f.qualifier() == null && cue.predicate().qualifiers().isEmpty())
-					|| (cue.predicate().symmetric() && Predicate.sameQualifierFamily(cue.qualifier(), f.qualifier()));
+			boolean qualifierOk;
+			String note = null;
+			boolean symmetricRole = cue.predicate().symmetric() && cue.qualifier() != null && f.objectId() != null
+					&& f.subjectId() != f.objectId() && (f.subjectId() == e.id() || f.objectId() == e.id());
+			if (symmetricRole) {
+				// A symmetric relation is stored once, its qualifier describing the subject. The role asked for
+				// ("Marcus's sister") belongs to the other person: when the possessor is the subject, the stored
+				// word says nothing about them, and their gender on record decides; when the possessor is the
+				// object, the stored word is theirs and is read with its gender (2026-09-25).
+				long otherId = f.subjectId() == e.id() ? f.objectId() : f.subjectId();
+				String asked = impliedGender(cue.predicate(), cue.qualifier());
+				if (f.objectId() == e.id()) {
+					String stored = impliedGender(cue.predicate(), f.qualifier());
+					// "sister" asked, "half-sister" stored: a sister, and the note says which kind.
+					qualifierOk = cue.qualifier().equalsIgnoreCase(f.qualifier())
+							|| Predicate.qualifierWithin(cue.qualifier(), f.qualifier())
+							|| cue.qualifier().equalsIgnoreCase(Predicate.headOf(f.qualifier()))
+							|| (Predicate.sameQualifierFamily(cue.qualifier(), f.qualifier())
+									&& (asked == null || stored == null || asked.equals(stored)));
+					if (qualifierOk && !cue.qualifier().equalsIgnoreCase(f.qualifier())) {
+						note = f.ref() + " is recorded as '" + f.qualifier() + "'"
+								+ (asked != null && stored == null
+										? ", which does not say whether " + entities.nameOf(otherId) + " is "
+												+ article(cue.qualifier()) + " " + cue.qualifier()
+										: "");
+					}
+				} else if (asked == null) {
+					qualifierOk = Predicate.sameQualifierFamily(cue.qualifier(), f.qualifier())
+							|| Predicate.qualifierWithin(cue.qualifier(), f.qualifier());
+				} else {
+					String gender = genderOf(otherId, asOf, now);
+					String other = entities.nameOf(otherId);
+					// The degree must fit: a plain word ("sister") takes any degree, "half-sister" only its own.
+					boolean degreeFits = Predicate.sameQualifierFamily(cue.qualifier(), f.qualifier())
+							|| cue.qualifier().equalsIgnoreCase(Predicate.headOf(cue.qualifier()));
+					if (gender != null) {
+						qualifierOk = degreeFits && asked.equals(gender);
+						if (qualifierOk) {
+							note = f.ref() + " records " + e.name() + "'s role; " + other + " is " + gender
+									+ " on record";
+						}
+					} else {
+						// The gender is not on record and is not invented: the same degree from the other side
+						// answers, and the note says what it does not settle.
+						qualifierOk = Predicate.sameQualifierFamily(cue.qualifier(), f.qualifier());
+						note = f.ref() + " records " + e.name() + "'s role, not " + other + "'s, and " + other
+								+ "'s gender is not on record";
+					}
+				}
+			} else {
+				qualifierOk = cue.qualifier() == null || cue.qualifier().equalsIgnoreCase(f.qualifier())
+						|| Predicate.qualifierWithin(cue.qualifier(), f.qualifier())
+						|| (f.qualifier() == null && cue.predicate().qualifiers().isEmpty());
+				// "aunt" asked, "aunt or uncle" on record: it answers, and says what is not on record.
+				if (qualifierOk && cue.qualifier() != null && f.qualifier() != null
+						&& !cue.qualifier().equalsIgnoreCase(f.qualifier())) {
+					note = f.ref() + " is recorded as '" + f.qualifier() + "', which covers '" + cue.qualifier()
+							+ "' without settling it";
+				}
+			}
 			if (qualifierOk) {
 				if (matched.stream().noneMatch(m -> m.id() == f.id())) {
 					matched.add(f);
-					// "aunt" asked, "aunt or uncle" on record: it answers, and says what is not on record.
-					if (cue.qualifier() != null && f.qualifier() != null
-							&& !cue.qualifier().equalsIgnoreCase(f.qualifier())) {
-						notes.add(f.ref() + " is recorded as '" + f.qualifier() + "', which covers '" + cue.qualifier()
-								+ "' without settling it");
+					if (note != null) {
+						notes.add(note);
 					}
 				}
 			} else {
 				near.add(f);
+				if (note != null && notes.stream().noneMatch(note::equals)) {
+					notes.add(note);
+				}
 			}
 		}
+	}
+
+	/**
+	 * The gender a role word says under a predicate: first what the predicate's own {@code implies} declares for the
+	 * word or its head ("paternal grandmother" by "grandmother"), which a definition sets in any language; then the
+	 * seed words. Null when the word says none ("sibling", "partner").
+	 */
+	private String impliedGender(Predicate p, String word) {
+		if (word == null || word.isBlank()) {
+			return null;
+		}
+		Map<String, Map<String, String>> implies = predicates.impliesOf(p.name());
+		for (String key : List.of(word.trim().toLowerCase(Locale.ROOT), Predicate.headOf(word))) {
+			Map<String, String> assigns = implies.get(key);
+			if (assigns != null && assigns.get("gender") != null) {
+				return genderValue(assigns.get("gender"));
+			}
+		}
+		return Predicate.impliedGender(word);
+	}
+
+	/** A gender value as recorded ("female", "woman", "f") read through the gender predicate's own implications. */
+	private String genderValue(String value) {
+		if (value == null || value.isBlank()) {
+			return null;
+		}
+		Map<String, String> assigns = predicates.impliesOf("gender").get(value.trim().toLowerCase(Locale.ROOT));
+		if (assigns != null && assigns.get("gender") != null) {
+			return assigns.get("gender").trim().toLowerCase(Locale.ROOT);
+		}
+		return Predicate.impliedGender(value);
+	}
+
+	/** The gender on record for an entity ("female", "male"), read from its current gender fact; null when none. */
+	private String genderOf(long entityId, Instant asOf, Instant now) {
+		for (Fact g : facts.probe(entityId, "gender", asOf, now, false)) {
+			if (g.subjectId() == entityId && g.objectText() != null && !"future".equals(g.state(now))) {
+				String gender = genderValue(g.objectText());
+				if (gender != null) {
+					return gender;
+				}
+			}
+		}
+		return null;
 	}
 
 	/** A namesake of a named thing, and the side of the relation it fits. */

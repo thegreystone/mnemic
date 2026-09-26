@@ -796,8 +796,10 @@ public final class PredicateRegistry {
 				cued.add(p.name());
 			}
 		}
-		// A group word ("family") cues every predicate under the group that the question did not cue by its own
-		// words; the group says nothing about the side, so the entity's type decides it.
+		// A group word ("family") cues every predicate under the group, the ones the question also names by their
+		// own words included: "Alexander's children and Christian's family" asks parent_of twice, once each. The
+		// binding drops the group's copy where it would ask the same relation of the same subject twice. The group
+		// says nothing about the side, so the entity's type decides it.
 		for (Group g : groupCache.values()) {
 			String term = null;
 			for (String t : g.lexicon()) {
@@ -810,9 +812,7 @@ public final class PredicateRegistry {
 				continue;
 			}
 			for (Predicate p : membersOf(g.name())) {
-				if (!cued.contains(p.name())) {
-					out.add(new Cue(p, null, term, "any", g.name()));
-				}
+				out.add(new Cue(p, null, term, "any", g.name()));
 			}
 		}
 		// Longest term first; at equal length a word in a predicate's own vocabulary outranks the same word known

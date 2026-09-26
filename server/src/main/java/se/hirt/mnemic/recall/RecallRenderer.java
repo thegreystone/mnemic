@@ -288,8 +288,10 @@ final class RecallRenderer {
 				sb.append("no ").append(s.predicate()).append(s.qualifier() != null ? "[" + s.qualifier() + "]" : "")
 						.append(" fact for ").append(s.entityName());
 				if (!s.nearMisses().isEmpty()) {
-					sb.append(" answers the question (").append(s.nearMisses().size())
-							.append(s.nearMisses().size() == 1 ? " near-miss" : " near-misses").append(" below)");
+					// "Do I still own the Yamaha": the owner's other things are on record, none of them the one asked.
+					sb.append(" answers what was asked (").append(s.nearMisses().size())
+							.append(s.nearMisses().size() == 1 ? " near-miss" : " near-misses")
+							.append(" below, about other things)");
 				}
 				sb.append("; the ");
 			} else {

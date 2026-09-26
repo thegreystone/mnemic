@@ -188,9 +188,19 @@ public final class FactQueries {
 	 */
 	public List<Fact> briefingFacts(long entityId, Instant now, int limit) {
 		return factsOf(entityId).stream().filter(f -> "current".equals(f.state(now)) && f.asserted())
-				.sorted(Comparator.comparingInt((Fact f) -> briefingRank(f.predicate()))
+				.sorted(Comparator.comparingInt((Fact f) -> briefingRank(f))
 						.thenComparing(Fact::corroborations, Comparator.reverseOrder()).thenComparing(Fact::id))
 				.limit(limit).toList();
+	}
+
+	/**
+	 * What comes first in a briefing: one-valued facts, then timeless relations between like things, then the rest,
+	 * then what the registry inferred; and what the store derived (the uncles, aunts, and cousins that follow from the
+	 * parents) after everything stated, since thirty of forty lines of derived kin crowd out what the user said
+	 * (2026-09-25).
+	 */
+	private int briefingRank(Fact f) {
+		return ("derived".equals(f.derivationKind()) ? 4 : 0) + briefingRank(f.predicate());
 	}
 
 	private int briefingRank(String predicate) {
