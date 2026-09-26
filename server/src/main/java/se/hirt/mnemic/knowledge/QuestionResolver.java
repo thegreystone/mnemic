@@ -261,8 +261,9 @@ public final class QuestionResolver {
 					"'" + choice + "' is not a registered predicate; answer with the candidate or \"new\"."));
 			// A confirmed synonym is asked once: the proposed name becomes an alias (EVALUATION.md J2). An ambiguous
 			// match confirmed for this fact stays a one-off (J3).
-			boolean similar = q.candidates().stream().anyMatch(cd -> target.name().equals(cd.get("id"))
-					&& ("similar".equals(cd.get("match")) || "semantic".equals(cd.get("match"))));
+			boolean similar = q.candidates().stream()
+					.anyMatch(cd -> target.name().equals(cd.get("id")) && ("similar".equals(cd.get("match"))
+							|| "semantic".equals(cd.get("match")) || "close".equals(cd.get("match"))));
 			if (similar) {
 				predicates.addAlias(target, f.predicate());
 			}

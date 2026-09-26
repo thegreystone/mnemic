@@ -53,7 +53,11 @@ public final class PredicateRegistry {
 	 * How a proposed predicate resolved. {@code predicate} is null and {@code candidate} set when the match is
 	 * plausible but not confident (EVALUATION.md J3): the caller decides.
 	 */
-	public record Resolution(Predicate predicate, String how, Predicate candidate) {
+	public record Resolution(Predicate predicate, String how, Predicate candidate, List<Predicate> alternatives) {
+		public Resolution(Predicate predicate, String how, Predicate candidate) {
+			this(predicate, how, candidate, List.of());
+		}
+
 		public boolean ambiguous() {
 			return "ambiguous".equals(how);
 		}
@@ -566,18 +570,18 @@ public final class PredicateRegistry {
 					List.of());
 		}
 		Similar similar = similar(def);
+		Nearest near = nearest(embeddingText(def), types(def.domain()), types(def.range()), null);
 		if (similar != null && (similar.overlap() >= SIMILAR_MIN_OVERLAP || def.description() == null)) {
-			return new Resolution(null, "similar", similar.predicate());
+			return new Resolution(null, "similar", similar.predicate(), closest(similar, near, similar.predicate()));
 		}
 		if (similar != null && similar.overlap() == 1) {
-			return new Resolution(null, "ambiguous", similar.predicate());
+			return new Resolution(null, "ambiguous", similar.predicate(), closest(similar, near, similar.predicate()));
 		}
-		Nearest near = nearest(embeddingText(def), types(def.domain()), types(def.range()), null);
 		if (near != null && near.similar()) {
-			return new Resolution(null, "semantic", near.predicate());
+			return new Resolution(null, "semantic", near.predicate(), closest(similar, near, near.predicate()));
 		}
 		if (near != null && near.ambiguous()) {
-			return new Resolution(null, "ambiguous", near.predicate());
+			return new Resolution(null, "ambiguous", near.predicate(), closest(similar, near, near.predicate()));
 		}
 		return new Resolution(register(def, observationId), bare(def) ? "inferred" : "registered", null);
 	}
@@ -603,7 +607,8 @@ public final class PredicateRegistry {
 	// ── meaning ──────────────────────────────────────────────────────────
 
 	/** The closest predicate by meaning, its score, and its lead over the runner-up. */
-	record Nearest(Predicate predicate, float score, float lead) {
+	/** The best match by meaning, how far ahead of the next it lies, and the next ones that are close too. */
+	record Nearest(Predicate predicate, float score, float lead, List<Predicate> alternatives) {
 		boolean similar() {
 			return score >= SEMANTIC_SIMILAR && lead >= SEMANTIC_SIMILAR_LEAD;
 		}
@@ -650,25 +655,57 @@ public final class PredicateRegistry {
 			vectorModel = emb.id();
 		}
 		float[] q = emb.embed(text);
-		Predicate best = null;
-		float bestScore = 0;
-		float second = 0;
+		var scored = new ArrayList<Map.Entry<Predicate, Float>>();
 		for (Predicate p : load().values()) {
 			if (p.name().equals(except) || p.literalRange() || !overlaps(p.domain(), domain)
 					|| !overlaps(p.range(), range)) {
 				continue;
 			}
 			float[] v = vectors.computeIfAbsent(p.name(), k -> emb.embed(embeddingText(p)));
-			float score = Embedding.dot(q, v);
-			if (score > bestScore) {
-				second = bestScore;
-				best = p;
-				bestScore = score;
-			} else if (score > second) {
-				second = score;
+			scored.add(Map.entry(p, Embedding.dot(q, v)));
+		}
+		if (scored.isEmpty()) {
+			return null;
+		}
+		scored.sort((a, b) -> Float.compare(b.getValue(), a.getValue()));
+		float bestScore = scored.getFirst().getValue();
+		float second = scored.size() > 1 ? scored.get(1).getValue() : 0;
+		// The next ones close enough to be asked about alongside the best, at most two.
+		var alternatives = new ArrayList<Predicate>();
+		for (int i = 1; i < scored.size() && alternatives.size() < 2; i++) {
+			if (scored.get(i).getValue() >= SEMANTIC_AMBIGUOUS) {
+				alternatives.add(scored.get(i).getKey());
 			}
 		}
-		return best == null ? null : new Nearest(best, bestScore, bestScore - second);
+		return new Nearest(scored.getFirst().getKey(), bestScore, bestScore - second, List.copyOf(alternatives));
+	}
+
+	/**
+	 * The relations to offer beside the chosen candidate when a name is asked about: the next closest by words and,
+	 * with a model loaded, by meaning, at most three in all, so the caller can say which of the closest will do rather
+	 * than only yes or no to one (2026-09-26).
+	 */
+	private static List<Predicate> closest(Similar similar, Nearest near, Predicate candidate) {
+		var out = new ArrayList<Predicate>();
+		var seen = new HashSet<String>();
+		seen.add(candidate.name());
+		var pool = new ArrayList<Predicate>();
+		if (similar != null) {
+			pool.add(similar.predicate());
+			pool.addAll(similar.alternatives());
+		}
+		if (near != null && near.ambiguous()) {
+			// The best by meaning counts only when it is close enough to have been asked about on its own; the next
+			// ones were kept only when they were.
+			pool.add(near.predicate());
+			pool.addAll(near.alternatives());
+		}
+		for (Predicate p : pool) {
+			if (seen.add(p.name()) && out.size() < 3) {
+				out.add(p);
+			}
+		}
+		return List.copyOf(out);
 	}
 
 	/**
@@ -1207,43 +1244,99 @@ public final class PredicateRegistry {
 		}
 	}
 
-	record Similar(Predicate predicate, int overlap) {
+	/** The best match by shared words, how many they share, and the next ones that share any. */
+	record Similar(Predicate predicate, int overlap, List<Predicate> alternatives) {
+	}
+
+	/** A token set with the lemma of every word added, so "leans" meets "leaning" through "lean". */
+	private static Set<String> withLemmas(Set<String> tokens) {
+		var out = new HashSet<String>(tokens);
+		for (String t : tokens) {
+			String lemma = Predicate.lemma(t);
+			if (lemma != null && lemma.length() > 2) {
+				out.add(lemma);
+			}
+		}
+		return out;
 	}
 
 	/** The best existing predicate with compatible domain and range, by content-token overlap; null when none. */
 	private Similar similar(PredicateDef def) {
 		List<String> domain = types(def.domain());
 		List<String> range = types(def.range());
-		var proposedTokens = new HashSet<String>();
-		proposedTokens.addAll(Names.contentTokens(def.name() == null ? "" : def.name().replace('_', ' ')));
-		proposedTokens.addAll(Names.contentTokens(def.description()));
+		// The vocabulary, the name's words and the lexicon, is compared with lemmas on both sides, so "leans toward"
+		// meets the "leaning" of considering through "lean". The prose of a description is compared as written: its
+		// words ("parent", "role", "from") are shared by many relations and lemmas would only add to that.
+		var proposedVocabulary = new HashSet<String>();
+		proposedVocabulary.addAll(Names.contentTokens(def.name() == null ? "" : def.name().replace('_', ' ')));
 		for (String l : def.lexicon()) {
-			proposedTokens.addAll(Names.contentTokens(l));
+			proposedVocabulary.addAll(Names.contentTokens(l));
 		}
-		Predicate best = null;
-		int bestScore = 0;
-		boolean tie = false;
+		// A bare name is only words, so it is read generously: with lemmas, against qualifiers too, and a word of
+		// the relation's own name counting twice. A defined name is compared as it always was: name, lexicon, and
+		// description as written, so that a definition is not mistaken for a seed it merely mentions.
+		boolean bare = def.description() == null;
+		Set<String> proposedWords = bare ? withLemmas(proposedVocabulary) : new HashSet<>(proposedVocabulary);
+		var proposedProse = new HashSet<>(proposedVocabulary);
+		proposedProse.addAll(Names.contentTokens(def.description()));
+		var scored = new ArrayList<Map.Entry<Predicate, Integer>>();
 		for (Predicate p : load().values()) {
 			if (!overlaps(p.domain(), domain) || !overlaps(p.range(), range)) {
 				continue;
 			}
-			var tokens = new HashSet<String>();
-			tokens.addAll(Names.contentTokens(p.name().replace('_', ' ')));
-			tokens.addAll(Names.contentTokens(p.description()));
-			for (String l : p.lexicon()) {
-				tokens.addAll(Names.contentTokens(l));
+			// A relation's vocabulary: its name's words, its lexicon, and its qualifiers ("brother" reaches
+			// sibling_of). A word shared with the name itself counts twice: "parent" is parent_of before it is the
+			// "parent-in-law" of in_law_of.
+			Set<String> nameWords = new HashSet<>(Names.contentTokens(p.name().replace('_', ' ')));
+			if (bare) {
+				nameWords = withLemmas(nameWords);
 			}
-			tokens.retainAll(proposedTokens);
-			int score = tokens.size();
-			if (score > bestScore) {
-				best = p;
-				bestScore = score;
-				tie = false;
-			} else if (score == bestScore && score > 0) {
-				tie = true;
+			var vocabulary = new HashSet<String>(nameWords);
+			for (String l : p.lexicon()) {
+				vocabulary.addAll(Names.contentTokens(l));
+			}
+			if (bare) {
+				for (String q : p.qualifiers()) {
+					vocabulary.addAll(Names.contentTokens(q));
+				}
+			}
+			Set<String> shared = bare ? withLemmas(vocabulary) : new HashSet<>(vocabulary);
+			shared.retainAll(proposedWords);
+			int score = shared.size();
+			if (bare) {
+				for (String w : shared) {
+					if (nameWords.contains(w)) {
+						score++;
+					}
+				}
+			}
+			if (!bare) {
+				var prose = new HashSet<>(vocabulary);
+				prose.addAll(Names.contentTokens(p.description()));
+				prose.retainAll(proposedProse);
+				prose.removeAll(shared);
+				score += prose.size();
+			}
+			if (score > 0) {
+				scored.add(Map.entry(p, score));
 			}
 		}
-		return best == null || tie ? null : new Similar(best, bestScore);
+		if (scored.isEmpty()) {
+			return null;
+		}
+		scored.sort((a, b) -> Integer.compare(b.getValue(), a.getValue()));
+		int bestScore = scored.getFirst().getValue();
+		boolean tie = scored.size() > 1 && scored.get(1).getValue() == bestScore;
+		if (tie && def.description() != null) {
+			// A defined name that reads equally like several relations reads like none of them, as before; a bare
+			// name has only its words, so its tied ones are offered together and the caller says.
+			return null;
+		}
+		var alternatives = new ArrayList<Predicate>();
+		for (int i = 1; i < scored.size() && alternatives.size() < 2; i++) {
+			alternatives.add(scored.get(i).getKey());
+		}
+		return new Similar(scored.getFirst().getKey(), bestScore, List.copyOf(alternatives));
 	}
 
 	private static boolean overlaps(List<String> a, List<String> b) {

@@ -743,4 +743,60 @@ class VocabularyTest {
 					e.events().get(eventId).orElseThrow().rendering(), "the corrected wording survives a restart");
 		}
 	}
+
+	@Test
+	void aBareNameWhoseWordsLemmatiseOntoARegisteredOneIsAskedAbout() {
+		// "leans_toward" shares no word with considering as written; through the lemma "lean" it meets "leaning",
+		// and the question offers considering rather than registering a synonym from use (2026-09-26).
+		try (Engine e = TestHomes.engine("s25-lemma")) {
+			RememberOutcome o = remember(e, "I'm leaning toward a Zenit 4.",
+					proposal().fact("self", "leans_toward", "buying a Zenit 4"));
+			assertEquals(0, o.applied().facts().size(), "held behind the question: " + o.applied());
+			Map<String, Object> q = question(o, "predicate_resolution");
+			assertEquals("leans_toward", q.get("predicate"));
+			assertEquals("considering", candidateIds(q).getFirst(), q.toString());
+			assertTrue(candidateIds(q).contains("new"));
+			RememberOutcome a = remember(e, "Yes, that.", null, new Resolve((String) q.get("id"), "considering"));
+			assertEquals(1, ((List<?>) a.resolved().getFirst().get("facts")).size(), a.resolved().toString());
+			assertTrue(e.predicates().get("considering").orElseThrow().aliases().contains("leans_toward"));
+			assertTrue(recall(e, "what is Mattias considering").structured().matched());
+			RememberOutcome later = remember(e, "I'm leaning toward a red one.",
+					proposal().fact("self", "leans_toward", "a red one"));
+			assertEquals("considering", later.applied().facts().getFirst().predicate(), "asked once");
+			assertEquals(List.of(), later.applied().questions());
+		}
+	}
+
+	@Test
+	void theClosestFewAreOfferedTogether() {
+		// "plans_to_decide" shares words with considering (plan) and decided (decide): both are offered, the
+		// closer first, and the one chosen takes the name as its alias.
+		try (Engine e = TestHomes.engine("s25-closest")) {
+			RememberOutcome o = remember(e, "I plan to decide on the printer next week.",
+					proposal().fact("self", "plans_to_decide", "on the printer next week"));
+			Map<String, Object> q = question(o, "predicate_resolution");
+			List<String> ids = candidateIds(q);
+			assertEquals(List.of("considering", "decided", "new"), ids, q.toString());
+			@SuppressWarnings("unchecked")
+			List<Map<String, Object>> cs = (List<Map<String, Object>>) q.get("candidates");
+			assertEquals("similar", cs.get(0).get("match"));
+			assertEquals("close", cs.get(1).get("match"));
+			assertTrue(q.get("message").toString().contains("next closest"), q.get("message").toString());
+			assertTrue(q.get("message").toString().contains("'decided'"), q.get("message").toString());
+			RememberOutcome a = remember(e, "The second one.", null, new Resolve((String) q.get("id"), "decided"));
+			assertEquals(1, ((List<?>) a.resolved().getFirst().get("facts")).size(), a.resolved().toString());
+			assertTrue(e.predicates().get("decided").orElseThrow().aliases().contains("plans_to_decide"));
+		}
+	}
+
+	@Test
+	void lemmasReachTheIngForm() {
+		assertEquals("lean", Predicate.lemma("leaning"));
+		assertEquals("plan", Predicate.lemma("planning"));
+		assertEquals("consider", Predicate.lemma("considering"));
+		assertEquals("lean", Predicate.lemma("leans"));
+		assertEquals(null, Predicate.lemma("sing"));
+		assertEquals(null, Predicate.lemma("plan"));
+	}
+
 }

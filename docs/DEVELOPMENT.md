@@ -87,8 +87,12 @@ proposal format, used by the bench's model proposer.
   and refusal of a newer schema. Never edit an applied migration; add the next one.
 - Some tests need what the build does not ship and skip when it is absent. With the ONNX Runtime library
   (`MNEMIC_ORT_LIBRARY`) and an embedding model directory (`MNEMIC_EMBED_MODEL`, holding `model.onnx` and
-  `tokenizer.json`) in the environment, `EmbedderTest`, `SemanticRecallTest`, `OwnerAliasSampleTest`, and the
-  embedding integration tests in `NativeImageSanityIT` run. `MNEMIC_VEC_LIBRARY` (the sqlite-vec loadable
+  `tokenizer.json`) in the environment, `EmbedderTest`, `SemanticRecallTest`, `SemanticVocabularyTest`,
+  `OwnerAliasSampleTest`, and the embedding integration tests in `NativeImageSanityIT` run. On a machine where a
+  served store has left the runtime and the default model under `~/.mnemic/models`, the server pom's
+  `local-embedder-*` profiles set both for the test JVMs, so those tests run there without any environment
+  (2026-09-27); the profiles are activated by the runtime file's presence, and the version in their paths is
+  spelled out because a profile activation cannot read a property. `MNEMIC_VEC_LIBRARY` (the sqlite-vec loadable
   library) gates only the sqlite-vec integration test. `MNEMIC_BAKEOFF_MODELS` (a directory of model folders)
   gates `TokenizerReferenceTest` and widens `OwnerAliasSampleTest`. `MNEMIC_EMBED_MIRROR` (a directory laid out
   like the model's Hugging Face repository) gates the two first-use download tests: scenario F2 in

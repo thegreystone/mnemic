@@ -116,20 +116,77 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
             </plugin>
             <plugin>
                 <artifactId>maven-surefire-plugin</artifactId>
+                <!-- The tests that need the real embedder read these; the local-embedder profiles fill them from
+                     ~/.mnemic/models when a served store has left the runtime and the model there, else they pass the
+                     caller's environment through, and the tests skip when neither exists. -->
+                <configuration>
+                    <environmentVariables>
+                        <MNEMIC_ORT_LIBRARY>${mnemic.test.ort.library}</MNEMIC_ORT_LIBRARY>
+                        <MNEMIC_EMBED_MODEL>${mnemic.test.embed.model}</MNEMIC_EMBED_MODEL>
+                    </environmentVariables>
+                </configuration>
             </plugin>
             <plugin>
                 <artifactId>maven-failsafe-plugin</artifactId>
+                <configuration>
+                    <environmentVariables>
+                        <MNEMIC_ORT_LIBRARY>${mnemic.test.ort.library}</MNEMIC_ORT_LIBRARY>
+                        <MNEMIC_EMBED_MODEL>${mnemic.test.embed.model}</MNEMIC_EMBED_MODEL>
+                    </environmentVariables>
+                </configuration>
             </plugin>
         </plugins>
     </build>
 
     <properties>
         <mnemic.ort.version>1.29.0</mnemic.ort.version>
+        <!-- Where the embedder tests find the runtime and the model: the environment unless a profile below finds
+             them under ~/.mnemic/models (the version in the activation paths is spelled out, since a profile cannot
+             read a property). -->
+        <mnemic.test.ort.library>${env.MNEMIC_ORT_LIBRARY}</mnemic.test.ort.library>
+        <mnemic.test.embed.model>${env.MNEMIC_EMBED_MODEL}</mnemic.test.embed.model>
+        <mnemic.test.models>${user.home}/.mnemic/models</mnemic.test.models>
         <!-- Overridden by the platform profiles below; 'none' bundles nothing on a platform the artifact lacks. -->
         <mnemic.ort.platform>none</mnemic.ort.platform>
     </properties>
 
     <profiles>
+        <profile>
+            <id>local-embedder-win</id>
+            <activation>
+                <file>
+                    <exists>${user.home}/.mnemic/models/onnxruntime-1.29.0/onnxruntime.dll</exists>
+                </file>
+            </activation>
+            <properties>
+                <mnemic.test.ort.library>${mnemic.test.models}/onnxruntime-${mnemic.ort.version}/onnxruntime.dll</mnemic.test.ort.library>
+                <mnemic.test.embed.model>${mnemic.test.models}/granite-embedding-311m-multilingual-r2</mnemic.test.embed.model>
+            </properties>
+        </profile>
+        <profile>
+            <id>local-embedder-linux</id>
+            <activation>
+                <file>
+                    <exists>${user.home}/.mnemic/models/onnxruntime-1.29.0/libonnxruntime.so</exists>
+                </file>
+            </activation>
+            <properties>
+                <mnemic.test.ort.library>${mnemic.test.models}/onnxruntime-${mnemic.ort.version}/libonnxruntime.so</mnemic.test.ort.library>
+                <mnemic.test.embed.model>${mnemic.test.models}/granite-embedding-311m-multilingual-r2</mnemic.test.embed.model>
+            </properties>
+        </profile>
+        <profile>
+            <id>local-embedder-mac</id>
+            <activation>
+                <file>
+                    <exists>${user.home}/.mnemic/models/onnxruntime-1.29.0/libonnxruntime.dylib</exists>
+                </file>
+            </activation>
+            <properties>
+                <mnemic.test.ort.library>${mnemic.test.models}/onnxruntime-${mnemic.ort.version}/libonnxruntime.dylib</mnemic.test.ort.library>
+                <mnemic.test.embed.model>${mnemic.test.models}/granite-embedding-311m-multilingual-r2</mnemic.test.embed.model>
+            </properties>
+        </profile>
         <profile>
             <id>ort-win-x64</id>
             <activation>

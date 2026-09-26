@@ -274,7 +274,7 @@ public record Predicate(String name, String description, List<String> domain, Li
 		return prefix + (lw.endsWith("ed") ? "did not " : "does not ") + lemma + after;
 	}
 
-	static String lemma(String verb) {
+	public static String lemma(String verb) {
 		if (IRREGULAR.containsKey(verb)) {
 			return IRREGULAR.get(verb);
 		}
@@ -291,6 +291,15 @@ public record Predicate(String name, String description, List<String> domain, Li
 		}
 		if (verb.endsWith("ed")) {
 			return verb.substring(0, verb.length() - 2);
+		}
+		if (verb.endsWith("ing") && verb.length() > 5) {
+			// "leaning" → lean, "planning" → plan, "considering" → consider; a dropped final "e" is not restored
+			String stem = verb.substring(0, verb.length() - 3);
+			if (stem.length() > 3 && stem.charAt(stem.length() - 1) == stem.charAt(stem.length() - 2)
+					&& "bdgklmnprt".indexOf(stem.charAt(stem.length() - 1)) >= 0) {
+				stem = stem.substring(0, stem.length() - 1);
+			}
+			return stem;
 		}
 		return null;
 	}

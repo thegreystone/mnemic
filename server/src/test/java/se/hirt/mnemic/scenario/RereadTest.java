@@ -131,17 +131,18 @@ class RereadTest {
 			// The assistant reads the same text again, properly: a type, a participant, and the fact it implies.
 			Reading r = e.reread(obs,
 					proposal().entity("e1", "Nordvik Cycles", "organization").entity("e2", "the red bicycle", "thing")
-							.event("ev1", "ordered", "2025-03", "self", "e2").fact("self", "buys_from", "e1").build());
+							.event("ev1", "ordered", "2025-03", "self", "e2").fact("self", "orders_from", "e1")
+							.build());
 			assertTrue(r.replaced());
 			assertEquals(1, r.removed().events().size(), r.removed().toString());
 			assertEquals(0, r.removed().facts().size());
 			assertEquals("ordered", r.applied().events().getFirst().type());
-			assertEquals(List.of("Mattias Sandell buys from Nordvik Cycles"),
+			assertEquals(List.of("Mattias Sandell orders from Nordvik Cycles"),
 					r.applied().facts().stream().map(f -> f.rendering()).toList());
 			Observation same = e.observations().get(obs).orElseThrow();
 			assertEquals(said, same.observedAt(), "the text keeps its date");
 			assertEquals("I ordered a red bicycle from Nordvik Cycles in March.", same.text());
-			assertTrue(same.proposalJson().contains("buys_from"), "the reading on record is the new one");
+			assertTrue(same.proposalJson().contains("orders_from"), "the reading on record is the new one");
 			assertEquals(entityId, e.entities().byRef("Nordvik Cycles").orElseThrow().id(), "entities keep their ids");
 			assertEquals(1, e.events().eventsOfObservation(obs).size(), "the old event is gone");
 			assertEquals(obs, factOf(e, factId(new RememberOutcome(o.observation(), r.applied(), List.of(), "x"), 0))
@@ -151,7 +152,7 @@ class RereadTest {
 			// A reading identical to the current one changes nothing but the ids.
 			Reading again = e.reread(obs, Proposal(same.proposalJson()));
 			assertEquals(1, again.removed().facts().size());
-			assertEquals(List.of("Mattias Sandell buys from Nordvik Cycles"), current(e, e.entities().owner().id()));
+			assertEquals(List.of("Mattias Sandell orders from Nordvik Cycles"), current(e, e.entities().owner().id()));
 		}
 	}
 

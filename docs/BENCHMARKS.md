@@ -90,6 +90,7 @@ store, the conversation empty), 43 steps are statements. The script is `bench/us
 | Qwen 3.5 9B | native tools | `usage-qwen9b-s9`, 2026-09-24 | 61 | 11 | 37 | 0 | 0 | 0.8 | none |
 | Qwen 3.5 9B | native tools, final tree | `usage-qwen9b-s10`, 2026-09-24 | 60 (61) | 10 | 38 | 0 | 0 | 0.7 | none |
 | Qwen 3.5 9B | native tools, 09-26 tree | `usage-qwen9b-s11`, 2026-09-26 | 62 | 11 | 40 | 1 | 0 | 0.8 | none |
+| Qwen 3.5 9B | native tools, closest relations offered | `usage-qwen9b-s12`, 2026-09-26 | 60 (62) | 10 | 39 | 1 | 0 | 0.7 | none |
 
 The judge is Opus 5.5 for the Claude rows and the 9B itself for the Qwen rows, whose verdicts were checked by
 hand; the number in parentheses is the hand count where it differs (a correct abstention or a partial answer
@@ -110,7 +111,10 @@ What the remaining misses are:
   now turns around, and a careless reading of a recall block that was in front of it.
 - **Opus**: none.
 
-Cap hits are statement or question turns that ran out of eight tool calls. On the text protocol Qwen's numbers
+The last row measured predicate resolution with lemmas and the closest relations offered together in the
+question; Qwen wrote `considering` itself that run, so the path was not exercised, and the predicate questions
+it did see were about its own near-duplicate names (`offers_fixed_rate` beside its `fixed_rate_offer`), which it
+answered rarely in either run. Cap hits are statement or question turns that ran out of eight tool calls. On the text protocol Qwen's numbers
 swing by ten between runs of the same code; native runs have so far been within one.
 
 ## Not measured on this branch

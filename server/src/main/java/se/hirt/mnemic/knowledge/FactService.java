@@ -875,7 +875,8 @@ public final class FactService {
 			a.defined("predicate", p.name(), "registered", assumed);
 		}
 		if (res.asks()) {
-			a.ask(asks.predicate(a.obs, f, res.candidate(), res.how(), def, FactQuestions.heldProposal(a.p, f, def)));
+			a.ask(asks.predicate(a.obs, f, res.candidate(), res.how(), def, FactQuestions.heldProposal(a.p, f, def),
+					res.alternatives()));
 			return Optional.empty();
 		}
 		Operands op = operands(a, f, res.predicate());

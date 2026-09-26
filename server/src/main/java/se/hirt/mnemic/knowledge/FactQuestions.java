@@ -76,17 +76,40 @@ final class FactQuestions {
 	}
 
 	Question predicate(Observation obs, FactRef f, Predicate candidate, String how, PredicateDef def, String payload) {
+		return predicate(obs, f, candidate, how, def, payload, List.of());
+	}
+
+	/**
+	 * {@code alternatives}: the next closest relations by words or meaning, offered beside the candidate so the caller
+	 * can say which of the closest will do, or that none does (2026-09-26).
+	 */
+	Question predicate(
+		Observation obs, FactRef f, Predicate candidate, String how, PredicateDef def, String payload,
+		List<Predicate> alternatives) {
 		var c = new ArrayList<Map<String, Object>>();
 		c.add(choice(1, candidate.name(), candidate.name() + ": " + candidate.description(), how));
-		c.add(choice(2, "new", "register '" + f.predicate() + "' as a new predicate", null));
+		int n = 2;
+		for (Predicate p : alternatives) {
+			c.add(choice(n++, p.name(), p.name() + ": " + p.description(), "close"));
+		}
+		c.add(choice(n, "new", "register '" + f.predicate() + "' as a new predicate", null));
+		var others = new StringBuilder();
+		for (Predicate p : alternatives) {
+			others.append(others.length() == 0 ? " Or one of the next closest: " : "; ").append("'").append(p.name())
+					.append("' (").append(p.description()).append(')');
+		}
+		if (others.length() > 0) {
+			others.append('.');
+		}
 		String message = "Does '" + f.predicate() + "' (" + (def == null ? "" : def.description()) + ") mean the "
-				+ "same as '" + candidate.name() + "' (" + candidate.description() + ")? " + switch (how) {
-				case "similar" -> "They share several words, but a narrower or opposite meaning (a restriction, "
-						+ "a negation) would be lost. ";
+				+ "same as '" + candidate.name() + "' (" + candidate.description() + ")?" + others + " "
+				+ switch (how) {
+				case "similar" -> "They share words, but a narrower or opposite meaning (a restriction, a negation) "
+						+ "would be lost. ";
 				case "semantic" -> "They share no words but lie close in meaning. ";
 				default -> "";
-				} + "The fact is held until you answer with '" + candidate.name() + "' or \"new\"; '" + candidate.name()
-				+ "' also records '" + f.predicate() + "' as its alias when the match was similar or semantic.";
+				} + "The fact is held until you answer with one of the names or \"new\"; a chosen name also records '"
+				+ f.predicate() + "' as its alias when the match was similar, semantic, or close.";
 		return questions.create("predicate_resolution", obs.id(), null, f.subject(), f.predicate(), c, payload,
 				message);
 	}

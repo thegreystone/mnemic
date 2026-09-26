@@ -235,14 +235,15 @@ class NativeImageSanityIT {
 								+ id + "}");
 				status = readResponse(stdout, 30_000);
 				assertNotNull(status, "No status response");
-				if (status.contains("dims") && status.contains("384")) {
+				// Ready with whichever model is configured: 384 dimensions for granite-107m, 768 for 311m-r2.
+				if (status.contains("\\\"state\\\":\\\"ready\\\"") && status.contains("dims")) {
 					break;
 				}
 				assertTrue(!status.contains("\\\"state\\\":\\\"failed\\\""),
 						"the embedder failed in the native image: " + status);
 				Thread.sleep(500);
 			}
-			assertTrue(status != null && status.contains("dims") && status.contains("384"),
+			assertTrue(status != null && status.contains("\\\"state\\\":\\\"ready\\\"") && status.contains("dims"),
 					"the embedder did not run in the native image: " + status);
 			System.out.println(status);
 		} finally {
