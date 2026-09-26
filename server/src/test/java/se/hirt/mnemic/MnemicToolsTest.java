@@ -741,6 +741,8 @@ class MnemicToolsTest {
 		// Claude Code puts every server's instructions in one block of about 4 KB and cuts the rest silently
 		// (anthropics/claude-code#43474), so with other servers configured only a short text arrives whole.
 		assertTrue(served.length() <= 2000, "instructions are " + served.length() + " chars; keep them under 2000");
+		// A model with native tool calls narrated writes it never made (usage bench, 2026-09-24): the rule is served.
+		assertTrue(served.contains("Say recorded only after") && served.contains("`remember` returns"), served);
 		// The four rules a proposal cannot do without ride in the instructions, so the guide is optional reading.
 		assertTrue(served.contains("considering") && served.contains("negated") && served.contains("ISO")
 				&& served.contains("kinship"), served);

@@ -289,6 +289,24 @@ class UsageFindingsTest {
 	}
 
 	@Test
+	void anEventIsNoAnswerToAQuestionThatNamesSomethingElse() {
+		try (Engine e = engine("usage-events-named-elsewhere")) {
+			// The joining on record is Initrode's; a question about Hooli, which the store has never heard of, is
+			// not answered by it (Qwen took "matches the question" at its word, 2026-09-24).
+			remember(e, "I have worked at Initrode since 2010.", proposal().entity("i", "Initrode", "organization")
+					.fact("self", "works_at", "i").event("ev1", "joined", "2010", "self", "i"));
+			RecallResult hooli = recall(e, "When did Mattias join Hooli?");
+			assertNotEquals("events", hooli.structured().state(), hooli.text());
+			assertTrue(hooli.text().contains("the question names hooli, which is not on record"), hooli.text());
+			assertTrue(hooli.text().contains("about other things"), hooli.text());
+			// The same question about the thing on record is answered by the event.
+			RecallResult initrode = recall(e, "When did Mattias join Initrode?");
+			assertEquals("events", initrode.structured().state(), initrode.text());
+			assertFalse(initrode.text().contains("not on record"), initrode.text());
+		}
+	}
+
+	@Test
 	void aMissSaysWhomTheObservationsBelowMention() {
 		try (Engine e = engine("usage-miss-mentions")) {
 			// A reading that reversed the parent relation: no step-parent is derived, so "stepmother" is a miss. The

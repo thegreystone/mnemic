@@ -89,6 +89,7 @@ store, the conversation empty), 43 steps are statements. The script is `bench/us
 | Qwen 3.5 9B | text | `usage-qwen9b-s7`, 2026-09-24 | 52 (53) | 10 | 43 | 8 | 67 | 2.5 | none |
 | Qwen 3.5 9B | native tools | `usage-qwen9b-s9`, 2026-09-24 | 61 | 11 | 37 | 0 | 0 | 0.8 | none |
 | Qwen 3.5 9B | native tools, final tree | `usage-qwen9b-s10`, 2026-09-24 | 60 (61) | 10 | 38 | 0 | 0 | 0.7 | none |
+| Qwen 3.5 9B | native tools, 09-26 tree | `usage-qwen9b-s11`, 2026-09-26 | 62 | 11 | 40 | 1 | 0 | 0.8 | none |
 
 The judge is Opus 5.5 for the Claude rows and the 9B itself for the Qwen rows, whose verdicts were checked by
 hand; the number in parentheses is the hand count where it differs (a correct abstention or a partial answer
@@ -98,10 +99,11 @@ repeated read, the fuller name on an entity answer); they are the reference unti
 
 What the remaining misses are:
 
-- **Qwen, native tools**: the model says "I've recorded that" without calling `remember`, five or six statements
-  a run; one of those is the SQLite decision, unknown after the break. The car decision, where the order is on
-  record and the model answers "no final decision". The text protocol never lost a statement, since every turn
-  had to be an explicit action; it lost eight steps to the call cap instead.
+- **Qwen, native tools**: the model says "I've recorded that" without calling `remember`. The instructions now
+  end rule 3 with "Say recorded only after `remember` returns" (2026-09-26); the narrated writes went from five
+  and four a run to three, and the three left are one shape, the project decisions ("for the Mnemic project we
+  decided ..."), so the SQLite decision is still unknown after the break. The text protocol never lost a
+  statement, since every turn had to be an explicit action; it lost eight steps to the call cap instead.
 - **Qwen, text**: identical recall calls repeated to the cap, and its own JSON: braces dropped, a bare string
   for an argument object, a bracket missing after an array. Native tool calls remove all of it.
 - **Haiku, text**: `parent_of` written with self as the parent (eight of nine times), which the direction line
@@ -113,7 +115,7 @@ swing by ten between runs of the same code; native runs have so far been within 
 
 ## Not measured on this branch
 
-- The Claude models on the native tool protocol and on the final tree (paid; the last measured state is above).
+- The Claude models on the native tool protocol and on the current tree (paid; the last measured state is above).
 - The semantic channel on the branch (needs the embedder in the environment).
 
 ## Running them

@@ -155,9 +155,13 @@ scenarios, 114 steps, 63 questions: family, jobs over time, negation, correction
 work on a code base, a car, a home, a wedding timeline, health, travel, a child's school; eight span a session
 break). Each scenario starts a real server over stdio on a fresh data home, exactly as a client would, and
 the assistant is given what a real client gives it: the server's instructions from the initialize reply and the
-tools it publishes (the proposal guide is not pasted in; the assistant fetches it with `inspect('guide')`). At each step the model either calls a tool (`{"tool": ...,
-"arguments": {...}}`) or answers the user (`{"reply": ...}`); a judge grades the answers against the script's
-expected ones, abstention questions with the `_abs` rule of the retrieval bench.
+tools it publishes (the proposal guide is not pasted in; the assistant fetches it with `inspect('guide')`). The
+tools reach the model as its vendor's native tool calls (`--protocol tools`, the default where the model has
+them), so a step is a turn of tool calls and their results until the model answers in text; `--protocol text`
+keeps the older form in which the model writes one JSON object a turn (`{"tool": ..., "arguments": {...}}` or
+`{"reply": ...}`) and the harness parses it, for reproducing runs made that way. A judge grades the answers
+against the script's expected ones; an abstention counts when the answer says the thing is not known, not
+recorded, or not told, and never when it asserts an answer.
 
 ```text
 cd bench
@@ -168,7 +172,10 @@ mvn -q exec:java -Dexec.args="usage --script usage/scenarios.json --server ../se
 Options: `--server` (the runner jar or the native binary), `--assistant MODEL`, `--judge MODEL|none`,
 `--api-key-env NAME`, `--limit N` (first N scenarios), `--only ID` (one scenario), `--embed on|off` (default
 off: the semantic channel is not what is measured), `--max-calls N` (tool calls allowed per step, default 8),
-`--reasoning-effort` as for `run`.
+`--protocol tools|text` (above), `--repeat-guard on|off` (default off: an identical consecutive call is executed,
+as a real client would; on, the harness answers it with a note instead, an experiment the store's own repeat
+note grew out of), `--reasoning-effort` as for `run`. Every record and the summary count `repeated_calls`
+either way.
 
 A run that stopped (an API limit, a crash) goes on from its first unfinished scenario with `--resume true`
 on the same `--out`: finished scenarios keep their records, a half-done one is played again, and the

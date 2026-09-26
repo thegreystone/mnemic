@@ -194,7 +194,7 @@ public final class RecallService {
 		if ("miss".equals(s.state()) && ch.events.stream().anyMatch(ev -> ch.lexicalEventIds.contains(ev.id()))) {
 			// A MISS over an events line that answers the question told a well-behaved assistant to say "I don't
 			// know". Only events that matched the query text count; an entity's own events stay context.
-			s = s.withState("events");
+			s = eventsUnlessNamedElsewhere(q, s, ch.events);
 		}
 		semanticChannel(q, asOf, now, includeHistory, ch);
 		upcomingChannel(q, asOf, now, ch);
@@ -449,7 +449,29 @@ public final class RecallService {
 		ch.structured.addAll(ranked);
 		boolean answered = ("matched".equals(s.state()) && g.answerCue()) || s.knownFalse()
 				|| "future".equals(s.state());
-		return answered ? s : s.withState("events");
+		return answered ? s : eventsUnlessNamedElsewhere(q, s, cued);
+	}
+
+	/**
+	 * The events verdict, unless the question names a thing the events do not: "when did Mattias join Hooli" over
+	 * "Mattias joined Initrode", with no Hooli on record, is not answered by the Initrode event, and the verdict says
+	 * what the question names that the store lacks instead of calling the event a match (2026-09-26).
+	 */
+	private static Structured eventsUnlessNamedElsewhere(Query q, Structured s, List<Event> events) {
+		if (q.named().isEmpty()) {
+			return s.withState("events");
+		}
+		var mentioned = new java.util.HashSet<String>();
+		for (Event ev : events) {
+			mentioned.addAll(Names.tokens(ev.rendering()));
+		}
+		var missing = q.named().stream().filter(n -> !mentioned.contains(n)).toList();
+		if (missing.isEmpty()) {
+			return s.withState("events");
+		}
+		return s.withNote("the question names " + String.join(", ", missing) + ", which is not on record; the "
+				+ events.size() + (events.size() == 1 ? " event" : " events") + " on the next line "
+				+ (events.size() == 1 ? "is" : "are") + " about other things");
 	}
 
 	/**
