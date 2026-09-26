@@ -157,7 +157,7 @@ class TwoPetersTest {
 					new Resolve(String.valueOf(q.get("id")), "new"));
 			String cloud = String.valueOf(other.resolved().getFirst().get("entity"));
 			assertFalse(hooli.equals(cloud));
-			RememberOutcome bare = remember(e, "Bosse works at Hooli.", proposal().entity("b", "Bosse Berg", "person")
+			RememberOutcome bare = remember(e, "Bo works at Hooli.", proposal().entity("b", "Bo Berg", "person")
 					.entity("h2", "Hooli", "organization").fact("b", "works_at", "h2"));
 			Map<String, Object> again = firstQuestion(bare);
 			assertEquals("Hooli", again.get("subject"));

@@ -66,6 +66,22 @@ public final class Names {
 	}
 
 	/** Normalised word tokens, possessive {@code 's} removed. */
+	/**
+	 * Whether a two-letter token is a name where it is written: capitalised in {@code source} and no stopword. "Bo" in
+	 * "Bo Berg" or "Is Bo home?" is; "it", "an", and a lowercase "bo" are not. Longer words carry identity by length;
+	 * one letter never does (2026-09-26).
+	 */
+	public static boolean looksLikeName(String token, String source) {
+		if (token == null || source == null || token.length() != 2 || STOPWORDS.contains(token)
+				|| !token.chars().allMatch(Character::isLetter)) {
+			return false;
+		}
+		String first = token.substring(0, 1).toUpperCase(Locale.ROOT);
+		Pattern p = Pattern.compile("(?<![\\p{L}\\p{N}])" + Pattern.quote(first) + "(?i:"
+				+ Pattern.quote(token.substring(1)) + ")(?![\\p{L}\\p{N}])");
+		return p.matcher(source).find();
+	}
+
 	public static List<String> tokens(String s) {
 		var out = new ArrayList<String>();
 		var m = tokenMatcher(s);

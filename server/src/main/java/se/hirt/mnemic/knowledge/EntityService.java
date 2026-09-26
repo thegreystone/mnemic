@@ -280,8 +280,8 @@ public final class EntityService {
 	 * the other's and at least one more ("Peter Andersson" over "Peter"; not "Oskar Nyberg" over "Konrad Nyberg").
 	 */
 	public boolean saysMore(String fuller, String shorter, String type) {
-		List<String> more = types.identityTokens(fuller, type).stream().filter(EntityService::identity).toList();
-		List<String> less = types.identityTokens(shorter, type).stream().filter(EntityService::identity).toList();
+		List<String> more = types.identityTokens(fuller, type).stream().filter(t -> identity(t, fuller)).toList();
+		List<String> less = types.identityTokens(shorter, type).stream().filter(t -> identity(t, shorter)).toList();
 		return !less.isEmpty() && more.size() > less.size() && more.containsAll(less);
 	}
 
@@ -446,9 +446,9 @@ public final class EntityService {
 	 */
 	private List<Candidate> fuzzy(
 		Tx tx, String name, String norm, String type, Set<Long> distinctFrom, Set<String> expected) {
-		List<String> tokens = types.identityTokens(name, type).stream().filter(EntityService::identity).toList();
-		if (norm.length() < 3 || tokens.isEmpty()) {
-			return List.of();
+		List<String> tokens = types.identityTokens(name, type).stream().filter(t -> identity(t, name)).toList();
+		if (tokens.isEmpty()) {
+			return List.of(); // nothing that identifies: "it", "AL" written lowercase, a stopword
 		}
 		List<String> words = Names.contentTokens(name);
 		Set<String> grams = trigrams(norm);
@@ -473,7 +473,7 @@ public final class EntityService {
 			double best = 0;
 			for (String alias : aliasesOf(tx, e.id())) {
 				String an = Names.norm(alias);
-				List<String> at = types.identityTokens(alias, e.type()).stream().filter(EntityService::identity)
+				List<String> at = types.identityTokens(alias, e.type()).stream().filter(t -> identity(t, alias))
 						.toList();
 				List<String> aliasPossessors = Names.possessors(alias);
 				List<String> mine = tokens;
@@ -492,12 +492,19 @@ public final class EntityService {
 				boolean possessorOnly = shared == 0 && (mine != tokens || theirs != at);
 				// "Oskar Nyberg" against "Konrad Nyberg": two full names whose leading tokens differ share a
 				// family name, not an identity. "Anna" against "Anna Lindqvist" stays ambiguous.
-				if (tokens.size() >= 2 && at.size() >= 2 && !tokens.getFirst().equals(at.getFirst())
-						&& !tokens.getFirst().startsWith(at.getFirst())
-						&& !at.getFirst().startsWith(tokens.getFirst())) {
+				boolean leadingDiffers = tokens.size() >= 2 && at.size() >= 2
+						&& !tokens.getFirst().equals(at.getFirst()) && !tokens.getFirst().startsWith(at.getFirst())
+						&& !at.getFirst().startsWith(tokens.getFirst());
+				if (leadingDiffers) {
 					tokenScore = Math.min(tokenScore, AMBIGUOUS - 0.1);
 				}
 				double gramScore = an.length() >= 4 ? jaccard(grams, trigrams(an)) : 0;
+				// "Lo Berg" against "Bo Berg": the letters agree because the family name is most of them, but a
+				// two-letter name has no room for a typo, so a different one is a different person. Three letters
+				// and up keep the typo question ("Ewa Berg" against "Eva Berg").
+				if (leadingDiffers && (tokens.getFirst().length() <= 2 || at.getFirst().length() <= 2)) {
+					gramScore = Math.min(gramScore, AMBIGUOUS - 0.1);
+				}
 				double score = Math.max(tokenScore, gramScore);
 				if (otherOwner || possessorOnly) {
 					score = Math.min(score, AMBIGUOUS - 0.1);
@@ -533,9 +540,12 @@ public final class EntityService {
 				.collect(java.util.stream.Collectors.toSet());
 	}
 
-	/** A token that identifies: three letters or more, or a number ("5" in "Raspberry Pi 5"). */
-	private static boolean identity(String token) {
-		return token.length() >= 3 || token.chars().allMatch(Character::isDigit);
+	/**
+	 * A token that identifies: three letters or more, a number ("5" in "Raspberry Pi 5"), or a two-letter word that
+	 * stands as a name where it is written ("Bo" in "Bo Berg"; see {@link Names#looksLikeName}).
+	 */
+	private static boolean identity(String token, String source) {
+		return token.length() >= 3 || token.chars().allMatch(Character::isDigit) || Names.looksLikeName(token, source);
 	}
 
 	static Set<String> trigrams(String s) {
@@ -828,7 +838,8 @@ public final class EntityService {
 						SELECT DISTINCT e.* FROM entity_alias a JOIN entity e ON e.id = a.entity_id
 						WHERE a.alias_norm = ? AND e.merged_into IS NULL ORDER BY e.id""", gram).stream()
 						.map(Entity::from).toList());
-				if (hits.isEmpty() && n == 1 && gram.length() >= 3) {
+				boolean nameLike = gram.length() >= 3 || Names.looksLikeName(gram, query);
+				if (hits.isEmpty() && n == 1 && nameLike) {
 					hits = db.read(tx -> tx.query("""
 							SELECT e.* FROM entity e WHERE e.type = 'person' AND e.merged_into IS NULL
 							AND (lower(e.name) LIKE ? || ' %')""", gram).stream().map(Entity::from).toList());
@@ -836,7 +847,7 @@ public final class EntityService {
 						hits = List.of(); // ambiguous first name: no guess
 					}
 				}
-				if (hits.isEmpty() && gram.length() >= 3) {
+				if (hits.isEmpty() && nameLike) {
 					hits = family(gram, tokens.subList(i, i + n));
 				}
 				if (!hits.isEmpty()) {

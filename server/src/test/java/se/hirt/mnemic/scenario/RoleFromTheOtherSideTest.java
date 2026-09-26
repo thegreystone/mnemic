@@ -191,7 +191,7 @@ class RoleFromTheOtherSideTest {
 			RecallResult navigator = recall(e, "Mattias's navigator");
 			assertEquals("miss", navigator.structured().state(), "Kim is the navigatrix: " + navigator.text());
 			// The same relation stated from Kim's side reads her word with its own gender.
-			remember(e, "Lova is my navigatrix.", proposal().entity("lo", "Lova Berg", "person")
+			remember(e, "Lo is my navigatrix.", proposal().entity("lo", "Lo Berg", "person")
 					.fact(fact("lo", "crewmate_of", "self", "navigatrix", null, null, null, null, null, null)));
 			RecallResult two = recall(e, "Mattias's navigatrix");
 			assertEquals(2, two.structured().facts().size(), two.text());
@@ -202,16 +202,16 @@ class RoleFromTheOtherSideTest {
 	void aGroupWordReachesAnyRelationNamedElsewhere() {
 		// Not parent_of in particular: a marriage named by its own word for one person, and by "family" for another.
 		try (Engine e = engine("group-any-relation")) {
-			remember(e, "Anna's husband is Carl; Bosse's wife is Dana.",
+			remember(e, "Anna's husband is Carl; Bo's wife is Dana.",
 					proposal().entity("a", "Anna Lindqvist", "person").entity("c", "Carl Lindqvist", "person")
-							.entity("b", "Bosse Berg", "person").entity("d", "Dana Berg", "person")
+							.entity("b", "Bo Berg", "person").entity("d", "Dana Berg", "person")
 							.fact(fact("c", "spouse_of", "a", "husband", null, null, null, null, null, null))
 							.fact(fact("d", "spouse_of", "b", "wife", null, null, null, null, null, null)));
-			RecallResult both = recall(e, "Anna's husband and Bosse's family");
+			RecallResult both = recall(e, "Anna's husband and Bo's family");
 			String t = both.text();
 			assertTrue(t.contains("Carl Lindqvist is Anna Lindqvist's husband"), t);
-			assertTrue(t.contains("Bosse Berg · spouse_of (via family)"), "Bo's marriage through the group: " + t);
-			assertTrue(t.contains("Dana Berg is Bosse Berg's wife"), t);
+			assertTrue(t.contains("Bo Berg · spouse_of (via family)"), "Bo's marriage through the group: " + t);
+			assertTrue(t.contains("Dana Berg is Bo Berg's wife"), t);
 		}
 	}
 
