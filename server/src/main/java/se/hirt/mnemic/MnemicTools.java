@@ -84,6 +84,8 @@ import java.util.Set;
  */
 public class MnemicTools {
 
+	private static final org.jboss.logging.Logger LOG = org.jboss.logging.Logger.getLogger(MnemicTools.class);
+
 	private static final Set<String> SELF_ALIASES = Set.of("I", "me", "my", "myself", "self", "the user");
 
 	@Inject
@@ -503,10 +505,20 @@ public class MnemicTools {
 	}
 
 	@Tool(name = "status", description = ToolDescriptions.STATUS, annotations = @Tool.Annotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
-	ToolResponse status() {
+	ToolResponse status(McpConnection connection) {
 		return ToolSupport.json("status", () -> {
 			var out = new LinkedHashMap<String, Object>();
 			out.put("version", engine.version());
+			// The repeat memo as this session sees it: which session this is, how many the process holds, and the
+			// last read it memoised, so that a client whose repeats never get the note can be understood.
+			String session = sessionKey(connection);
+			var memo = new LinkedHashMap<String, Object>();
+			memo.put("session", session);
+			memo.put("connection", connection == null ? null : connection.id());
+			memo.put("sessions", lastRead.size());
+			memo.put("writes", writes.get());
+			memo.put("last_read", lastRead.get(session));
+			out.put("repeat_memo", memo);
 			out.put("home", engine.home().toAbsolutePath().toString());
 			out.put("schema_version", engine.database().schemaVersion());
 			out.put("owner", engine.entities().owner().name());
@@ -600,10 +612,21 @@ public class MnemicTools {
 	 * a call). One memo per session and read; a write in any session clears them all. A caller with no connection (the
 	 * tests) is one session.
 	 */
+	/**
+	 * The key a read is memoised under. A client whose requests arrive as transient connections (Claude Code over
+	 * stdio: a new id every request, "transient/4", "transient/5") is one client all the same, since stdio carries one;
+	 * a lasting connection keeps its own memo. No connection at all (the tests) is one session too.
+	 */
+	static String sessionKey(McpConnection connection) {
+		return connection == null || connection.isTransient() ? "" : connection.id();
+	}
+
 	private ToolResponse unlessRepeated(
 		McpConnection connection, String tool, List<?> args, Supplier<ToolResponse> call) {
-		String session = connection == null ? "" : connection.id();
+		String session = sessionKey(connection);
 		String signature = tool + "|" + writes.get() + "|" + args;
+		LOG.debugf("read memo %s: session '%s', %s", signature.equals(lastRead.get(session)) ? "hit" : "miss", session,
+				signature);
 		if (signature.equals(lastRead.get(session))) {
 			return "recall".equals(tool) ? ToolSupport.text(tool, () -> REPEATED_NOTE)
 					: ToolSupport.json(tool, () -> Map.of("repeated", true, "note", REPEATED_NOTE));

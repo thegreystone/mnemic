@@ -130,7 +130,7 @@ class MnemicToolsTest {
 
 	@Test
 	void statusReportsTheStore() {
-		ToolResponse status = tools.status();
+		ToolResponse status = tools.status(null);
 		assertFalse(status.isError(), text(status));
 		Map<String, Object> result = result(status);
 		assertEquals(35, ((Number) result.get("schema_version")).intValue());
@@ -218,7 +218,7 @@ class MnemicToolsTest {
 		assertEquals(obs, result(r).get("retired"));
 		assertEquals(1, ((List<?>) result(r).get("facts_citing")).size(), "the fact it produced is named");
 		assertTrue(result(r).containsKey("note"));
-		assertEquals(1L, ((Number) result(tools.status()).get("observations_retired")).longValue());
+		assertEquals(1L, ((Number) result(tools.status(null)).get("observations_retired")).longValue());
 		// The fact's history marks the observation as retired, and the observation says so itself.
 		ToolResponse h = tools.inspect("Mattias Sandell", Optional.of(true), Optional.of("uses"), null);
 		assertTrue(text(h).contains("observations_retired"), text(h));
@@ -229,7 +229,7 @@ class MnemicToolsTest {
 		ToolResponse u = tools.correct(obs, Map.of("retired", false), NONE);
 		assertFalse(u.isError(), text(u));
 		assertEquals(obs, result(u).get("reinstated"));
-		assertEquals(0L, ((Number) result(tools.status()).get("observations_retired")).longValue());
+		assertEquals(0L, ((Number) result(tools.status(null)).get("observations_retired")).longValue());
 		// A replacement without 'retired' is refused with the shape spelled out.
 		assertTrue(tools.correct(obs, Map.of("text", "x"), NONE).isError());
 	}
@@ -344,12 +344,12 @@ class MnemicToolsTest {
 		assertEquals("aunt_uncle_of", ((Map<?, ?>) result(retired).get("covered_by")).get("predicate"), text(retired));
 		assertEquals(((Map<?, ?>) result(retired).get("covered_by")).get("id"), result(retired).get("superseded_by"));
 		// A correction that changes nothing is refused, and leaves no record behind to replay.
-		long observations = ((Number) result(tools.status()).get("observations")).longValue();
+		long observations = ((Number) result(tools.status(null)).get("observations")).longValue();
 		String movedId = (String) replacement.get("id");
 		ToolResponse noop = tools.correct(movedId, Map.of("qualifier", "partner"), Optional.of("as it is"));
 		assertTrue(noop.isError(), text(noop));
 		assertTrue(error(noop).get("message").toString().contains("changes nothing"), text(noop));
-		assertEquals(observations, ((Number) result(tools.status()).get("observations")).longValue(),
+		assertEquals(observations, ((Number) result(tools.status(null)).get("observations")).longValue(),
 				"no correction record for a refused correction");
 	}
 
@@ -529,9 +529,55 @@ class MnemicToolsTest {
 		assertFalse(look.isError(), text(look));
 		ToolResponse lookAgain = tools.inspect("registry", Optional.empty(), NONE, null);
 		assertEquals(true, result(lookAgain).get("repeated"), text(lookAgain));
+		// A client whose every request is a transient connection with a fresh id (Claude Code over stdio) is one
+		// client: its repeat gets the note. A lasting connection with another id keeps a memo of its own.
+		ToolResponse t1 = tools.recall(Optional.of("Repeat Tester plums"), NONE, Optional.of(400), Optional.empty(),
+				Optional.empty(), connection("transient/7", true));
+		assertTrue(text(t1).startsWith("recall: \"Repeat Tester plums\""), text(t1));
+		ToolResponse t2 = tools.recall(Optional.of("Repeat Tester plums"), NONE, Optional.of(400), Optional.empty(),
+				Optional.empty(), connection("transient/8", true));
+		assertEquals(MnemicTools.REPEATED_NOTE, text(t2), "transient connections share the stdio client's memo");
+		ToolResponse lasting = tools.recall(Optional.of("Repeat Tester plums"), NONE, Optional.of(400),
+				Optional.empty(), Optional.empty(), connection("session-a", false));
+		assertTrue(text(lasting).startsWith("recall: \"Repeat Tester plums\""), "another session: " + text(lasting));
 		// An error repeated is an error again: its message is what says what to change.
 		assertTrue(tools.inspect("", Optional.empty(), NONE, null).isError());
 		assertTrue(tools.inspect("", Optional.empty(), NONE, null).isError(), "an error is not memoised");
+	}
+
+	/** A connection as the MCP library hands it to a tool: only its id and whether it lasts matter here. */
+	private static io.quarkiverse.mcp.server.McpConnection connection(String id, boolean transientOne) {
+		return new io.quarkiverse.mcp.server.McpConnection() {
+			@Override
+			public String id() {
+				return id;
+			}
+
+			@Override
+			public Status status() {
+				return Status.IN_OPERATION;
+			}
+
+			@Override
+			public io.quarkiverse.mcp.server.InitialRequest initialRequest() {
+				return null;
+			}
+
+			@Override
+			public io.quarkiverse.mcp.server.McpLog.LogLevel logLevel() {
+				return io.quarkiverse.mcp.server.McpLog.LogLevel.INFO;
+			}
+
+			@Override
+			public String serverName() {
+				return "mnemic";
+			}
+
+			@Override
+			public boolean isTransient() {
+				return transientOne;
+			}
+		};
 	}
 
 	private static String text(ToolResponse r) {
