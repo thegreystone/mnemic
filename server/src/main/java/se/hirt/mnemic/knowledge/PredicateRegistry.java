@@ -574,16 +574,22 @@ public final class PredicateRegistry {
 		if (similar != null && (similar.overlap() >= SIMILAR_MIN_OVERLAP || def.description() == null)) {
 			return new Resolution(null, "similar", similar.predicate(), closest(similar, near, similar.predicate()));
 		}
-		if (similar != null && similar.overlap() == 1) {
+		boolean described = def.description() != null && !def.description().isBlank();
+		if (similar != null && similar.overlap() == 1 && !described) {
 			return new Resolution(null, "ambiguous", similar.predicate(), closest(similar, near, similar.predicate()));
 		}
 		if (near != null && near.similar()) {
 			return new Resolution(null, "semantic", near.predicate(), closest(similar, near, near.predicate()));
 		}
-		if (near != null && near.ambiguous()) {
+		if (near != null && near.ambiguous() && !described) {
 			return new Resolution(null, "ambiguous", near.predicate(), closest(similar, near, near.predicate()));
 		}
-		return new Resolution(register(def, observationId), bare(def) ? "inferred" : "registered", null);
+		// A described predicate on a weak signal (one shared word, a close but not leading meaning) is registered
+		// as the caller defined it, the neighbour named so that the reply and consolidate can point at it: the
+		// caller said what it means, and 'size' is not 'color' for sharing the word 'product' (2026-09-27).
+		Predicate neighbour = similar != null && similar.overlap() == 1 ? similar.predicate()
+				: near != null && near.ambiguous() ? near.predicate() : null;
+		return new Resolution(register(def, observationId), bare(def) ? "inferred" : "registered", neighbour);
 	}
 
 	/** A definition that states nothing beyond the name. */

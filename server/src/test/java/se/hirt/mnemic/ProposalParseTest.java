@@ -29,6 +29,8 @@
 package se.hirt.mnemic;
 
 import org.junit.jupiter.api.Test;
+
+import java.util.List;
 import se.hirt.mnemic.proposal.Proposal;
 import se.hirt.mnemic.protocol.MnemicException;
 
@@ -80,6 +82,16 @@ class ProposalParseTest {
 				{"facts": [{"subject": "self", "predicate": "uses", "object": "X", "certainty": "believed"}]}""");
 		assertEquals(0.5, word.proposal().facts().getFirst().callerConfidence(), 1e-9);
 		assertTrue(word.warnings().isEmpty(), word.warnings().toString());
+	}
+
+	@Test
+	void theKeysTheGuideNamesOnAPredicateAreKnown() {
+		Proposal.Parsed p = Proposal.parseWithWarnings("""
+				{"predicates": [{"name": "size", "description": "Ring size.", "range": "literal", "lasting": true,
+				                 "groups": ["attributes"], "inverse_lexicon": ["sized"]}]}""");
+		assertTrue(p.warnings().isEmpty(), p.warnings().toString());
+		assertEquals(Boolean.TRUE, p.proposal().predicates().getFirst().lasting());
+		assertEquals(List.of("attributes"), p.proposal().predicates().getFirst().groups());
 	}
 
 	@Test

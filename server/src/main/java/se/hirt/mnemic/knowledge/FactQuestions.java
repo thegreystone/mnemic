@@ -83,6 +83,11 @@ final class FactQuestions {
 	 * {@code alternatives}: the next closest relations by words or meaning, offered beside the candidate so the caller
 	 * can say which of the closest will do, or that none does (2026-09-26).
 	 */
+	/** 'name' (description), or 'name' alone when nothing has been said about it: no empty parentheses, no null. */
+	private static String described(String name, String description) {
+		return description == null || description.isBlank() ? "'" + name + "'" : "'" + name + "' (" + description + ")";
+	}
+
 	Question predicate(
 		Observation obs, FactRef f, Predicate candidate, String how, PredicateDef def, String payload,
 		List<Predicate> alternatives) {
@@ -95,14 +100,14 @@ final class FactQuestions {
 		c.add(choice(n, "new", "register '" + f.predicate() + "' as a new predicate", null));
 		var others = new StringBuilder();
 		for (Predicate p : alternatives) {
-			others.append(others.length() == 0 ? " Or one of the next closest: " : "; ").append("'").append(p.name())
-					.append("' (").append(p.description()).append(')');
+			others.append(others.length() == 0 ? " Or one of the next closest: " : "; ")
+					.append(described(p.name(), p.description()));
 		}
 		if (others.length() > 0) {
 			others.append('.');
 		}
-		String message = "Does '" + f.predicate() + "' (" + (def == null ? "" : def.description()) + ") mean the "
-				+ "same as '" + candidate.name() + "' (" + candidate.description() + ")?" + others + " "
+		String message = "Does " + described(f.predicate(), def == null ? null : def.description()) + " mean the "
+				+ "same as " + described(candidate.name(), candidate.description()) + "?" + others + " "
 				+ switch (how) {
 				case "similar" -> "They share words, but a narrower or opposite meaning (a restriction, a negation) "
 						+ "would be lost. ";

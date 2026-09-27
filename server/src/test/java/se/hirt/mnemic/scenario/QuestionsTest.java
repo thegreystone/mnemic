@@ -662,25 +662,28 @@ class QuestionsTest {
 
 	@Test
 	@Scenario("J3")
-	void ambiguousPredicateMatchAsks() {
+	void aDescribedPredicateOnOneSharedWordIsRegisteredAndItsNeighbourNamed() {
 		try (Engine e = engine("j3")) {
+			// "advises" shares one word ("work") with works_at: a weak signal. Described, the caller has said what it
+			// means, and advising Acme is not working there: the predicate is registered as defined and the fact
+			// applied, with the neighbour named in the reply so that the caller, or consolidate, can fold them if
+			// they turn out to be one relation (2026-09-27; before, this asked and held the fact).
 			var def = new PredicateDef("advises", "Subject gives professional advice on work matters to object.",
 					"person", "organization", false, null, null, null, null, List.of(), null, List.of(), List.of());
 			RememberOutcome o = remember(e, "I advise Acme on their profiler.",
 					proposal().predicate(def).entity("e1", "Acme", "organization").fact("self", "advises", "e1"));
-			assertEquals(1, o.applied().questions().size(), o.applied().toString());
-			Map<String, Object> q = o.applied().questions().getFirst();
-			assertEquals("predicate_resolution", q.get("kind"));
-			List<Map<String, Object>> c = candidates(o);
-			assertTrue(c.stream().anyMatch(x -> "works_at".equals(x.get("id"))), c.toString());
-			assertTrue(c.stream().anyMatch(x -> "new".equals(x.get("id"))), c.toString());
-			assertTrue(o.applied().facts().isEmpty(), "held");
-			assertTrue(e.predicates().get("advises").isEmpty(), "not registered yet");
-
-			RememberOutcome yes = remember(e, "No, advising is not working there.", null,
-					new Resolve(questionId(o), "new"));
-			assertTrue(e.predicates().get("advises").isPresent(), "registered on 'new'");
-			assertEquals(1, ((List<?>) yes.resolved().getFirst().get("facts")).size());
+			assertEquals(List.of(), o.applied().questions(), o.applied().toString());
+			assertEquals(1, o.applied().facts().size(), o.applied().toString());
+			assertTrue(e.predicates().get("advises").isPresent(), "registered as defined");
+			assertEquals("Subject gives professional advice on work matters to object.",
+					e.predicates().get("advises").orElseThrow().description());
+			Map<String, Object> d = o.applied().definitions().stream().filter(x -> "advises".equals(x.get("name")))
+					.findFirst().orElseThrow(() -> new AssertionError(o.applied().definitions().toString()));
+			assertEquals("registered", d.get("resolution"));
+			@SuppressWarnings("unchecked")
+			Map<String, Object> note = (Map<String, Object>) d.get("inferred");
+			assertEquals("works_at", note.get("close_to"), d.toString());
+			assertTrue(String.valueOf(note.get("fold")).contains("works_at"), d.toString());
 			Entity acme = e.entities().byRef("Acme").orElseThrow();
 			assertTrue(e.facts().factsOf(acme.id()).stream().anyMatch(f -> "advises".equals(f.predicate())));
 		}
@@ -688,16 +691,23 @@ class QuestionsTest {
 
 	@Test
 	@Scenario("J3")
-	void answeringWithTheCandidateUsesIt() {
+	void aBareNameOnASharedWordAsksAndTheCandidateAnswerUsesIt() {
 		try (Engine e = engine("j3-existing")) {
-			var def = new PredicateDef("advises", "Subject gives professional advice on work matters to object.",
-					"person", "organization", false, null, null, null, null, List.of(), null, List.of(), List.of());
-			RememberOutcome o = remember(e, "I advise Acme on their profiler.",
-					proposal().predicate(def).entity("e1", "Acme", "organization").fact("self", "advises", "e1"));
+			// Without a description nothing says what "works_with" means; the shared word is the only evidence, so
+			// the store asks, and the candidate's name as the answer files the fact under it.
+			RememberOutcome o = remember(e, "I work with Acme on their profiler.",
+					proposal().entity("e1", "Acme", "organization").fact("self", "works_with", "e1"));
+			assertEquals(1, o.applied().questions().size(), o.applied().toString());
+			assertEquals("predicate_resolution", o.applied().questions().getFirst().get("kind"));
+			List<Map<String, Object>> c = candidates(o);
+			assertTrue(c.stream().anyMatch(x -> "works_at".equals(x.get("id"))), c.toString());
+			assertTrue(c.stream().anyMatch(x -> "new".equals(x.get("id"))), c.toString());
+			assertTrue(o.applied().facts().isEmpty(), "held");
 			remember(e, "Yes, it is a job.", null, new Resolve(questionId(o), "works_at"));
 			Entity acme = e.entities().byRef("Acme").orElseThrow();
 			assertTrue(e.facts().factsOf(acme.id()).stream().anyMatch(f -> "works_at".equals(f.predicate())));
-			assertTrue(e.predicates().get("advises").isEmpty());
+			assertEquals("works_at", e.predicates().get("works_with").orElseThrow().name(),
+					"the confirmed name is an alias of the candidate: asked once");
 		}
 	}
 

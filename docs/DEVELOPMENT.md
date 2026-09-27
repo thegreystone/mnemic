@@ -89,7 +89,7 @@ ends with one line saying when it was written and how many things it lists (2026
 Findings come newest first, by the observation they cite, and each that arrived after the previous
 consolidation is marked `new` (in the reply's entries and as "new:" on the page), so a reader sees what it has
 not seen before what it has; the mark is the newest observation id at the last consolidation, kept in
-`store_meta`. The reply carries the first 25 of each list and `<key>_more` with the count of the rest, which
+`store_meta` and left alone by a dry run. The reply carries the first 25 of each list and `<key>_more` with the count of the rest, which
 the page holds: the model's context is bounded whatever the store's size, while the consolidation itself
 still works over the whole store, since a merge or a new sibling can change derived facts anywhere.
 

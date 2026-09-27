@@ -36,6 +36,7 @@ import se.hirt.mnemic.TestHomes;
 import se.hirt.mnemic.embed.Embedder;
 import se.hirt.mnemic.knowledge.PredicateRegistry.Resolution;
 import se.hirt.mnemic.knowledge.QuestionResolver.Resolve;
+import se.hirt.mnemic.proposal.Proposal.PredicateDef;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -149,4 +150,39 @@ class SemanticVocabularyTest {
 			assertEquals(List.of(), v.applied().questions());
 		}
 	}
+
+	@Test
+	void aDescribedPredicateOnAWeakMatchIsRegisteredAndItsNeighbourNamed() throws Exception {
+		try (Embedder emb = embedder(); Engine e = engine(emb, "semantic-vocabulary-described")) {
+			remember(e, "The ring is silver.",
+					proposal().entity("r", "Oura Ring 4", "product").fact("r", "color", "Silver")
+							.predicate(new PredicateDef("color", "The colour or finish of a product.", null, "literal",
+									true, null, false, null, "low", List.of("color", "colour"), null, List.of(),
+									List.of())));
+			// 'size' shares one word ("product") with color's description and lies near it in meaning, without a
+			// lead: weak signals. Described, it is registered as defined, not asked about; the reply names the
+			// neighbour with the correction that folds them should they be one relation.
+			RememberOutcome o = remember(e, "The ring is size 13.",
+					proposal().entity("r", "Oura Ring 4", "product").fact("r", "size", "13")
+							.predicate(new PredicateDef("size", "The size of a product in its maker's sizing.", null,
+									"literal", true, null, false, null, "low", List.of("size"), null, List.of(),
+									List.of())));
+			assertEquals(List.of(), o.applied().questions(), o.applied().toString());
+			assertEquals(1, o.applied().facts().size(), o.applied().toString());
+			Map<String, Object> size = o.applied().definitions().stream().filter(d -> "size".equals(d.get("name")))
+					.findFirst().orElseThrow(() -> new AssertionError(o.applied().definitions().toString()));
+			assertEquals("registered", size.get("resolution"));
+			@SuppressWarnings("unchecked")
+			Map<String, Object> note = (Map<String, Object>) size.get("inferred");
+			assertEquals("color", note.get("close_to"), size.toString());
+			assertTrue(String.valueOf(note.get("fold")).contains("merge_into"), size.toString());
+			assertEquals("exact", resolve(e, "size").how());
+			assertEquals("The size of a product in its maker's sizing.",
+					e.predicates().get("size").orElseThrow().description());
+			// The same name without a description is still asked about: nothing says what it means.
+			Resolution bare = resolve(e, "hue");
+			assertTrue(bare.asks() || "inferred".equals(bare.how()), bare.how());
+		}
+	}
+
 }

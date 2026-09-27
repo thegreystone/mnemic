@@ -865,14 +865,23 @@ public final class FactService {
 			a.defined("predicate", p.name(), "inferred", inferred);
 			a.warnings.add("Predicate '" + f.predicate() + "' was registered from this use with everything inferred "
 					+ "from its name (see definitions); state what you know in 'predicates' or through correct.");
-		} else if ("registered".equals(res.how()) && def != null && def.lasting() == null) {
+		} else if ("registered".equals(res.how()) && def != null
+				&& (def.lasting() == null || res.candidate() != null)) {
 			// A definition that said nothing about lasting: the store assumed, and says what, once, where the
-			// definition is answered.
+			// definition is answered. A described predicate registered beside a neighbour it weakly resembles names
+			// it, with the correction that folds them should they be one relation.
 			Predicate p = res.predicate();
-			var assumed = new LinkedHashMap<String, Object>();
-			assumed.put("assumed", Map.of("lasting", p.lasting()));
-			assumed.put("correct", "correct(\"pred:" + p.name() + "\", {\"lasting\": " + !p.lasting() + "})");
-			a.defined("predicate", p.name(), "registered", assumed);
+			var note = new LinkedHashMap<String, Object>();
+			if (def.lasting() == null) {
+				note.put("assumed", Map.of("lasting", p.lasting()));
+				note.put("correct", "correct(\"pred:" + p.name() + "\", {\"lasting\": " + !p.lasting() + "})");
+			}
+			if (res.candidate() != null) {
+				note.put("close_to", res.candidate().name());
+				note.put("fold", "correct(\"pred:" + p.name() + "\", {\"merge_into\": \"" + res.candidate().name()
+						+ "\"}) if they are one relation");
+			}
+			a.defined("predicate", p.name(), "registered", note);
 		}
 		if (res.asks()) {
 			a.ask(asks.predicate(a.obs, f, res.candidate(), res.how(), def, FactQuestions.heldProposal(a.p, f, def),

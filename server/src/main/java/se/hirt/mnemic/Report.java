@@ -113,7 +113,13 @@ final class Report {
 					+ "event a type of a word or two"));
 		}
 		for (Map<String, Object> m : c.unusedVocabulary()) {
-			out.add(mark(m, entry(m) + " is defined and used by nothing"));
+			String kind = m.containsKey("predicate") ? "predicate"
+					: m.containsKey("event_type") ? "event type" : "entity type";
+			Object name = m.getOrDefault("predicate", m.getOrDefault("event_type", m.get("entity_type")));
+			String ref = m.containsKey("predicate") ? "pred:" + name
+					: m.containsKey("event_type") ? "event:" + name : "type:" + name;
+			out.add(mark(m, "the " + kind + " '" + name + "' is used by nothing and the observation that defined it "
+					+ "is gone — harmless; it stays available, inspect('" + ref + "') shows it"));
 		}
 		for (Map<String, Object> m : c.unresolvedDerivations()) {
 			out.add(mark(m,

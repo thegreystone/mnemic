@@ -182,7 +182,7 @@ Integer specVersion, List<EntityRef> entities, List<EventRef> events, List<FactR
 			"predicates",
 			Set.of("name", "description", "domain", "range", "functional", "functional_scope", "symmetric", "inverse",
 					"volatility", "lexicon", "render", "qualifiers", "aliases", "renders", "defined_as", "implies",
-					"containment"),
+					"containment", "groups", "lasting", "inverse_lexicon"),
 			"closures", Set.of("subject", "predicate", "type"), "valid_time", Set.of("start", "end", "precision"),
 			"derivation", Set.of("kind"), "event_types",
 			Set.of("name", "description", "opens", "closes", "supersedes", "ends_entity", "lexicon", "render"),

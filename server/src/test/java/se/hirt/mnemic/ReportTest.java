@@ -141,6 +141,8 @@ class ReportTest {
 			Consolidation first = e.consolidate(true);
 			assertTrue(e.findings(first).stream().anyMatch(f -> f.startsWith("new: ") && f.contains("'mentors'")),
 					"before any consolidation everything is new: " + e.findings(first));
+			assertEquals(0, e.lastConsolidationMark(), "a dry run changes nothing, the mark included");
+			e.consolidate(false);
 			assertTrue(e.lastConsolidationMark() > 0);
 			// A second relation registered from use after the first consolidation: it comes first, marked new,
 			// and the one the reader has already been shown is not marked.

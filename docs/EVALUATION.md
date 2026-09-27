@@ -1200,7 +1200,7 @@ updated; the next `employed_by` resolves through the alias without a
 question. Token overlap cannot see meaning, so a similar match is never
 applied on its own (J7).
 
-### J3. Ambiguous predicate match asks
+### J3. Ambiguous predicate match: a described one registers, a bare one asks
 
 ```text
 remember(text: "I advise Acme on their profiler.",
@@ -1210,9 +1210,21 @@ remember(text: "I advise Acme on their profiler.",
 ```
 
 Expect: `works_at` is a near match (same domain/range, the description
-sharing "work") but not confident; response returns a `questions` entry of kind
-`predicate_resolution` with candidates `works_at` and `new`. Observation
-stored; fact held pending. Resolving with `new` registers `advises`.
+sharing "work") but not confident, and the caller has said what `advises`
+means: it is registered as defined and the fact applied; `definitions` names
+the neighbour (`close_to: works_at`) with the `merge_into` correction that
+folds them should they be one relation (2026-09-27; before, the fact was held
+behind a `predicate_resolution` question, and advising Acme is not working
+there). The same weak signal on a **bare** name still asks:
+
+```text
+remember(text: "I work with Acme on their profiler.",
+         proposal: { facts: [ { predicate: "works_with", object: "Acme" } ] })
+```
+
+Expect: a `questions` entry of kind `predicate_resolution` with candidates
+`works_at` and `new`; observation stored, fact held. Answering `works_at`
+files the fact under it; `new` registers `works_with`.
 
 ### J4. Domain/range mismatch is a question
 

@@ -198,7 +198,12 @@ every existing predicate of compatible domain and range: two or more shared
 content tokens is a *similar* match, exactly one an *ambiguous* one, and
 either comes back as a `predicate_resolution` question with the candidate;
 the fact is held until the caller answers with the candidate's name or
-`"new"`. Nothing is applied silently: token overlap cannot see meaning, and a
+`"new"`. A definition with a description is asked about only on a *similar*
+match (or a leading match by meaning, below): on one shared word or a close
+but not leading meaning it is registered as defined, and `definitions` names
+the neighbour under `close_to` with the `merge_into` that folds them, since
+the caller said what it means and `size` is not `color` for sharing the word
+"product" (2026-09-27). Nothing is applied silently: token overlap cannot see meaning, and a
 defined `real_estate_confined_to` once mapped itself onto `owns`. Confirming a
 *similar* candidate records the proposed name as an alias, so the question is
 asked once; an *ambiguous* one is confirmed per fact. A name with no plausible

@@ -923,7 +923,9 @@ public final class Engine implements AutoCloseable {
 				recentFirst(c.nameCollisions(), mark), c.reclosed(), proposed, c.resolvedQuestions(),
 				recentFirst(c.review(), mark), retired, embedded, recentFirst(c.duplicates(), mark), rebuilt,
 				c.removedEntities());
-		db.setMeta(LAST_CONSOLIDATION, String.valueOf(observations.newestId()));
+		if (!dryRun) {
+			db.setMeta(LAST_CONSOLIDATION, String.valueOf(observations.newestId()));
+		}
 		return out;
 	}
 
