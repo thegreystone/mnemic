@@ -173,7 +173,10 @@ final class ToolDescriptions {
 			+ "proposal, so that a town every other fact points at is not renumbered. Leave false when forgetting for "
 			+ "privacy: entities nothing else references are removed with the observation.";
 
-	static final String CONSOLIDATE = "Housekeeping over stored knowledge: merges entities that later evidence showed to be "
+	static final String CONSOLIDATE = "Writes report.md in the data home, a page of the store as a person reads it, with "
+			+ "'findings' (what to look at, each with the call that fixes it; the reply carries them too), and returns "
+			+ "its path; inspect('report') reads it later. "
+			+ "Housekeeping over stored knowledge: merges entities that later evidence showed to be "
 			+ "the same, closes facts whose ending event was recorded afterwards, lists observations still waiting for a "
 			+ "reading, open questions, vocabulary registered from use that still lacks a description or an effect "
 			+ "(inferred_vocabulary: settle them with the user through correct), predicates close in meaning to another "

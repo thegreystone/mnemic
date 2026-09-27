@@ -109,14 +109,26 @@ public final class Consolidator {
 		for (var t : eventTypes.all()) {
 			if (t.inferred()) {
 				long n = db.read(tx -> tx.queryLong("SELECT COUNT(*) FROM event WHERE type = ?", t.name()));
-				out.add(Map.of("event_type", t.name(), "uses", n));
+				var m = new LinkedHashMap<String, Object>();
+				m.put("event_type", t.name());
+				m.put("uses", n);
+				if (t.definedBy() != null) {
+					m.put("since", "obs-" + t.definedBy());
+				}
+				out.add(m);
 			}
 		}
 		for (var t : entityTypes.all()) {
 			if (t.inferred()) {
 				long n = db.read(tx -> tx
 						.queryLong("SELECT COUNT(*) FROM entity WHERE type = ? AND merged_into IS NULL", t.name()));
-				out.add(Map.of("entity_type", t.name(), "uses", n));
+				var m = new LinkedHashMap<String, Object>();
+				m.put("entity_type", t.name());
+				m.put("uses", n);
+				if (t.definedBy() != null) {
+					m.put("since", "obs-" + t.definedBy());
+				}
+				out.add(m);
 			}
 		}
 		return out;

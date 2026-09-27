@@ -518,8 +518,17 @@ class VocabularyTest {
 							.entity("e3", "the cabin", "place").entity("e4", "Anna Lindqvist", "person")
 							.event("ev1", "inherited", "2019", "self", "e3").fact("self", "mentors", "e4"));
 			List<Map<String, Object>> before = e.consolidate(true).inferredVocabulary();
-			assertTrue(before.contains(Map.of("event_type", "inherited", "uses", 1L)), before.toString());
-			assertTrue(before.contains(Map.of("entity_type", "canton", "uses", 2L)), before.toString());
+			// Each entry names the type, its uses, and the observation that registered it; a first consolidation
+			// marks everything new.
+			Map<String, Object> inherited = before.stream().filter(m -> "inherited".equals(m.get("event_type")))
+					.findFirst().orElseThrow(() -> new AssertionError(before.toString()));
+			assertEquals(1L, inherited.get("uses"));
+			assertEquals("obs-1", inherited.get("since"));
+			assertEquals(Boolean.TRUE, inherited.get("new"));
+			Map<String, Object> canton = before.stream().filter(m -> "canton".equals(m.get("entity_type"))).findFirst()
+					.orElseThrow(() -> new AssertionError(before.toString()));
+			assertEquals(2L, canton.get("uses"));
+			assertEquals("obs-1", canton.get("since"));
 			Map<String, Object> mentors = before.stream().filter(m -> "mentors".equals(m.get("predicate"))).findFirst()
 					.orElseThrow();
 			assertEquals(1L, mentors.get("uses"));

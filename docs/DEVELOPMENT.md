@@ -76,6 +76,23 @@ loses its end whenever other servers are configured; a test enforces the bound. 
 guide, returned by `inspect('guide')`; the instructions say when to fetch it. `extraction-spec.md` is the
 proposal format, used by the bench's model proposer.
 
+## The report page
+
+`consolidate` writes `report.md` into the data home every time it runs, dry run or not: what to look at first
+(each finding with the call that fixes it; the reply carries the same list as `findings` beside the path), the
+owner's stated facts with the derived ones counted rather than listed, the twenty most recently touched
+entities with up to eight facts each and an `inspect` pointer for the rest, open questions with their `resolve`
+call, pending readings, and the last ten corrections. It is a report on the store with ids into it, never a
+copy: every section is capped and the page stops at 24 KB. `inspect('report')` returns it, and the briefing
+ends with one line saying when it was written and how many things it lists (2026-09-27).
+
+Findings come newest first, by the observation they cite, and each that arrived after the previous
+consolidation is marked `new` (in the reply's entries and as "new:" on the page), so a reader sees what it has
+not seen before what it has; the mark is the newest observation id at the last consolidation, kept in
+`store_meta`. The reply carries the first 25 of each list and `<key>_more` with the count of the rest, which
+the page holds: the model's context is bounded whatever the store's size, while the consolidation itself
+still works over the whole store, since a merge or a new sibling can change derived facts anywhere.
+
 ## Tests
 
 - Unit and scenario tests run with `mvn package`. Scenario tests are annotated with `@Scenario("C2")` and map

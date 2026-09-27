@@ -580,6 +580,52 @@ class MnemicToolsTest {
 		};
 	}
 
+	@Test
+	@SuppressWarnings("unchecked")
+	void consolidateWritesThePageAndInspectReadsIt() {
+		assertFalse(remember("Report Tester works at Beekeepers AB.", Map.of("entities",
+				List.of(Map.of("name", "Report Tester", "type", "person"),
+						Map.of("name", "Beekeepers AB", "type", "organization")),
+				"facts",
+				List.of(Map.of("subject", "Report Tester", "predicate", "works_at", "object", "Beekeepers AB"))),
+				"tools-report-1").isError());
+		ToolResponse c = tools.consolidate(Optional.of(true), Optional.empty(), Optional.empty());
+		assertFalse(c.isError(), text(c));
+		Map<String, Object> result = result(c);
+		assertTrue(result.get("findings") instanceof List<?>, result.toString());
+		String path = String.valueOf(result.get("report"));
+		assertTrue(path.endsWith("report.md"), path);
+		assertTrue(java.nio.file.Files.exists(java.nio.file.Path.of(path)), path);
+		ToolResponse page = tools.inspect("report", Optional.empty(), NONE, null);
+		assertFalse(page.isError(), text(page));
+		String md = String.valueOf(result(page).get("text"));
+		assertTrue(md.startsWith("# Mnemic report for "), md);
+		assertTrue(md.contains("## Things to look at (") && md.contains("## About "), md);
+		assertTrue(
+				md.contains("### Report Tester (person, ent-") && md.contains("Report Tester works at Beekeepers AB"),
+				md);
+		assertEquals(path, result(page).get("path"));
+		ToolResponse briefing = tools.recall(Optional.empty(), NONE, Optional.of(4000), Optional.empty(),
+				Optional.empty(), null);
+		assertTrue(text(briefing).contains("inspect('report') reads it"), text(briefing));
+	}
+
+	@Test
+	void aConsolidateListInTheReplyIsCapped() {
+		var list = new java.util.ArrayList<Map<String, Object>>();
+		for (int i = 1; i <= 30; i++) {
+			list.add(Map.of("predicate", "p" + i));
+		}
+		var out = new java.util.LinkedHashMap<String, Object>();
+		MnemicTools.capped(out, "inferred_vocabulary", list);
+		assertEquals(MnemicTools.LIST_CAP, ((List<?>) out.get("inferred_vocabulary")).size());
+		assertEquals(5, out.get("inferred_vocabulary_more"));
+		var small = new java.util.LinkedHashMap<String, Object>();
+		MnemicTools.capped(small, "review", list.subList(0, 3));
+		assertEquals(3, ((List<?>) small.get("review")).size());
+		assertFalse(small.containsKey("review_more"));
+	}
+
 	private static String text(ToolResponse r) {
 		return ((TextContent) r.content().getFirst()).text();
 	}

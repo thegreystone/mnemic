@@ -276,7 +276,7 @@ public class MnemicTools {
 	@Tool(name = "inspect", description = ToolDescriptions.INSPECT, annotations = @Tool.Annotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
 	ToolResponse inspect(
 		@ToolArg(description = "ent-12, a name or alias, f-12, obs-12, evt-3, q-3, pred:works_at, event:joined, "
-				+ "type:place, group:family, 'registry', or 'guide'")
+				+ "type:place, group:family, 'registry', 'guide', or 'report' (the page consolidate wrote)")
 		String ref,
 		@ToolArg(description = "For an entity: every fact that ever touched it, with its changes and tombstones "
 				+ "(default false)")
@@ -289,13 +289,19 @@ public class MnemicTools {
 					if (r.isEmpty()) {
 						throw MnemicException
 								.invalidArgument("'ref' is required: ent-12, a name, f-12, obs-12, evt-3, q-3, "
-										+ "pred:works_at, event:joined, type:place, group:family, 'registry', or 'guide'.");
+										+ "pred:works_at, event:joined, type:place, group:family, 'registry', 'guide', or 'report'.");
 					}
 					if (r.equalsIgnoreCase("registry")) {
 						return registry();
 					}
 					if (r.equalsIgnoreCase("guide")) {
 						return Map.of("title", "Mnemic proposal guide", "text", Protocol.guide());
+					}
+					if (r.equalsIgnoreCase("report")) {
+						String page = engine.report().orElseThrow(() -> MnemicException
+								.notFound("No report yet: consolidate writes one (report.md in the data home)."));
+						return Map.of("title", "Mnemic report", "path", engine.home().resolve(Report.FILE).toString(),
+								"text", page);
 					}
 					if (r.startsWith("f-")) {
 						return fact(parseId(r, "f-"));
@@ -477,29 +483,32 @@ public class MnemicTools {
 			}
 			var out = new LinkedHashMap<String, Object>();
 			out.put("dry_run", dry_run.orElse(false));
-			out.put("merges", c.merges());
-			out.put("name_collisions", c.nameCollisions());
+			// The page: what was found, in words with the call that fixes each, and where the whole report is.
+			out.put("findings", engine.findings(c));
+			out.put("report", engine.writeReport(c, dry_run.orElse(false)).toString());
+			capped(out, "merges", c.merges());
+			capped(out, "name_collisions", c.nameCollisions());
 			out.put("reclosed_facts", c.reclosed());
 			out.put("pending_proposals", c.pendingProposals());
-			out.put("proposed", c.proposed());
-			out.put("resolved_questions", c.resolvedQuestions());
-			out.put("backlog", c.backlog());
-			out.put("open_questions", c.openQuestions());
-			out.put("inferred_vocabulary", c.inferredVocabulary());
-			out.put("similar_vocabulary", c.similarVocabulary());
-			out.put("descriptive_events", c.descriptiveEvents());
-			out.put("unused_vocabulary", c.unusedVocabulary());
-			out.put("unresolved_derivations", c.unresolvedDerivations());
-			out.put("misfiled_relations", c.misfiledRelations());
-			out.put("attribute_unknown", c.attributeUnknown());
+			capped(out, "proposed", c.proposed());
+			capped(out, "resolved_questions", c.resolvedQuestions());
+			capped(out, "backlog", c.backlog());
+			capped(out, "open_questions", c.openQuestions());
+			capped(out, "inferred_vocabulary", c.inferredVocabulary());
+			capped(out, "similar_vocabulary", c.similarVocabulary());
+			capped(out, "descriptive_events", c.descriptiveEvents());
+			capped(out, "unused_vocabulary", c.unusedVocabulary());
+			capped(out, "unresolved_derivations", c.unresolvedDerivations());
+			capped(out, "misfiled_relations", c.misfiledRelations());
+			capped(out, "attribute_unknown", c.attributeUnknown());
 			out.put("removed_entities", c.removedEntities());
 			if (out_rebuilt != null) {
 				out.put("rebuilt", out_rebuilt);
 			}
-			out.put("review", c.review());
+			capped(out, "review", c.review());
 			out.put("retired", c.retired());
 			out.put("embedded", c.embedded());
-			out.put("duplicates", c.duplicates());
+			capped(out, "duplicates", c.duplicates());
 			return out;
 		});
 	}
@@ -689,6 +698,22 @@ public class MnemicTools {
 
 	private Map<String, Object> factSummary(Fact f) {
 		return Map.of("id", f.ref(), "predicate", f.predicate(), "standing", standing(f), "rendering", f.rendering());
+	}
+
+	static final int LIST_CAP = 25;
+
+	/**
+	 * A consolidate list in the reply: the first {@value #LIST_CAP} entries, newest first as the engine orders them,
+	 * and {@code <key>_more} with the count of the rest, which the report page holds. The model's context is not the
+	 * place for a store's whole backlog (2026-09-27).
+	 */
+	static void capped(Map<String, Object> out, String key, List<Map<String, Object>> list) {
+		if (list.size() <= LIST_CAP) {
+			out.put(key, list);
+			return;
+		}
+		out.put(key, list.subList(0, LIST_CAP));
+		out.put(key + "_more", list.size() - LIST_CAP);
 	}
 
 	/** A fact that stands, with the call that turns it around where the relation has a direction. */

@@ -72,6 +72,7 @@ import se.hirt.mnemic.recall.TokenEstimator;
 
 import org.jboss.logging.Logger;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
@@ -822,7 +823,48 @@ public final class Engine implements AutoCloseable {
 
 	/** The session briefing for a recall without a query (EVALUATION.md F10). */
 	public String briefing(int maxTokens) {
-		return briefing.render(maxTokens);
+		String text = briefing.render(maxTokens);
+		// The last report, in one line: what consolidate found and where to read it.
+		Optional<String> report = report();
+		if (report.isPresent()) {
+			String head = report.get().lines().findFirst().orElse("");
+			int at = head.indexOf(" — ");
+			String date = at < 0 ? "" : head.substring(at + 3).replaceAll(" \\(.*$", "");
+			String count = report.get().lines().filter(l -> l.startsWith("## Things to look at ("))
+					.map(l -> l.replaceAll("^.*\\((\\d+)\\).*$", "$1")).findFirst().orElse("?");
+			text = text + "\nreport of " + date + ": " + count + " things to look at; inspect('report') reads it\n";
+		}
+		return text;
+	}
+
+	/** Writes the report page consolidate produces into the data home; its path. */
+	public Path writeReport(Consolidation c, boolean dryRun) {
+		Path path = home().resolve(Report.FILE);
+		try {
+			Files.writeString(path, Report.render(this, c, dryRun, options.clock().instant()),
+					java.nio.charset.StandardCharsets.UTF_8);
+		} catch (java.io.IOException e) {
+			throw MnemicException.internal("Could not write " + path + ": " + e.getMessage(), e);
+		}
+		return path;
+	}
+
+	/** The findings of a consolidation in words, as the report lists them. */
+	public List<String> findings(Consolidation c) {
+		return Report.findings(c);
+	}
+
+	/** The last report page written, if any. */
+	public Optional<String> report() {
+		Path path = home().resolve(Report.FILE);
+		if (!Files.exists(path)) {
+			return Optional.empty();
+		}
+		try {
+			return Optional.of(Files.readString(path, java.nio.charset.StandardCharsets.UTF_8));
+		} catch (java.io.IOException e) {
+			return Optional.empty();
+		}
 	}
 
 	public Consolidation consolidate(boolean dryRun) {
@@ -870,10 +912,71 @@ public final class Engine implements AutoCloseable {
 			return (Map<String, Object>) m;
 		}).toList();
 		List<Map<String, Object>> open = knowledge.questions().open(20).stream().map(q -> q.toMap()).toList();
-		return new Consolidation(observations.pendingProposals(), backlog, open, c.inferredVocabulary(),
-				c.similarVocabulary(), c.descriptiveEvents(), c.unusedVocabulary(), c.unresolvedDerivations(),
-				c.misfiledRelations(), c.attributeUnknown(), c.merges(), c.nameCollisions(), c.reclosed(), proposed,
-				c.resolvedQuestions(), c.review(), retired, embedded, c.duplicates(), rebuilt, c.removedEntities());
+		// Newest first, and what arrived since the last consolidation flagged, so a capped reply and the page show
+		// what the reader has not seen before what it has (2026-09-27).
+		long mark = lastConsolidationMark();
+		var out = new Consolidation(observations.pendingProposals(), recentFirst(backlog, mark),
+				recentFirst(open, mark), recentFirst(c.inferredVocabulary(), mark),
+				recentFirst(c.similarVocabulary(), mark), recentFirst(c.descriptiveEvents(), mark),
+				recentFirst(c.unusedVocabulary(), mark), recentFirst(c.unresolvedDerivations(), mark),
+				recentFirst(c.misfiledRelations(), mark), recentFirst(c.attributeUnknown(), mark), c.merges(),
+				recentFirst(c.nameCollisions(), mark), c.reclosed(), proposed, c.resolvedQuestions(),
+				recentFirst(c.review(), mark), retired, embedded, recentFirst(c.duplicates(), mark), rebuilt,
+				c.removedEntities());
+		db.setMeta(LAST_CONSOLIDATION, String.valueOf(observations.newestId()));
+		return out;
+	}
+
+	static final String LAST_CONSOLIDATION = "last_consolidation_observation";
+	private static final java.util.regex.Pattern OBS_REF = java.util.regex.Pattern.compile("obs-(\\d+)");
+	private static final java.util.regex.Pattern ANY_REF = java.util.regex.Pattern.compile("(?:f|evt|ent|q)-(\\d+)");
+
+	/** The newest observation the previous consolidation had seen; 0 before the first. */
+	public long lastConsolidationMark() {
+		String v = db.meta(LAST_CONSOLIDATION);
+		try {
+			return v == null ? 0 : Long.parseLong(v);
+		} catch (NumberFormatException e) {
+			return 0;
+		}
+	}
+
+	/**
+	 * Findings ordered newest first, by the observation they cite (or the newest id of any kind they name), each marked
+	 * {@code new: true} when its observation came after the previous consolidation.
+	 */
+	static List<Map<String, Object>> recentFirst(List<Map<String, Object>> entries, long mark) {
+		var scored = new ArrayList<Map.Entry<Map<String, Object>, long[]>>();
+		for (Map<String, Object> e : entries) {
+			long obs = 0;
+			long any = 0;
+			for (Object v : e.values()) {
+				String text = String.valueOf(v);
+				var m = OBS_REF.matcher(text);
+				while (m.find()) {
+					obs = Math.max(obs, Long.parseLong(m.group(1)));
+				}
+				var a = ANY_REF.matcher(text);
+				while (a.find()) {
+					any = Math.max(any, Long.parseLong(a.group(1)));
+				}
+			}
+			var copy = new LinkedHashMap<String, Object>(e);
+			if (obs > mark) {
+				copy.put("new", true);
+			}
+			scored.add(Map.entry(copy, new long[] {obs > mark ? 1 : 0, obs, any}));
+		}
+		scored.sort((x, y) -> {
+			for (int i = 0; i < 3; i++) {
+				int c = Long.compare(y.getValue()[i], x.getValue()[i]);
+				if (c != 0) {
+					return c;
+				}
+			}
+			return 0;
+		});
+		return scored.stream().map(Map.Entry::getKey).toList();
 	}
 
 	private List<Map<String, Object>> proposeBacklog() {

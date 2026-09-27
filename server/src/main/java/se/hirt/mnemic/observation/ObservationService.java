@@ -133,6 +133,11 @@ public final class ObservationService {
 				+ "ORDER BY id LIMIT ?", limit).stream().map(Observation::from).toList());
 	}
 
+	/** The highest observation id on record, forgotten ones included; 0 when the store is empty. */
+	public long newestId() {
+		return db.read(tx -> tx.queryLong("SELECT COALESCE(MAX(id), 0) FROM observation"));
+	}
+
 	public long count() {
 		return db.read(tx -> tx.queryLong("SELECT COUNT(*) FROM observation WHERE forgotten_at IS NULL"));
 	}
