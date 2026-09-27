@@ -1049,8 +1049,13 @@ class MnemicToolsTest {
 		String home = text(tools.recall(Optional.of("where does Pelle Wiklund live"), NONE, Optional.of(400),
 				Optional.empty(), Optional.empty(), null));
 		assertTrue(home.contains("Tjörn") && home.contains("2020-09"), home);
-		ToolResponse refused = tools.correct(evt, Map.of("type", "relocated"), NONE);
-		assertTrue(refused.isError() && text(refused).contains("valid_time"), text(refused));
+		// The type is correctable too, one key at a time; who took part is not.
+		ToolResponse retyped = tools.correct(evt, Map.of("type", "relocated"), NONE);
+		assertFalse(retyped.isError(), text(retyped));
+		assertTrue(text(retyped).contains("\"after\"") && text(retyped).contains("relocated"), text(retyped));
+		ToolResponse refused = tools.correct(evt, Map.of("participants", List.of("e1")), NONE);
+		assertTrue(refused.isError() && text(refused).contains("valid_time") && text(refused).contains("type"),
+				text(refused));
 	}
 
 	@Test

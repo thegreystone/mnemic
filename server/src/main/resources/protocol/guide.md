@@ -13,6 +13,8 @@ The rules behind the protocol the server states when a client connects: how to r
 - What the user says is not so: a fact with `negated: true` ('I don't own a boat'), a fact with `only: true`
   whose object is a place ('I only own property in Switzerland'), or a closure ('those are all my
   properties'); never a fact with the bound as its object.
+- A thing's own values (colour, size, plate) go in its entity's `attributes` (`{color: "Silver", size:
+  "13"}`): literal facts on lasting predicates, never entities of their own.
 - A qualifier describes the subject's role toward the object: parent_of(Anna, self, mother) says Anna is
   the mother. Symmetric relations are stored once from either side. `scope` is the organization of a role.
   A belief carries `caller_confidence` below 1.
@@ -20,20 +22,19 @@ The rules behind the protocol the server states when a client connects: how to r
   in-laws, and step-parents are derived from them. State a derived relation only when the user gives it
   without the chain behind it. A person's gender is a `gender` fact.
 - An event type is a verb or two words (`inherited`, `purchased_property`); a sentence where the type goes
-  is stored as a plain occurrence and never becomes vocabulary.
+  is stored as a plain occurrence and never becomes vocabulary (`correct(evt-N, {type})` retypes it).
 
 ## Vocabulary
 
 - A predicate, event type, or entity type the registry lacks registers itself from its first use; the
   reply's `definitions` says what the store assumed (`inferred`) and how to change it with `correct`. A
   definition is needed only to say more than the name does. Rare predicate keys: `functional_scope`,
-  `symmetric`, `inverse`, `qualifiers`, `aliases`, `renders` (templates per language), `defined_as` (rules of
-  a derived relation), `implies` (what a qualifier says about an attribute).
+  `symmetric`, `inverse`, `qualifiers`, `aliases`, `renders` (per language), `defined_as` (rules of a
+  derived relation), `implies` (a qualifier's attribute).
 - A type spelled with a word in a registered type's `kinds` (hotel: place; clinic: organization; dog:
   animal), a plural of a registered type, or a compound headed by one is placed without a question. Teach a
   family at once: `entity_types: [{name: vehicle, parent: thing, kinds: [car, van, truck]}]`, or
-  `correct('type:vehicle', {kinds: [...]})`, which replaces the list. `inspect('type:place')` shows a type's
-  kinds; `definitions` says what placed a type (`placed_by`, `placed`).
+  `correct('type:vehicle', {kinds: [...]})`, which replaces the list. `definitions` says what placed a type.
 - Name the `groups` a new predicate belongs to (kinship is in `family`), so one word in a question reaches
   it with its kin. Say `lasting: true` for a relation a participant's end does not end (parents, siblings,
   attributes); a job, a home, or a marriage is not lasting. Put the words for the object's side in
@@ -50,7 +51,7 @@ The rules behind the protocol the server states when a client connects: how to r
   or `dismiss`. `event_effect`: `opens:<predicate>`, `closes:<predicate>`, `ends_entity`, or `none`.
   `containment`: `yes` or `no`.
 - Answers go as `resolve: [{question_id: "q-3", choice: ...}]` on the next `remember`, or alone in a
-  `remember` with no text. The reply names what an answer opened under `questions` too.
+  `remember` with no text.
 
 ## Housekeeping
 

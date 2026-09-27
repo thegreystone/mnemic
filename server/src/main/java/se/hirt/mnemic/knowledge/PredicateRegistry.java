@@ -1227,6 +1227,35 @@ public final class PredicateRegistry {
 		return get(p.name()).orElseThrow();
 	}
 
+	/**
+	 * A predicate registered from an entity's attribute shorthand takes a value, not a thing: its range becomes literal
+	 * and it lasts, as attributes do (a colour, a size, a plate). Only a predicate registered from use that holds no
+	 * fact with an entity as its object is changed, and the change is logged; anything else is returned as it stands
+	 * (2026-09-27, a ring's "Silver" had become an entity of type unknown).
+	 */
+	public synchronized Predicate literalFromUse(String name, String reason) {
+		Predicate p = get(name).orElseThrow(() -> MnemicException.notFound("No predicate " + name));
+		if (p.literalRange() || !p.isInferred()) {
+			return p;
+		}
+		long entityObjects = db.read(tx -> tx
+				.queryLong("SELECT COUNT(*) FROM fact WHERE predicate = ? AND object_id IS NOT NULL", p.name()));
+		if (entityObjects > 0) {
+			return p;
+		}
+		db.write(tx -> {
+			tx.update("UPDATE predicate SET range = ?, lasting = 1 WHERE name = ?", json(List.of("literal")), p.name());
+			tx.insert(
+					"INSERT INTO predicate_change(predicate, field, old_value, new_value, reason, changed_at) "
+							+ "VALUES (?,?,?,?,?,?)",
+					p.name(), "range", json(p.range()), json(List.of("literal")), reason, Instant.now().toString());
+			return null;
+		});
+		vectors.remove(p.name());
+		cache = null;
+		return get(p.name()).orElseThrow();
+	}
+
 	public List<Map<String, Object>> changes(String name) {
 		return db.read(tx -> tx.query("SELECT * FROM predicate_change WHERE predicate = ? ORDER BY id", name).stream()
 				.map(r -> {

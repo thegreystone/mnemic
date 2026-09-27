@@ -626,11 +626,15 @@ public final class Engine implements AutoCloseable {
 	public Map<String, Object> correctEvent(long eventId, Map<String, Object> replacement, String reason) {
 		Event ev = knowledge.events().get(eventId)
 				.orElseThrow(() -> MnemicException.notFound("No event evt-" + eventId));
+		if (replacement != null && replacement.keySet().equals(Set.of("type"))) {
+			return retypeEvent(ev, String.valueOf(replacement.get("type")), reason);
+		}
 		if (replacement == null || !(replacement.get("valid_time") instanceof Map<?, ?> vt)
 				|| !replacement.keySet().equals(Set.of("valid_time"))) {
-			throw MnemicException.invalidArgument("An event is corrected by its date: {\"valid_time\": {\"start\": "
-					+ "\"2027-06-19\"}} (a year, a month, or a day; 'end' too for a span). To change what happened or who "
-					+ "took part, re-read its observation with remember(observation_id, proposal).");
+			throw MnemicException.invalidArgument("An event is corrected by its date, {\"valid_time\": {\"start\": "
+					+ "\"2027-06-19\"}} (a year, a month, or a day; 'end' too for a span), or by its type, {\"type\": "
+					+ "\"graduated\"} (a verb or two words), one at a time. To change who took part, re-read its "
+					+ "observation with remember(observation_id, proposal).");
 		}
 		var warnings = new ArrayList<String>();
 		Instant now = options.clock().instant();
@@ -670,6 +674,44 @@ public final class Engine implements AutoCloseable {
 		if (!warnings.isEmpty()) {
 			out.put("warnings", warnings);
 		}
+		return out;
+	}
+
+	/**
+	 * Gives an event another type from a correction record, so that a rebuild does it again: the sentence an early
+	 * reading put where the type goes becomes a type of a word or two in one call, where a re-read of the whole
+	 * observation was needed before (2026-09-27).
+	 */
+	private Map<String, Object> retypeEvent(Event ev, String given, String reason) {
+		String type = EventTypeRegistry.key(given);
+		if (type.isBlank() || !EventTypeRegistry.typeLike(given)) {
+			throw MnemicException
+					.invalidArgument("An event type is a verb or two words (graduated, purchased_property); '" + given
+							+ "' reads as a description. Keep the detail in the observation text.");
+		}
+		if (type.equals(ev.type())) {
+			throw MnemicException.invalidArgument(
+					"The correction changes nothing about " + ev.ref() + ": its type is '" + type + "' already.");
+		}
+		String why = reason == null || reason.isBlank() ? "" : ": " + reason;
+		Instant now = options.clock().instant();
+		List<String> names = ev.participants().stream().map(id -> knowledge.entities().nameOf(id)).toList();
+		var reading = new LinkedHashMap<String, Object>();
+		reading.put("retypes", Map.of("type", ev.type(), "participants", names, "valid_start",
+				ev.validStart() == null ? "" : ev.validStart()));
+		reading.put("type", type);
+		if (reason != null && !reason.isBlank()) {
+			reading.put("reason", reason);
+		}
+		Remembered r = observations.remember("Retyping of " + ev.rendering() + why + " → " + type,
+				new Source("correction", ev.ref(), null, null, null), now, Json.write(reading), null, null);
+		Observation record = observations.get(r.observationId()).orElseThrow();
+		Map<String, Object> changed = knowledge.factService().retype(ev.id(), type, record);
+		derive();
+		var out = new LinkedHashMap<String, Object>();
+		out.put("event", ev.ref());
+		out.putAll(changed);
+		out.put("observation", record.ref());
 		return out;
 	}
 

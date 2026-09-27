@@ -843,6 +843,19 @@ public final class FactService {
 	private Optional<FactOut> applyFact(Application a, FactRef f) {
 		PredicateDef def = a.defs.get(f.predicate());
 		PredicateRegistry.Resolution res = predicates.resolve(f.predicate(), def, a.obs.id(), a.warnings);
+		if (a.attributeFacts.contains(f) && res.predicate() != null && !res.predicate().literalRange()) {
+			// An attribute is a value of the thing, never a thing of its own: a predicate registered from this use
+			// takes literals from here on; one defined to take a thing is used as defined, and the caller told.
+			Predicate p = predicates.literalFromUse(res.predicate().name(),
+					"attribute of " + f.subject() + " in obs-" + a.obs.id());
+			if (p.literalRange()) {
+				res = new PredicateRegistry.Resolution(p, res.how(), res.candidate(), res.alternatives());
+			} else {
+				a.warnings.add("Attribute '" + f.predicate() + "' of " + f.subject() + " is stored under '" + p.name()
+						+ "', which takes " + p.range() + ", not a value: \"" + f.object()
+						+ "\" resolves to an entity. State it as a fact under a predicate with range literal instead.");
+			}
+		}
 		if (def != null && a.predicateOut.stream().noneMatch(o -> o.proposed().equals(f.predicate()))) {
 			Predicate named = res.predicate() != null ? res.predicate() : res.candidate();
 			a.predicateOut.add(new PredicateOut(f.predicate(), res.how(), named == null ? null : named.name()));
@@ -1610,10 +1623,53 @@ public final class FactService {
 		return moved;
 	}
 
+	/**
+	 * Gives an event another type (correct(evt-N, {type})): a type the registry lacks registers from this use, as it
+	 * would from a proposal, and the reply says so under definitions. The sentence an early reading put where the type
+	 * goes is the case this serves: fifteen of them on one store, each needing a full re-read before (2026-09-27).
+	 */
+	public Map<String, Object> retype(long eventId, String type, Observation record) {
+		var out = new LinkedHashMap<String, Object>();
+		if (eventTypes.get(type).isEmpty()) {
+			EventType et = eventTypes.registerInferred(type, record.id());
+			var inferred = new LinkedHashMap<String, Object>();
+			inferred.put("render", et.render());
+			inferred.put("lexicon", et.lexicon());
+			inferred.put("effects", "none");
+			inferred.put("correct", "correct(\"event:" + et.name()
+					+ "\", {opens, closes, supersedes, ends_entity, render, lexicon, description})");
+			var d = definition("event_type", et.name(), "inferred");
+			d.put("inferred", inferred);
+			out.put("definitions", List.of(d));
+		}
+		EventService.Retyped moved = events.retype(eventId, type, record.id());
+		out.put("before", Map.of("type", moved.type(), "rendering", moved.before()));
+		out.put("after", Map.of("type", type, "rendering", moved.after()));
+		EventType et = eventTypes.get(type).orElseThrow();
+		var ends = new ArrayList<>(et.closes());
+		ends.addAll(et.supersedes());
+		if (!ends.isEmpty() || et.endsEntity()) {
+			out.put("note", "the type ends things (" + String.join(", ", ends) + (et.endsEntity() ? " ends_entity" : "")
+					+ "): consolidate closes what it reaches");
+		}
+		if (!et.opens().isEmpty()) {
+			out.put("note_opens", "the type opens " + et.opens() + ": state the fact it opened with remember");
+		}
+		return out;
+	}
+
 	public String replayCorrection(Observation record) {
 		Map<String, Object> reading = Json.readMap(record.proposalJson());
 		if (reading.get("redates") instanceof Map<?, ?> key) {
 			return replayRedating(record, key, reading);
+		}
+		if (reading.get("retypes") instanceof Map<?, ?> key) {
+			Optional<Event> ev = eventByKey(key);
+			if (ev.isEmpty()) {
+				return "unmatched";
+			}
+			retype(ev.get().id(), String.valueOf(reading.get("type")), record);
+			return "replayed";
 		}
 		boolean retraction = reading.get("retracts") instanceof Map<?, ?>;
 		boolean retirement = reading.get("retires") instanceof Map<?, ?>;
@@ -1650,20 +1706,26 @@ public final class FactService {
 		return "replayed";
 	}
 
-	/** A re-dating replayed: the event found by its key (type, participant names, the start it had) is moved again. */
+	/** The event a correction record names by its key (type, participant names, the start it had), if it stands. */
 	@SuppressWarnings("unchecked")
-	private String replayRedating(Observation record, Map<?, ?> key, Map<String, Object> reading) {
+	private Optional<Event> eventByKey(Map<?, ?> key) {
 		String type = String.valueOf(key.get("type"));
 		var ids = new ArrayList<Long>();
 		for (Object name : (List<Object>) key.get("participants")) {
 			Optional<Entity> e = entities.byRef(String.valueOf(name));
 			if (e.isEmpty()) {
-				return "unmatched";
+				return Optional.empty();
 			}
 			ids.add(e.get().id());
 		}
-		Optional<Event> ev = events.find(type, ids,
-				key.get("valid_start") == null ? null : String.valueOf(key.get("valid_start")));
+		String start = key.get("valid_start") == null || String.valueOf(key.get("valid_start")).isBlank() ? null
+				: String.valueOf(key.get("valid_start"));
+		return events.find(type, ids, start);
+	}
+
+	/** A re-dating replayed: the event found by its key (type, participant names, the start it had) is moved again. */
+	private String replayRedating(Observation record, Map<?, ?> key, Map<String, Object> reading) {
+		Optional<Event> ev = eventByKey(key);
 		if (ev.isEmpty()) {
 			return "unmatched";
 		}

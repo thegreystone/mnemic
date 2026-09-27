@@ -45,6 +45,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Test helpers: a fresh data home per test in {@code java.io.tmpdir}, an {@link Engine} without any container, and the
@@ -171,6 +172,11 @@ public final class TestHomes {
 
 		public P entity(EntityRef er) {
 			entities.add(er);
+			return this;
+		}
+
+		public P entity(String ref, String name, String type, Map<String, Object> attributes) {
+			entities.add(new EntityRef(ref, name, type, List.of(), null, attributes));
 			return this;
 		}
 

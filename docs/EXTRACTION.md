@@ -661,8 +661,9 @@ excerpt each; `propose` gives them their reading), `open_questions`,
 name, with the correction that folds them if they are one),
 `inferred_vocabulary` (terms registered from use and not yet described),
 `similar_vocabulary` (predicates registered from use that lie close in meaning
-to another), `descriptive_events` (events whose type is a sentence, with the
-observation to re-read), `unused_vocabulary` (predicates, event types, and entity types that nothing uses and whose
+to another), `descriptive_events` (events whose type is a sentence: `correct(evt-N,
+{type: "graduated"})` gives one a type of a word or two, registered from use when
+the registry lacks it and replayed by a rebuild, or the observation is re-read), `unused_vocabulary` (predicates, event types, and entity types that nothing uses and whose
 defining observation was forgotten), `unresolved_derivations` (stated facts on derived predicates that no chain
 reaches, with whether the chain is complete and the `derivation` question a complete one raised),
 `misfiled_relations` (stated `related_to` facts whose role a predicate of its own names, with the derived fact that
@@ -1028,7 +1029,11 @@ coworker relation ends with the job, death or not. A
 person's gender is a fact under the seed predicate `gender` (person →
 literal, functional; "Britt is female"), stated outright or through the
 `gender` shorthand on an entity entry; `attributes: {"handedness": "left"}`
-on an entry does the same for any attribute. `consolidate` lists under
+on an entry does the same for any attribute: the value is a literal, never an
+entity, and a predicate the shorthand registers from use takes literals and
+lasts from then on (one already defined to take a thing is used as defined,
+with a warning; a ring's "Silver" had become an entity of type unknown,
+2026-09-27). `consolidate` lists under
 `attribute_unknown`, per attribute, the entities whose derived relations
 rendered with the plain qualifier for want of a value, each with its
 `stated_roles` and whether their predicates declare an implication, and an entity's card

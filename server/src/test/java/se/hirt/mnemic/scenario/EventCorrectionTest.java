@@ -128,21 +128,91 @@ class EventCorrectionTest {
 	}
 
 	@Test
-	void onlyTheDateIsCorrectable() {
+	void theDateAndTheTypeAreCorrectableOneAtATime() {
 		try (Engine e = engine("evt-redate-refused")) {
 			RememberOutcome o = remember(e, "I moved to Willisau in 2024.",
 					proposal().entity("e1", "Willisau", "place").event("ev1", "moved", "2024", "self", "e1"));
 			long evt = eventId(o);
-			MnemicException type = assertThrows(MnemicException.class,
-					() -> e.correctEvent(evt, Map.of("type", "relocated"), "wrong word"));
-			assertTrue(type.getMessage().contains("valid_time"), type.getMessage());
-			assertTrue(type.getMessage().contains("remember(observation_id, proposal)"), type.getMessage());
+			MnemicException participants = assertThrows(MnemicException.class,
+					() -> e.correctEvent(evt, Map.of("participants", List.of("self")), "wrong people"));
+			assertTrue(participants.getMessage().contains("valid_time"), participants.getMessage());
+			assertTrue(participants.getMessage().contains("type"), participants.getMessage());
+			assertTrue(participants.getMessage().contains("remember(observation_id, proposal)"),
+					participants.getMessage());
+			MnemicException both = assertThrows(MnemicException.class, () -> e.correctEvent(evt,
+					Map.of("type", "relocated", "valid_time", Map.of("start", "2023")), "two at once"));
+			assertTrue(both.getMessage().contains("one at a time"), both.getMessage());
 			MnemicException same = assertThrows(MnemicException.class,
 					() -> e.correctEvent(evt, Map.of("valid_time", Map.of("start", "2024")), "same"));
 			assertTrue(same.getMessage().contains("changes nothing"), same.getMessage());
 			assertThrows(MnemicException.class,
 					() -> e.correctEvent(999, Map.of("valid_time", Map.of("start", "2024")), "no such event"));
 			assertEquals(1, e.observations().all().size(), "a refused correction leaves no record behind");
+		}
+	}
+
+	@Test
+	void aSentenceWhereTheTypeGoesBecomesATypeInOneCall() {
+		try (Engine e = engine("evt-retype")) {
+			// An early reading put a sentence where the type goes: a plain occurrence, listed by consolidate.
+			RememberOutcome o = remember(e, "I earned my M.Sc. in computer science at KTH in 1999.",
+					proposal().entity("k", "KTH", "organization").event("ev1", "earned_m_sc_in_computer_science",
+							"1999", "self", "k"));
+			long evt = eventId(o);
+			assertTrue(o.applied().warnings().stream().anyMatch(w -> w.contains("reads as a description")),
+					o.applied().warnings().toString());
+			assertEquals(1, e.consolidate(true).descriptiveEvents().size());
+			assertTrue(
+					e.findings(e.consolidate(true)).stream()
+							.anyMatch(f -> f.contains("correct('evt-" + evt + "', {type: '...'})")),
+					e.findings(e.consolidate(true)).toString());
+			// A sentence again is refused; a type of a word or two is taken, registered from this use, and the
+			// event re-rendered.
+			MnemicException sentence = assertThrows(MnemicException.class, () -> e.correctEvent(evt,
+					Map.of("type", "got the degree after five years of study"), "still a sentence"));
+			assertTrue(sentence.getMessage().contains("reads as a description"), sentence.getMessage());
+			Map<String, Object> out = e.correctEvent(evt, Map.of("type", "graduated"), "a type, not a sentence");
+			assertEquals("evt-" + evt, out.get("event"));
+			@SuppressWarnings("unchecked")
+			Map<String, Object> before = (Map<String, Object>) out.get("before");
+			@SuppressWarnings("unchecked")
+			Map<String, Object> after = (Map<String, Object>) out.get("after");
+			assertEquals("earned_m_sc_in_computer_science", before.get("type"));
+			assertEquals("graduated", after.get("type"));
+			assertTrue(String.valueOf(after.get("rendering")).contains("graduated")
+					&& String.valueOf(after.get("rendering")).contains("1999"), after.toString());
+			@SuppressWarnings("unchecked")
+			List<Map<String, Object>> defs = (List<Map<String, Object>>) out.get("definitions");
+			assertEquals("graduated", defs.getFirst().get("name"), out.toString());
+			assertEquals("inferred", defs.getFirst().get("resolution"));
+			Event again = e.events().get(evt).orElseThrow();
+			assertEquals("graduated", again.type());
+			assertEquals(List.of(), e.consolidate(true).descriptiveEvents(), "nothing left to list");
+			assertTrue(e.eventTypes().get("graduated").orElseThrow().inferred(), "registered from use");
+			// The same type again changes nothing and leaves no record; a known type needs no definition.
+			MnemicException same = assertThrows(MnemicException.class,
+					() -> e.correctEvent(evt, Map.of("type", "graduated"), "same"));
+			assertTrue(same.getMessage().contains("changes nothing"), same.getMessage());
+			Map<String, Object> known = e.correctEvent(evt, Map.of("type", "joined"), "a seed type");
+			assertFalse(known.containsKey("definitions"), known.toString());
+			assertTrue(String.valueOf(known.get("note_opens")).contains("works_at") || known.get("note_opens") == null,
+					known.toString());
+			assertEquals(3, e.observations().all().size(), "two correction records beside the observation");
+		}
+	}
+
+	@Test
+	void aRebuildRetypesTheEventAgain() {
+		try (Engine e = engine("evt-retype-rebuild")) {
+			RememberOutcome o = remember(e, "I earned my M.Sc. at KTH in 1999.", proposal()
+					.entity("k", "KTH", "organization").event("ev1", "earned_m_sc_at_kth", "1999", "self", "k"));
+			long evt = eventId(o);
+			e.correctEvent(evt, Map.of("type", "graduated"), "a type, not a sentence");
+			Engine.Rebuilt rebuilt = e.rebuild();
+			assertEquals(1, rebuilt.corrections(), rebuilt.toString());
+			assertEquals(List.of(), rebuilt.unmatched(), rebuilt.toString());
+			assertEquals(1, e.events().ofType("graduated").size(), "the correction replayed");
+			assertEquals(0, e.events().ofType("earned_m_sc_at_kth").size());
 		}
 	}
 

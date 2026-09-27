@@ -266,6 +266,28 @@ public final class EventService {
 	}
 
 	/** What moving an event to another date did: the facts it had opened and closed, moved with it. */
+	/** An event given another type: the type it had, its rendering before, and after. */
+	public record Retyped(String type, String before, String after) {
+	}
+
+	/**
+	 * Gives an event another type and re-renders it; the correction observation is recorded as its source. Effects are
+	 * not applied here: what the new type closes, consolidate closes; what it opens, the caller states.
+	 */
+	public Retyped retype(long eventId, String type, long correctionObservationId) {
+		Event ev = get(eventId).orElseThrow(() -> MnemicException.notFound("No event evt-" + eventId));
+		return db.write(tx -> {
+			List<String> names = ev.participants().stream().map(id -> FactRenderer.nameIn(tx, id)).toList();
+			Bounds b = new Bounds(ev.validStart(), ev.validStartPrecision(), null, ev.validEnd(),
+					ev.validEndPrecision(), null);
+			String rendering = render(type, names, b);
+			tx.update("UPDATE event SET type = ?, rendering = ? WHERE id = ?", type, rendering, eventId);
+			tx.update("INSERT OR IGNORE INTO event_source(event_id, observation_id, kind) VALUES (?,?,'retyped')",
+					eventId, correctionObservationId);
+			return new Retyped(ev.type(), ev.rendering(), rendering);
+		});
+	}
+
 	public record Redated(String before, String after, List<Long> opened, List<Long> closed) {
 	}
 

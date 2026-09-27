@@ -108,9 +108,10 @@ final class Report {
 							+ "', {merge_into: '" + m.get("close_to") + "'})"));
 		}
 		for (Map<String, Object> m : c.descriptiveEvents()) {
-			out.add(mark(m, "event " + m.get("event") + " (" + m.get("observation") + ") has a sentence as its type: '"
-					+ m.get("type") + "' — reread the observation with remember(observation_id, proposal) giving the "
-					+ "event a type of a word or two"));
+			out.add(mark(m,
+					"event " + m.get("event") + " (" + m.get("observation") + ") has a sentence as its type: '"
+							+ m.get("type") + "' — give it a type of a word or two with correct('" + m.get("event")
+							+ "', {type: '...'}), or reread the observation with remember(observation_id, proposal)"));
 		}
 		for (Map<String, Object> m : c.unusedVocabulary()) {
 			String kind = m.containsKey("predicate") ? "predicate"
