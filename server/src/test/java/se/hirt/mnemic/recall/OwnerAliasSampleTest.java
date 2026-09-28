@@ -62,7 +62,11 @@ class OwnerAliasSampleTest {
 		String lib = System.getenv("MNEMIC_ORT_LIBRARY");
 		String model = System.getenv("MNEMIC_EMBED_MODEL");
 		Path samples = Path.of("..", "bench", "bakeoff", "personal-notes.json");
-		Assumptions.assumeTrue(lib != null && model != null && Files.exists(samples),
+		// CI sets the variables from Maven properties the local-embedder profile leaves unresolved: the files must
+		// exist, as EmbedderTest checks, or the build fails on every push (four in a row, 2026-09-27).
+		Assumptions.assumeTrue(
+				lib != null && model != null && Files.exists(samples) && Files.exists(Path.of(lib))
+						&& Files.exists(Path.of(model, "tokenizer.json")),
 				"MNEMIC_ORT_LIBRARY / MNEMIC_EMBED_MODEL not set");
 		JsonNode root = new ObjectMapper().readTree(Files.readString(samples));
 		var languages = new ArrayList<String>();
