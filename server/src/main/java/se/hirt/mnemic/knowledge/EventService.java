@@ -119,17 +119,105 @@ public final class EventService {
 	static List<Event> events(Tx tx, List<Row> rows) {
 		var out = new ArrayList<Event>();
 		for (Row r : rows) {
-			List<Long> parts = tx.query(
-					"SELECT entity_id FROM event_participant WHERE event_id = ? ORDER BY position IS NULL, position, entity_id",
-					r.lng("id")).stream().map(x -> x.lng("entity_id")).toList();
-			out.add(Event.from(r, parts));
+			List<Row> rows2 = tx.query("SELECT entity_id, role FROM event_participant WHERE event_id = ? "
+					+ "ORDER BY position IS NULL, position, entity_id", r.lng("id"));
+			List<Long> parts = rows2.stream().map(x -> x.lng("entity_id")).toList();
+			List<String> roles = rows2.stream().map(x -> x.str("role")).toList();
+			out.add(Event.from(r, parts, roles));
 		}
 		return out;
 	}
 
 	/** The sentence for an event of a type over these participants, with the store's temporal suffix. */
 	public String render(String type, List<String> participants, Bounds b) {
-		return types.render(type, participants) + b.suffix(false, lang);
+		return render(type, participants, null, b);
+	}
+
+	/** As above, with the event's detail, what its type and participants leave unsaid, after the sentence. */
+	public String render(String type, List<String> participants, String detail, Bounds b) {
+		return render(type, participants, null, detail, b);
+	}
+
+	/**
+	 * The sentence for an event whose participants may have roles ({@code roles} parallel to them, null where none).
+	 * The participants without a role fill the type's template; each role follows the sentence, "with Calle Wilund"
+	 * when it is a word that reads so, else "(co-author: Calle Wilund)". "Marcus Hirt created Calle Wilund, JMAPI"
+	 * becomes "Marcus Hirt created JMAPI with Calle Wilund" (2026-09-29).
+	 */
+	public String render(String type, List<String> participants, List<String> roles, String detail, Bounds b) {
+		var acting = new ArrayList<String>();
+		var byRole = new LinkedHashMap<String, List<String>>();
+		for (int i = 0; i < participants.size(); i++) {
+			String role = i == 0 || roles == null || i >= roles.size() ? null : roles.get(i);
+			if (role == null || role.isBlank()) {
+				acting.add(participants.get(i));
+			} else {
+				byRole.computeIfAbsent(role.strip(), k -> new ArrayList<>()).add(participants.get(i));
+			}
+		}
+		var sb = new StringBuilder(types.render(type, acting));
+		for (Map.Entry<String, List<String>> r : byRole.entrySet()) {
+			String who = joined(r.getValue());
+			sb.append(readsAsWord(r.getKey()) ? " " + r.getKey() + " " + who : " (" + r.getKey() + ": " + who + ")");
+		}
+		if (detail != null && !detail.isBlank()) {
+			sb.append(" (").append(detail).append(')');
+		}
+		return sb + b.suffix(false, lang);
+	}
+
+	/** Roles that read as a word before a name: "with", "from", "for", "at", "on behalf of". */
+	static final java.util.Set<String> ROLE_WORDS = java.util.Set.of("with", "for", "from", "to", "at", "by", "on",
+			"in", "via", "against", "alongside", "under", "into", "through", "among", "between", "as", "of", "about",
+			"before", "after", "beside", "without", "near", "on behalf of", "together with", "instead of");
+
+	private static boolean readsAsWord(String role) {
+		return ROLE_WORDS.contains(role.toLowerCase(java.util.Locale.ROOT));
+	}
+
+	private static String joined(List<String> names) {
+		if (names.size() < 3) {
+			return String.join(" and ", names);
+		}
+		return String.join(", ", names.subList(0, names.size() - 1)) + " and " + names.getLast();
+	}
+
+	/**
+	 * What a sentence put where an event's type goes said, as a detail: the words of the type, when the type is a
+	 * description rather than a type ("took_2nd_place_in_the_kth_q_arne_val_melody_festival"); null for a type.
+	 */
+	public static String detailOf(String sentenceType) {
+		if (sentenceType == null || EventTypeRegistry.typeLike(sentenceType)) {
+			return null;
+		}
+		return String.join(" ", Names.tokens(sentenceType));
+	}
+
+	/**
+	 * Events retyped before they could keep a detail: the sentence their correction record says they had becomes it.
+	 * Idempotent; the count filled in.
+	 */
+	public int backfillRetypedDetails() {
+		return db.write(tx -> {
+			int n = 0;
+			for (Row r : tx.query("""
+					SELECT e.id, o.proposal_json FROM event e JOIN event_source s ON s.event_id = e.id
+					JOIN observation o ON o.id = s.observation_id
+					WHERE s.kind = 'retyped' AND e.detail IS NULL AND o.proposal_json IS NOT NULL
+					ORDER BY e.id, o.id""")) {
+				Object key = se.hirt.mnemic.protocol.Json.readMap(r.str("proposal_json")).get("retypes");
+				String was = key instanceof Map<?, ?> m && m.get("type") != null ? String.valueOf(m.get("type")) : null;
+				String detail = detailOf(was);
+				if (detail != null && tx.update("UPDATE event SET detail = ? WHERE id = ? AND detail IS NULL", detail,
+						r.lng("id")) > 0) {
+					n++;
+				}
+			}
+			if (n > 0) {
+				rerender(tx, tx.query("SELECT * FROM event WHERE detail IS NOT NULL"));
+			}
+			return n;
+		});
 	}
 
 	/** Recomputes the renderings of every event of a type, after its template changed; the count. */
@@ -148,7 +236,8 @@ public final class EventService {
 			List<String> names = ev.participants().stream().map(id -> FactRenderer.nameIn(tx, id)).toList();
 			Bounds b = new Bounds(ev.validStart(), ev.validStartPrecision(), null, ev.validEnd(),
 					ev.validEndPrecision(), null);
-			tx.update("UPDATE event SET rendering = ? WHERE id = ?", render(ev.type(), names, b), ev.id());
+			tx.update("UPDATE event SET rendering = ? WHERE id = ?",
+					render(ev.type(), names, ev.roles(), ev.detail(), b), ev.id());
 			n++;
 		}
 		return n;
@@ -177,6 +266,15 @@ public final class EventService {
 	 * is one event, and a date the record lacked is filled in. A different date is a different event.
 	 */
 	Stored store(String type, List<Entity> participants, Bounds b, String rendering, Observation obs) {
+		return store(type, participants, null, b, rendering, obs);
+	}
+
+	/**
+	 * As above, with the participants' roles ({@code roles} parallel to them, null where none). The same event stated
+	 * again with a role its record lacks gets the role.
+	 */
+	Stored store(
+		String type, List<Entity> participants, List<String> roles, Bounds b, String rendering, Observation obs) {
 		Optional<Event> same = sameEvent(type, participants, b.start());
 		if (same.isPresent()) {
 			Event e = same.get();
@@ -188,6 +286,19 @@ public final class EventService {
 									UPDATE event SET valid_start = ?, valid_start_precision = ?, valid_end = ?, valid_end_precision = ?,
 									                 rendering = ? WHERE id = ?""",
 							b.start(), b.startPrecision(), b.end(), b.endPrecision(), rendering, e.id());
+				}
+				// A role said now that the record lacks is added; a re-dated event keeps its roles and detail.
+				var added = new java.util.HashMap<Long, String>();
+				for (int i = 0; i < participants.size(); i++) {
+					String role = roleAt(roles, i);
+					if (role != null && e.roleOf(participants.get(i).id()) == null) {
+						added.put(participants.get(i).id(), role);
+					}
+				}
+				if (!added.isEmpty()) {
+					setRoles(tx, e.id(), added);
+				} else if (dating) {
+					rerender(tx, tx.query("SELECT * FROM event WHERE id = ?", e.id()));
 				}
 				// This observation stated it too: it is a source, and the one that dated it when it did.
 				tx.update("INSERT OR IGNORE INTO event_source(event_id, observation_id, kind) VALUES (?,?,?)", e.id(),
@@ -203,13 +314,31 @@ public final class EventService {
 					obs.id(), b.start(), b.startPrecision(), b.end(), b.endPrecision(), rendering,
 					Instant.now().toString());
 			for (int i = 0; i < participants.size(); i++) {
-				tx.update("INSERT OR IGNORE INTO event_participant(event_id, entity_id, position) VALUES (?,?,?)", eid,
-						participants.get(i).id(), i);
+				tx.update(
+						"INSERT OR IGNORE INTO event_participant(event_id, entity_id, position, role) VALUES (?,?,?,?)",
+						eid, participants.get(i).id(), i, roleAt(roles, i));
 			}
 			tx.update("INSERT INTO event_source(event_id, observation_id, kind) VALUES (?,?,'stated')", eid, obs.id());
 			return eid;
 		});
 		return new Stored(id, true);
+	}
+
+	private static String roleAt(List<String> roles, int i) {
+		return i == 0 || roles == null || i >= roles.size() ? null : roles.get(i);
+	}
+
+	/**
+	 * Sets the roles of an event's participants ({@code changes} by entity id; a null or blank role clears one) and
+	 * re-renders it. The first participant carries the sentence and takes none.
+	 */
+	void setRoles(Tx tx, long eventId, Map<Long, String> changes) {
+		for (Map.Entry<Long, String> c : changes.entrySet()) {
+			String role = c.getValue() == null || c.getValue().isBlank() ? null : c.getValue().strip();
+			tx.update("UPDATE event_participant SET role = ? WHERE event_id = ? AND entity_id = ?", role, eventId,
+					c.getKey());
+		}
+		rerender(tx, tx.query("SELECT * FROM event WHERE id = ?", eventId));
 	}
 
 	/** The observations behind an event: its home first, then every other that stated or dated it. */
@@ -267,7 +396,7 @@ public final class EventService {
 
 	/** What moving an event to another date did: the facts it had opened and closed, moved with it. */
 	/** An event given another type: the type it had, its rendering before, and after. */
-	public record Retyped(String type, String before, String after) {
+	public record Retyped(String type, String before, String after, String detail) {
 	}
 
 	/**
@@ -275,16 +404,39 @@ public final class EventService {
 	 * not applied here: what the new type closes, consolidate closes; what it opens, the caller states.
 	 */
 	public Retyped retype(long eventId, String type, long correctionObservationId) {
+		return retype(eventId, type, null, correctionObservationId);
+	}
+
+	/**
+	 * As above, with a detail: the one given, else the one the event has, else the words of a sentence type it is
+	 * retyped from, so that retyping never loses what the sentence said (2026-09-28). The same type with a detail sets
+	 * the detail alone.
+	 */
+	public Retyped retype(long eventId, String type, String detail, long correctionObservationId) {
+		return retype(eventId, type, detail, Map.of(), correctionObservationId);
+	}
+
+	/** As above, with roles set on participants ({@code roles} by entity id; a blank role clears one). */
+	public Retyped retype(
+		long eventId, String type, String detail, Map<Long, String> roles, long correctionObservationId) {
 		Event ev = get(eventId).orElseThrow(() -> MnemicException.notFound("No event evt-" + eventId));
+		String kept = detail != null && !detail.isBlank() ? detail.strip()
+				: ev.detail() != null ? ev.detail() : type.equals(ev.type()) ? null : detailOf(ev.type());
 		return db.write(tx -> {
 			List<String> names = ev.participants().stream().map(id -> FactRenderer.nameIn(tx, id)).toList();
 			Bounds b = new Bounds(ev.validStart(), ev.validStartPrecision(), null, ev.validEnd(),
 					ev.validEndPrecision(), null);
-			String rendering = render(type, names, b);
-			tx.update("UPDATE event SET type = ?, rendering = ? WHERE id = ?", type, rendering, eventId);
+			String rendering = render(type, names, ev.roles(), kept, b);
+			tx.update("UPDATE event SET type = ?, detail = ?, rendering = ? WHERE id = ?", type, kept, rendering,
+					eventId);
 			tx.update("INSERT OR IGNORE INTO event_source(event_id, observation_id, kind) VALUES (?,?,'retyped')",
 					eventId, correctionObservationId);
-			return new Retyped(ev.type(), ev.rendering(), rendering);
+			if (!roles.isEmpty()) {
+				setRoles(tx, eventId, roles);
+			}
+			String after = tx.queryOne("SELECT rendering FROM event WHERE id = ?", eventId).orElseThrow()
+					.str("rendering");
+			return new Retyped(ev.type(), ev.rendering(), after, kept);
 		});
 	}
 
@@ -316,7 +468,7 @@ public final class EventService {
 		Event ev = get(eventId).orElseThrow(() -> MnemicException.notFound("No event evt-" + eventId));
 		return db.write(tx -> {
 			List<String> names = ev.participants().stream().map(id -> FactRenderer.nameIn(tx, id)).toList();
-			String rendering = render(ev.type(), names, b);
+			String rendering = render(ev.type(), names, ev.roles(), ev.detail(), b);
 			tx.update("""
 					UPDATE event SET valid_start = ?, valid_start_precision = ?, valid_end = ?, valid_end_precision = ?,
 					                 rendering = ? WHERE id = ?""", b.start(), b.startPrecision(), b.end(),

@@ -34,15 +34,33 @@ import java.util.List;
 
 /** An occurrence at a point or interval in valid time, with participants (DESIGN.md, Events versus Facts). */
 public record Event(long id, String type, long observationId, String validStart, String validStartPrecision,
-		String validEnd, String validEndPrecision, String rendering, List<Long> participants) {
+		String validEnd, String validEndPrecision, String rendering, List<Long> participants, String detail,
+		List<String> roles) {
 
 	public String ref() {
 		return "evt-" + id;
 	}
 
-	static Event from(Row r, List<Long> participants) {
+	/** The role of a participant ("with", "from"), or null: the ones without carry the sentence. */
+	public String roleOf(long entityId) {
+		int i = participants.indexOf(entityId);
+		return i < 0 || roles == null || i >= roles.size() ? null : roles.get(i);
+	}
+
+	/** The participants without a role, in order: the subject and objects the type's template and effects take. */
+	public List<Long> acting() {
+		var out = new java.util.ArrayList<Long>();
+		for (int i = 0; i < participants.size(); i++) {
+			if (roles == null || i >= roles.size() || roles.get(i) == null) {
+				out.add(participants.get(i));
+			}
+		}
+		return out;
+	}
+
+	static Event from(Row r, List<Long> participants, List<String> roles) {
 		return new Event(r.lng("id"), r.str("type"), r.lng("observation_id"), r.str("valid_start"),
 				r.str("valid_start_precision"), r.str("valid_end"), r.str("valid_end_precision"), r.str("rendering"),
-				participants);
+				participants, r.str("detail"), roles);
 	}
 }

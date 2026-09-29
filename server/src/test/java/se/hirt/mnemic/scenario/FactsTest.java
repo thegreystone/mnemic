@@ -271,12 +271,14 @@ class FactsTest {
 			var c = e.correct(f.id(), Map.of("caller_confidence", 1.0), "Mattias confirmed it");
 			assertFalse(c.replacement().rendering().contains("(believed)"), c.replacement().rendering());
 			assertEquals(0.80, e.facts().confidence(c.replacement()), 1e-9);
-			// A qualifier on a template without a slot is stored and reported, never dropped silently.
+			// A qualifier on a template without a slot is stored and shown after the sentence, never dropped
+			// silently: before, it was stored, not shown, and warned about (2026-09-29).
 			RememberOutcome noSlot = remember(e, "I lead Kestrel as its steward.",
 					proposal().entity("e3", "Kestrel", "project").fact(
 							new FactRef("self", "leads", "e3", "steward", null, null, null, List.of(), null, null)));
-			assertTrue(noSlot.applied().warnings().stream().anyMatch(w -> w.contains("no slot")),
-					noSlot.applied().warnings().toString());
+			assertTrue(noSlot.applied().warnings().isEmpty(), noSlot.applied().warnings().toString());
+			assertTrue(noSlot.applied().facts().getFirst().rendering().endsWith("leads Kestrel (steward)"),
+					noSlot.applied().facts().toString());
 		}
 	}
 

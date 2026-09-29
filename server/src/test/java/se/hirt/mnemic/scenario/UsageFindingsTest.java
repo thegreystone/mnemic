@@ -207,26 +207,27 @@ class UsageFindingsTest {
 	@Test
 	void theAssistantTeachesTheStoreAFamilyOfKindsAtOnce() {
 		try (Engine e = engine("usage-kinds-taught")) {
-			// The store asks what a "van" is; instead of answering one word at a time, the assistant defines the
+			// The store asks what a "sofa" is; instead of answering one word at a time, the assistant defines the
 			// family: from then on every kind it named is placed without a question, in this store.
-			RememberOutcome asked = remember(e, "I drive a van.",
-					proposal().entity("e1", "the van", "van").fact("self", "uses", "e1"));
+			RememberOutcome asked = remember(e, "I sit on a sofa.",
+					proposal().entity("e1", "the sofa", "sofa").fact("self", "uses", "e1"));
 			assertEquals(1, asked.applied().questions().stream().filter(q -> "type_kind".equals(q.get("kind"))).count(),
 					asked.applied().questions().toString());
-			RememberOutcome taught = remember(e, "A van is a vehicle; so are trucks and scooters.",
-					proposal().entityType(
-							new se.hirt.mnemic.proposal.Proposal.EntityTypeDef("vehicle", "Something one drives.",
-									"thing", List.of(), List.of(), null, List.of("van", "truck", "scooter"))));
-			assertEquals("vehicle", e.entityTypes().get("van").orElseThrow().parent(), taught.applied().toString());
+			RememberOutcome taught = remember(e, "A sofa is furniture; so are wardrobes and ottomans.",
+					proposal().entityType(new se.hirt.mnemic.proposal.Proposal.EntityTypeDef("furniture",
+							"Something a home is furnished with.", "thing", List.of(), List.of(), null,
+							List.of("sofa", "wardrobe", "ottoman"))));
+			assertEquals("furniture", e.entityTypes().get("sofa").orElseThrow().parent(), taught.applied().toString());
 			assertEquals(0, e.questions().openCount(), "the definition answered the question");
-			RememberOutcome later = remember(e, "Anna rides a scooter.",
-					proposal().entity("e1", "Anna Lindqvist", "person").entity("e2", "Anna's scooter", "scooter")
+			RememberOutcome later = remember(e, "Anna has an ottoman.",
+					proposal().entity("e1", "Anna Lindqvist", "person").entity("e2", "Anna's ottoman", "ottoman")
 							.fact("e1", "uses", "e2"));
 			assertTrue(later.applied().questions().isEmpty(), later.applied().questions().toString());
-			assertEquals("vehicle", e.entityTypes().get("scooter").orElseThrow().parent());
-			assertTrue(e.entityTypes().isA("scooter", "thing"));
+			assertEquals("furniture", e.entityTypes().get("ottoman").orElseThrow().parent());
+			assertTrue(e.entityTypes().isA("ottoman", "thing"));
 			// And inspect shows the family, so the next session can build on it.
-			assertEquals(List.of("van", "truck", "scooter"), e.entityTypes().get("vehicle").orElseThrow().kinds());
+			assertEquals(List.of("sofa", "wardrobe", "ottoman"),
+					e.entityTypes().get("furniture").orElseThrow().kinds());
 		}
 	}
 

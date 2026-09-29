@@ -407,9 +407,39 @@ Integer specVersion, List<EntityRef> entities, List<EventRef> events, List<FactR
 
 	@JsonIgnoreProperties(ignoreUnknown = true)
 	public record EventRef(String ref, String type, List<String> participants, @JsonProperty("valid_time")
-	ValidTime validTime) {
+	ValidTime validTime, Map<String, String> roles) {
 		public EventRef {
 			participants = participants == null ? List.of() : participants;
+			roles = roles == null ? Map.of() : roles;
+		}
+
+		public EventRef(String ref, String type, List<String> participants, ValidTime validTime) {
+			this(ref, type, participants, validTime, Map.of());
+		}
+
+		/**
+		 * The role of each participant, in order, as the proposal gives it ({@code "roles": {"Calle Wilund": "with"}});
+		 * null where none. The first participant carries the sentence and takes none.
+		 */
+		/** This event with only its participants without a role: the ones the type's effects are between. */
+		public EventRef acting() {
+			List<String> roles = roleList();
+			var names = new java.util.ArrayList<String>();
+			for (int i = 0; i < participants.size(); i++) {
+				if (roles.get(i) == null) {
+					names.add(participants.get(i));
+				}
+			}
+			return new EventRef(ref, type, names, validTime);
+		}
+
+		public List<String> roleList() {
+			var out = new java.util.ArrayList<String>();
+			for (int i = 0; i < participants.size(); i++) {
+				String role = i == 0 ? null : roles.get(participants.get(i));
+				out.add(role == null || role.isBlank() ? null : role.strip());
+			}
+			return out;
 		}
 	}
 

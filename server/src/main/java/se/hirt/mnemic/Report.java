@@ -120,7 +120,8 @@ final class Report {
 			String ref = m.containsKey("predicate") ? "pred:" + name
 					: m.containsKey("event_type") ? "event:" + name : "type:" + name;
 			out.add(mark(m, "the " + kind + " '" + name + "' is used by nothing and the observation that defined it "
-					+ "is gone — harmless; it stays available, inspect('" + ref + "') shows it"));
+					+ "is gone — harmless; it stays available, inspect('" + ref + "') shows it"
+					+ ("predicate".equals(kind) ? "" : ", or correct('" + ref + "', {remove: true}) removes it")));
 		}
 		for (Map<String, Object> m : c.unresolvedDerivations()) {
 			out.add(mark(m,
@@ -142,7 +143,16 @@ final class Report {
 			out.add(mark(m, "name collision: " + entry(m)));
 		}
 		for (Map<String, Object> m : c.duplicates()) {
-			out.add(mark(m, "possible duplicate: " + entry(m) + " — fold with correct(ent-N, {merge_into: ent-M})"));
+			// A fact or event fold is consolidate's own work: done, or done by the next consolidate. No call to make.
+			out.add(mark(m,
+					(m.containsKey("folded") ? "folded: " : "duplicate, folded by the next consolidate: ") + entry(m)));
+		}
+		for (Map<String, Object> m : c.repairs()) {
+			out.add(mark(m,
+					(m.containsKey("repaired") ? "repaired: " : "to repair by the next consolidate: ") + entry(m)));
+		}
+		for (Map<String, Object> m : c.notRetired()) {
+			out.add(mark(m, "not retired: " + entry(m)));
 		}
 		for (Map<String, Object> m : c.review()) {
 			out.add(mark(m, "to review: " + entry(m)));

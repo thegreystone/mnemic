@@ -70,7 +70,7 @@ class EntityTypeRegistryTest {
 					"a country drops the type words of the place it is");
 			assertEquals(List.of("kanton"), types.identityTokens("Kanton", "place"),
 					"a name that is only a type word keeps it");
-			assertEquals(12, types.all().size());
+			assertEquals(15, types.all().size());
 		}
 	}
 
@@ -134,35 +134,35 @@ class EntityTypeRegistryTest {
 		try (Database db = open(home)) {
 			var types = new EntityTypeRegistry(db);
 			// A defined type with kinds of its own places what it names, ahead of the seeds.
-			types.register(new EntityTypeDef("vehicle", "Something one drives.", "thing", List.of(), List.of(), null,
-					List.of("car", "van", "truck")), null);
-			assertEquals("vehicle", types.placeFromUse("van", null).orElseThrow().type().parent());
+			types.register(new EntityTypeDef("furnishing", "Something a home is furnished with.", "thing", List.of(),
+					List.of(), null, List.of("appliance", "sofa", "desk")), null);
+			assertEquals("furnishing", types.placeFromUse("sofa", null).orElseThrow().type().parent());
 			// A type waiting for its kind is placed when a definition names it, and stays movable.
-			types.registerInferred("truck", null);
-			assertEquals(List.of("truck"), types.adoptKinds("vehicle"));
-			assertEquals("vehicle", types.get("truck").orElseThrow().parent());
-			assertTrue(types.get("truck").orElseThrow().inferred());
+			types.registerInferred("desk", null);
+			assertEquals(List.of("desk"), types.adoptKinds("furnishing"));
+			assertEquals("furnishing", types.get("desk").orElseThrow().parent());
+			assertTrue(types.get("desk").orElseThrow().inferred());
 			// A word two types claim places nothing, from use or from a definition.
-			types.register(new EntityTypeDef("lorry", "A big truck.", "thing", List.of(), List.of(), null,
-					List.of("truck", "tanker")), null);
-			types.registerInferred("tanker", null);
-			assertEquals(List.of("tanker"), types.adoptKinds("lorry"), "truck is claimed twice, tanker once");
-			assertEquals("vehicle", types.get("truck").orElseThrow().parent(), "not moved");
-			// "car" is now claimed by thing (seed) and vehicle: nothing is placed, the caller asks.
-			assertTrue(types.placeFromUse("car", null).isEmpty(), "two claims: ask");
+			types.register(new EntityTypeDef("bureau", "Office furniture.", "thing", List.of(), List.of(), null,
+					List.of("desk", "cabinet")), null);
+			types.registerInferred("cabinet", null);
+			assertEquals(List.of("cabinet"), types.adoptKinds("bureau"), "desk is claimed twice, cabinet once");
+			assertEquals("furnishing", types.get("desk").orElseThrow().parent(), "not moved");
+			// "appliance" is now claimed by thing (seed) and furnishing: nothing is placed, the caller asks.
+			assertTrue(types.placeFromUse("appliance", null).isEmpty(), "two claims: ask");
 			// A correction settles it: the seed's list is the store's to change, and the change is logged.
-			List<String> without = types.get("thing").orElseThrow().kinds().stream().filter(k -> !k.equals("car"))
+			List<String> without = types.get("thing").orElseThrow().kinds().stream().filter(k -> !k.equals("appliance"))
 					.toList();
-			types.update("thing", Map.of("kinds", without), "cars are vehicles here");
-			assertEquals("vehicle", types.placeFromUse("car", null).orElseThrow().type().parent());
+			types.update("thing", Map.of("kinds", without), "appliances are furnishings here");
+			assertEquals("furnishing", types.placeFromUse("appliance", null).orElseThrow().type().parent());
 			assertTrue(types.changes("thing").stream().anyMatch(c -> "kinds".equals(c.get("field"))),
 					types.changes("thing").toString());
 		}
 		try (Database db = open(home)) {
 			var reopened = new EntityTypeRegistry(db);
-			assertFalse(reopened.get("thing").orElseThrow().kinds().contains("car"),
+			assertFalse(reopened.get("thing").orElseThrow().kinds().contains("appliance"),
 					"the corrected seed list stays corrected across a start");
-			assertEquals(List.of("car", "van", "truck"), reopened.get("vehicle").orElseThrow().kinds());
+			assertEquals(List.of("appliance", "sofa", "desk"), reopened.get("furnishing").orElseThrow().kinds());
 		}
 	}
 
@@ -251,7 +251,7 @@ class EntityTypeRegistryTest {
 			assertEquals("place", canton.parent());
 			assertEquals(List.of("kanton"), canton.synonyms());
 			assertEquals("canton", reopened.canonical("kanton"));
-			assertEquals(13, reopened.all().size());
+			assertEquals(16, reopened.all().size());
 		}
 	}
 

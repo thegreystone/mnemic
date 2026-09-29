@@ -219,6 +219,20 @@ public record Predicate(String name, String description, List<String> domain, Li
 		return range.contains("literal");
 	}
 
+	/**
+	 * Whether the predicate takes a value or a thing ({@code ["literal", "*"]}): an object that names a thing on record
+	 * (or one the proposal declares) is that thing, anything else stays words. considering and decided are so, a plan
+	 * in words or the thing it is about.
+	 */
+	public boolean mixedRange() {
+		return range.contains("literal") && range.size() > 1;
+	}
+
+	/** The kinds of thing the predicate takes, without "literal". */
+	public List<String> thingRange() {
+		return range.stream().filter(t -> !"literal".equals(t)).toList();
+	}
+
 	/** Whether the domain admits an entity whose type lineage (the type and its ancestors) is given. */
 	public boolean acceptsSubject(List<String> lineage) {
 		return accepts(domain, lineage);
@@ -336,7 +350,9 @@ public record Predicate(String name, String description, List<String> domain, Li
 	}
 
 	private static String render(String template, String subject, String object, String scope, String qualifier) {
-		String out = template;
+		// A qualifier the template has no slot for is still said, after the sentence: a stated "elected" on member_of
+		// was stored and never shown, and every such remember warned instead (2026-09-29).
+		String out = template.contains("{qualifier") || isBlank(qualifier) ? template : template + " ({qualifier})";
 		var sb = new StringBuilder();
 		int i = 0;
 		while (i < out.length()) {

@@ -505,7 +505,7 @@ class RecallFeedbackTest {
 		try (Engine e = engine("f19-kinds")) {
 			remember(e, "I own a Yamaha FZ6-S.",
 					proposal().entity("e1", "Yamaha FZ6-S", "vehicle").fact("self", "owns", "e1"));
-			// "vehicle" is a kind of thing from its first use (a seed kind); "conveyance" is a word nobody placed.
+			// "vehicle" is a seed kind of thing; "conveyance" is a word nobody placed.
 			remember(e, "I own a Segway.",
 					proposal().entity("e1", "the Segway", "conveyance").fact("self", "owns", "e1"));
 			remember(e, "I own a Toyota Sienna.",
@@ -516,12 +516,12 @@ class RecallFeedbackTest {
 					proposal().entity("e1", "Hooli", "organization").fact("self", "works_at", "e1")
 							.fact(fact("self", "holds_role", "CTO", null, "e1", null, null, null, null, null)));
 			// A kind the store never heard of cannot narrow or deny: the verdict says so beside the facts.
-			RecallResult bikes = recall(e, "what motorcycles does Mattias own");
+			RecallResult bikes = recall(e, "what gliders does Mattias own");
 			assertEquals("matched", bikes.structured().state(), bikes.text());
 			assertEquals(4, bikes.structured().facts().size(), bikes.text());
 			assertTrue(
 					bikes.text()
-							.contains("'motorcycles' names no kind of thing on record; the 4 facts under owns "
+							.contains("'gliders' names no kind of thing on record; the 4 facts under owns "
 									+ "for Mattias Sandell are everything recorded, none of them classified so"),
 					bikes.text());
 			// A kind on record narrows: a vehicle registered from use, the thing, the place.

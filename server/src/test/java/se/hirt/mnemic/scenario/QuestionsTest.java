@@ -305,7 +305,7 @@ class QuestionsTest {
 			assertTrue(b.applied().questions().isEmpty(), "containment nests, no conflict: " + b.applied().questions());
 			assertEquals("current", stored(e, a, 0).status());
 			assertEquals("current", stored(e, b, 0).status());
-			assertEquals(35, e.database().schemaVersion());
+			assertEquals(37, e.database().schemaVersion());
 		}
 	}
 

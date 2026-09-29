@@ -86,17 +86,19 @@ store, the conversation empty), 43 steps are statements. The script is `bench/us
 |---|---|---|---|---|---|---|---|---|---|
 | Opus 5.5 | text | `usage-opus55-s6b`, 2026-09-23 | **63** | 11 | 43 | 0 | 0 | 1.5 | about $3.90 with the judge |
 | Haiku 4.5 | text | `usage-haiku45-s6b`, 2026-09-23 | 59 | 11 | 43 | 0 | 34 | 1.2 | about $0.65 plus the judge |
+| Opus 5.5 | native tools, store-audit fixes and event roles | `usage-opus55-s13`, 2026-09-29 | **63** | 11 | 43 | 2 | 0 | 1.6 | about $4.30 with the judge |
+| Haiku 4.5 | native tools, store-audit fixes and event roles | `usage-haiku45-s13`, 2026-09-29 | 62 | 11 | 43 | 1 | 0 | 1.1 | about $0.65 plus the judge |
 | Qwen 3.5 9B | text | `usage-qwen9b-s7`, 2026-09-24 | 52 (53) | 10 | 43 | 8 | 67 | 2.5 | none |
 | Qwen 3.5 9B | native tools | `usage-qwen9b-s9`, 2026-09-24 | 61 | 11 | 37 | 0 | 0 | 0.8 | none |
 | Qwen 3.5 9B | native tools, final tree | `usage-qwen9b-s10`, 2026-09-24 | 60 (61) | 10 | 38 | 0 | 0 | 0.7 | none |
 | Qwen 3.5 9B | native tools, 09-26 tree | `usage-qwen9b-s11`, 2026-09-26 | 62 | 11 | 40 | 1 | 0 | 0.8 | none |
 | Qwen 3.5 9B | native tools, closest relations offered | `usage-qwen9b-s12`, 2026-09-26 | 60 (62) | 10 | 39 | 1 | 0 | 0.7 | none |
+| Qwen 3.5 9B | native tools, store-audit fixes and event roles | `usage-qwen9b-s13`, 2026-09-29 | 58 (60) | 11 | 36 | 0 | 0 | 0.9 | none |
 
 The judge is Opus 5.5 for the Claude rows and the 9B itself for the Qwen rows, whose verdicts were checked by
 hand; the number in parentheses is the hand count where it differs (a correct abstention or a partial answer
-the small judge refused). Cost is at list price for assistant and judge together. The Claude rows are on the
-text protocol and predate this branch's last changes (the direction line on stored facts, the note on a
-repeated read, the fuller name on an entity answer); they are the reference until rerun natively.
+the small judge refused). Cost is at list price for assistant and judge together. The `s6b` rows are on the text
+protocol and predate this branch's later changes; the `s13` rows are native tools on the current tree.
 
 What the remaining misses are:
 

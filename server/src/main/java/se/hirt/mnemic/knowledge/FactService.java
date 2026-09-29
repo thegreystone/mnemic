@@ -201,6 +201,8 @@ public final class FactService {
 
 	private static final Pattern SENTENCE_END = Pattern.compile("[.!?\\n]");
 	private static final Pattern REF_SHAPE = Pattern.compile("(?i)(e|ev|ent|evt)[-_]?\\d+");
+	/** A stored entity's id as the store writes it, which a fact may name instead of the entity's name. */
+	private static final Pattern ENTITY_ID = Pattern.compile("(?i)ent-\\d+");
 	/** An object that is a clause about the world, not a plan or an option. */
 	private static final Pattern RECOLLECTION = Pattern.compile("^(?:that|whether|if)\\b", Pattern.CASE_INSENSITIVE);
 
@@ -225,6 +227,8 @@ public final class FactService {
 	 * {@link #apply}; the engine is single-threaded per store, and nested applies save and restore it.
 	 */
 	private Set<Long> declaredInProposal = Set.of();
+	/** The object a running correction replaces: never a candidate for the new object's name. */
+	private Set<Long> correctionDistinct = Set.of();
 
 	FactService(Database db, EntityService entities, PredicateRegistry predicates, EventTypeRegistry eventTypes,
 			EventService events, QuestionService questions, FactQueries queries, FactQuestions asks,
@@ -255,7 +259,7 @@ public final class FactService {
 	public Applied apply(Observation obs, Proposal p, Map<String, Entity> bound) {
 		Set<Long> outer = declaredInProposal;
 		try {
-			var declared = new HashSet<Long>();
+			var declared = new HashSet<Long>(correctionDistinct);
 			for (EntityRef er : p.entities()) {
 				declared.addAll(entities.exactIds(er.name(), er.aliases(), er.type()));
 			}
@@ -634,21 +638,31 @@ public final class FactService {
 						+ "\", {opens, closes, supersedes, ends_entity, render, lexicon, description})");
 				a.defined("event_type", et.name(), "inferred", inferred);
 			}
-			String rendering = events.render(type, participants.stream().map(Entity::name).toList(), b);
-			EventService.Stored stored = events.store(type, participants, b, rendering, a.obs);
+			List<String> roles = ev.roleList();
+			warnUnknownRoles(a, ev);
+			String rendering = events.render(type, participants.stream().map(Entity::name).toList(), roles, null, b);
+			EventService.Stored stored = events.store(type, participants, roles, b, rendering, a.obs);
+			// A participant with a role ("with" Calle Wilund) is there, but the type's effects are between the others:
+			// creating JMAPI with Calle opens nothing toward Calle.
+			var acting = new ArrayList<Entity>();
+			for (int i = 0; i < participants.size(); i++) {
+				if (roles.get(i) == null) {
+					acting.add(participants.get(i));
+				}
+			}
 			String key = ev.ref() != null ? ev.ref() : "evt-" + stored.id();
 			a.eventIds.put(key, stored.id());
 			a.eventTypeOf.put(key, type);
-			a.eventParticipants.put(key, participants.stream().map(Entity::id).toList());
+			a.eventParticipants.put(key, acting.stream().map(Entity::id).toList());
 			a.eventOut.add(new EventOut(key, "evt-" + stored.id(), type));
 			if (stored.effects()) {
-				events.applyEffects(stored.id(), type, participants, b, a.obs, a.superseded);
+				events.applyEffects(stored.id(), type, acting, b, a.obs, a.superseded);
 			}
-			opened.addAll(openedBy(a, ev, type, participants, key));
+			opened.addAll(openedBy(a, ev.acting(), type, acting, key));
 			if (et != null && et.inferred()) {
-				List<Predicate> fit = fitting(participants);
-				if (effectWorthAsking(participants, fit)) {
-					asks.eventEffect(a.obs, et, participants, stored.id(), fit).ifPresent(a::ask);
+				List<Predicate> fit = fitting(acting);
+				if (effectWorthAsking(acting, fit)) {
+					asks.eventEffect(a.obs, et, acting, stored.id(), fit).ifPresent(a::ask);
 				}
 			}
 		}
@@ -708,9 +722,9 @@ public final class FactService {
 			Optional<Observation> obs = db
 					.read(tx -> tx.queryOne("SELECT * FROM observation WHERE id = ?", ev.observationId()))
 					.map(Observation::from);
-			List<Entity> participants = ev.participants().stream().map(id -> entities.get(id).orElse(null))
+			List<Entity> participants = ev.acting().stream().map(id -> entities.get(id).orElse(null))
 					.filter(Objects::nonNull).toList();
-			if (obs.isEmpty() || participants.size() != ev.participants().size()) {
+			if (obs.isEmpty() || participants.size() != ev.acting().size()) {
 				continue;
 			}
 			var a = new Application(obs.get(),
@@ -741,6 +755,19 @@ public final class FactService {
 	}
 
 	/** The event's participants, or null when one is held behind an entity question. */
+	/** A role keyed by a name that is not among the event's participants is said, not silently dropped. */
+	private static void warnUnknownRoles(Application a, EventRef ev) {
+		for (String who : ev.roles().keySet()) {
+			if (!ev.participants().contains(who)) {
+				a.warnings.add("Role '" + ev.roles().get(who) + "' of '" + who + "' ignored: '" + who
+						+ "' is not one of the participants " + ev.participants() + " as written.");
+			} else if (who.equals(ev.participants().getFirst())) {
+				a.warnings.add("Role '" + ev.roles().get(who) + "' of '" + who + "' ignored: the first participant "
+						+ "carries the sentence and takes no role.");
+			}
+		}
+	}
+
 	private List<Entity> participants(Application a, EventRef ev) {
 		var participants = new ArrayList<Entity>();
 		for (String ref : ev.participants()) {
@@ -775,7 +802,8 @@ public final class FactService {
 			}
 			for (String pred : et.get().opens()) {
 				Predicate pr = predicates.get(pred).orElse(null);
-				if (pr == null || pr.literalRange() || !pr.acceptsSubject(types.lineage(subj.type()))
+				if (pr == null || (pr.literalRange() && !pr.mixedRange())
+						|| !pr.acceptsSubject(types.lineage(subj.type()))
 						|| !pr.acceptsObject(types.lineage(obj.type()))) {
 					continue;
 				}
@@ -930,10 +958,17 @@ public final class FactService {
 		int[] span = span(a.obs.text(), op.objectName());
 		final Bounds bounds = b;
 		final boolean isEnded = ended;
+		// What the object is called, for a fact this one ends whose object was said in words ("considering Zenit 4").
+		final List<String> objectNames = op.object() == null ? List.of(Names.norm(op.objectText()))
+				: entities.aliases(op.object().id()).stream().map(Names::norm).toList();
 		Stored stored = db.write(tx -> {
 			Optional<Row> existing = currentRow(tx, op);
 			if (existing.isPresent()) {
-				return corroborate(tx, a.obs, op, Fact.from(existing.get()));
+				Fact e = Fact.from(existing.get());
+				if (isEnded && !e.ended() && e.validEnd() == null) {
+					return endRestated(tx, a.obs, op, e, bounds);
+				}
+				return corroborate(tx, a.obs, op, e);
 			}
 			ConflictCheck.Outcome c = conflicts.check(tx, op, bounds, isEnded, event, rendering);
 			String rowRendering = c.rowEnded() != isEnded ? base + c.row().suffix(true, lang) : rendering;
@@ -952,6 +987,9 @@ public final class FactService {
 					a.obs.observedAt().toString(), Instant.now().toString(), c.row().startSource(), c.row().endSource(),
 					op.mode());
 			FactLedger.link(tx, id, a.obs.id(), "stated");
+			if (!c.pending() && "asserted".equals(op.mode())) {
+				endEarlier(tx, a, op, id, objectNames, c.row().start(), c.row().startPrecision(), eventId);
+			}
 			if (c.besides() != null) {
 				// Decided here, not by a person: the ledger says so, and the reply names it.
 				Fact fresh = Fact.from(tx.queryOne("SELECT * FROM fact WHERE id = ?", id).orElseThrow());
@@ -1051,7 +1089,7 @@ public final class FactService {
 		String mode = f.mode();
 		Entity object = null;
 		String objectText = null;
-		if (pred.literalRange()) {
+		if (pred.literalRange() && !(pred.mixedRange() && namesAnEntity(f.object(), a.refs))) {
 			objectText = f.object().trim();
 			if (("considering".equals(pred.name()) || "decided".equals(pred.name()))
 					&& RECOLLECTION.matcher(objectText).find()) {
@@ -1063,8 +1101,12 @@ public final class FactService {
 			}
 		} else if ("negated".equals(mode) && !namesAnEntity(f.object(), a.refs)) {
 			objectText = f.object().trim();
+		} else if (pred.range().contains("*") && !namesAnEntity(f.object(), a.refs) && readsAsDescription(f.object())) {
+			// "prefers being challenged with contrary evidence rather than agreement": a description, not a thing,
+			// kept as text rather than minted as an entity of unknown type nobody will ever name (2026-09-28).
+			objectText = f.object().trim();
 		} else {
-			object = resolveRef(a, f.object(), kinds(pred.range()));
+			object = resolveRef(a, f.object(), kinds(pred.thingRange()));
 			if (object == null) {
 				return null;
 			}
@@ -1094,6 +1136,22 @@ public final class FactService {
 		return new Operands(subject, pred, object, objectText, qualifier(a, f, pred), scope, mode);
 	}
 
+	/**
+	 * Whether an object reads as a description rather than a name: it starts in lower case over three words or more
+	 * ("routing tax questions to ..."), it is a list ("MS Office, Photoshop, Cubase, ..."), or it runs to seven words.
+	 * Names and titles ("Toyota Sienna", "The Skeptics' Guide to the Universe") start in upper case and stay short.
+	 */
+	static boolean readsAsDescription(String object) {
+		String s = object == null ? "" : object.strip();
+		List<String> tokens = Names.tokens(s);
+		if (tokens.isEmpty()) {
+			return false;
+		}
+		boolean lower = Character.isLowerCase(s.codePointAt(0));
+		return (lower && tokens.size() >= 3) || ((s.contains(",") || s.contains(";")) && tokens.size() >= 4)
+				|| tokens.size() >= 7;
+	}
+
 	/** Whether the entity's type was registered from use and could still be made a kind of something. */
 	private boolean newKind(Entity e) {
 		return types.get(e.type()).map(EntityTypeRegistry.EntityType::inferred).orElse(false);
@@ -1108,11 +1166,6 @@ public final class FactService {
 		if (!freeQualifier(pred) && !pred.qualifiers().contains(q)) {
 			a.warnings.add("Qualifier '" + q + "' is not one of " + pred.qualifiers() + " for " + pred.name()
 					+ "; kept as given.");
-		}
-		if (!pred.render().contains("{qualifier")) {
-			a.warnings.add("Qualifier '" + q + "' is stored but " + pred.name() + "'s template has no slot for it, "
-					+ "so the rendering will not show it; correct the predicate's render (add [[ ({qualifier})]]) or put "
-					+ "the meaning in the observation text.");
 		}
 		return q;
 	}
@@ -1144,17 +1197,55 @@ public final class FactService {
 		}
 	}
 
-	/** The current row with the same key and mode, whatever its bounds. */
-	/** The current stated row a restatement folds into; a derived row (family K) is never it. */
+	/**
+	 * The current stated row a restatement folds into, whatever its bounds; a derived row (family K) is never it. A
+	 * free-text qualifier is wording, so a row worded differently is the same fact, unless the two wordings say
+	 * different things: "motor insurance for the Polestar" is not a restatement of "household insurance" (2026-09-29).
+	 */
 	private static Optional<Row> currentRow(Tx tx, Operands op) {
-		return tx.queryOne("""
-				SELECT * FROM fact WHERE subject_id = ? AND predicate = ? AND status = 'current'
-				AND derivation_kind <> 'derived'
-				AND COALESCE(object_id, -1) = ? AND COALESCE(lower(object_text), '') = ?
-				AND (? = 1 OR COALESCE(qualifier, '') = ?) AND COALESCE(scope_id, -1) = ? AND mode = ?
-				ORDER BY id LIMIT 1""", op.subject().id(), op.predicate().name(), op.objectId(), op.objectTextKey(),
-				freeQualifier(op.predicate()) ? 1 : 0, op.qualifier() == null ? "" : op.qualifier(), op.scopeId(),
-				op.mode());
+		boolean free = freeQualifier(op.predicate());
+		return tx
+				.query("""
+						SELECT * FROM fact WHERE subject_id = ? AND predicate = ? AND status = 'current'
+						AND derivation_kind <> 'derived'
+						AND COALESCE(object_id, -1) = ? AND COALESCE(lower(object_text), '') = ?
+						AND (? = 1 OR COALESCE(qualifier, '') = ?) AND COALESCE(scope_id, -1) = ? AND mode = ?
+						ORDER BY id""", op.subject().id(), op.predicate().name(), op.objectId(), op.objectTextKey(),
+						free ? 1 : 0, op.qualifier() == null ? "" : op.qualifier(), op.scopeId(), op.mode())
+				.stream().filter(r -> !free || sameWording(op.qualifier(), r.str("qualifier"))).findFirst();
+	}
+
+	/** Words too common to tell two qualifiers apart. */
+	private static final Set<String> WORDING_STOPWORDS = Set.of("the", "and", "for", "with", "from", "not", "per",
+			"his", "her", "their", "our", "its", "this", "that", "was", "are", "has", "have", "into", "onto", "about");
+
+	/**
+	 * Whether two free-text qualifiers word the same thing: either is empty, or at least half of the content words of
+	 * the shorter one appear in the other. "financed the work at" and "financed the work at, until venture capital
+	 * arrived" are one; "household insurance (no household casco cover)" and "motor insurance for the Polestar 4" are
+	 * two, sharing only "insurance".
+	 */
+	static boolean sameWording(String a, String b) {
+		if (a == null || a.isBlank() || b == null || b.isBlank()) {
+			return true;
+		}
+		Set<String> x = wordingTokens(a);
+		Set<String> y = wordingTokens(b);
+		if (x.isEmpty() || y.isEmpty()) {
+			return a.strip().equalsIgnoreCase(b.strip());
+		}
+		long shared = x.stream().filter(y::contains).count();
+		return shared * 2 >= Math.min(x.size(), y.size());
+	}
+
+	private static Set<String> wordingTokens(String s) {
+		var out = new HashSet<String>();
+		for (String t : Names.tokens(s)) {
+			if (t.length() >= 3 && !WORDING_STOPWORDS.contains(t) && !t.chars().allMatch(Character::isDigit)) {
+				out.add(t);
+			}
+		}
+		return out;
 	}
 
 	/**
@@ -1173,6 +1264,54 @@ public final class FactService {
 		}
 		return new Stored(new FactOut(e.ref(), op.predicate().name(), shown, e.status(), true), e.id(), null, null,
 				List.of());
+	}
+
+	/**
+	 * The facts a new one ends (the predicate's {@code ends}): open facts of those predicates with the same subject and
+	 * the same object, the object matched as the thing or, when one side said it in words, by its name. They end at the
+	 * new fact's start, or undated without one; one that began later is left alone. "I ordered the Zenit 4" left "I'm
+	 * leaning toward a Zenit 4" current (usage bench, 2026-09-29): owns and decided end considering.
+	 */
+	private void endEarlier(
+		Tx tx, Application a, Operands op, long id, List<String> objectNames, String start, String precision,
+		Long eventId) {
+		for (String q : predicates.endsOf(op.predicate().name())) {
+			for (Row r : tx.query("SELECT * FROM fact WHERE predicate = ? AND subject_id = ? AND status = 'current' "
+					+ "AND ended = 0 AND valid_end IS NULL AND mode = 'asserted' AND derivation_kind <> 'derived' "
+					+ "AND id <> ?", q, op.subject().id(), id)) {
+				Fact f = Fact.from(r);
+				boolean same = f.objectId() != null ? op.object() != null && f.objectId() == op.object().id()
+						: f.objectText() != null && objectNames.contains(Names.norm(f.objectText()));
+				if (!same || (f.validStart() != null && start != null && f.validStart().compareTo(start) > 0)) {
+					continue;
+				}
+				ledger.close(tx, f, id, "ended_by", op.predicate().name() + " ends " + q, eventId, a.obs.id(), start,
+						precision, "current");
+				var m = new LinkedHashMap<String, Object>();
+				m.put("fact_id", f.ref());
+				m.put("predicate", f.predicate());
+				m.put("rendering",
+						Fact.from(tx.queryOne("SELECT * FROM fact WHERE id = ?", f.id()).orElseThrow()).rendering());
+				m.put("ended_by", "f-" + id);
+				m.put("closed_at", start == null ? null : Bounds.show(start, precision));
+				m.put("reason", op.predicate().name() + " ends " + q);
+				a.superseded.add(m);
+			}
+		}
+	}
+
+	/**
+	 * A fact on record stated again as ended ("that is no longer an active project"): the open row ends, at the end the
+	 * statement gives when it gives one, and the statement is one more source of it. Before, the restatement only
+	 * corroborated the open row, and the fact stayed current (2026-09-29).
+	 */
+	private Stored endRestated(Tx tx, Observation obs, Operands op, Fact e, Bounds stated) {
+		FactLedger.corroborate(tx, e.id(), obs.id(), obs.observedAt().toString());
+		ledger.close(tx, e, null, "stated", "restated as ended", null, obs.id(), stated.end(), stated.endPrecision(),
+				e.status());
+		Fact after = Fact.from(tx.queryOne("SELECT * FROM fact WHERE id = ?", e.id()).orElseThrow());
+		return new Stored(new FactOut(e.ref(), op.predicate().name(), after.rendering(), after.status(), true), e.id(),
+				null, null, List.of());
 	}
 
 	private static Map<String, Object> supersededOut(Fact other, long byId, Event event) {
@@ -1262,6 +1401,13 @@ public final class FactService {
 		}
 		if (EntityService.SELF.contains(Names.norm(ref))) {
 			return entities.owner();
+		}
+		if (ENTITY_ID.matcher(ref).matches()) {
+			// A stored entity named by its id (a correction pointing a fact at the one meant): that entity, as is.
+			Entity byId = entities.byRef(ref.toLowerCase(Locale.ROOT))
+					.orElseThrow(() -> MnemicException.invalidArgument("'" + ref + "' names no entity on record."));
+			a.bind(ref, byId);
+			return byId;
 		}
 		if (REF_SHAPE.matcher(ref).matches()) {
 			throw MnemicException.invalidArgument("'" + ref + "' refers to no entity in this proposal.");
@@ -1427,7 +1573,11 @@ public final class FactService {
 	public Corrected correct(long factId, Map<String, Object> replacement, String reason, Observation correction) {
 		Fact original = correctable(factId);
 		FactRef ref = readingOf(original, replacement);
-		if (sameStatement(ref, readingOf(original, Map.of()))) {
+		// A value stored as a thing under a predicate that takes values (an entity "male" under gender) reads the same
+		// by name, yet correcting it to the value is a change: the row moves from the entity to the text (2026-09-29).
+		boolean toValue = original.objectId() != null && replacement.containsKey("object")
+				&& predicates.get(ref.predicate()).map(p -> p.literalRange() && !p.mixedRange()).orElse(false);
+		if (!toValue && sameStatement(ref, readingOf(original, Map.of()))) {
 			// A relation stated the wrong way round is fixed by giving both sides; a reader that restates one side at
 			// a time never gets there (the usage bench's family scenarios, 2026-09-24).
 			String swap = original.objectId() == null ? ""
@@ -1521,12 +1671,29 @@ public final class FactService {
 	Corrected correctWith(Fact original, FactRef ref, String reason, Observation correction) {
 		storeReading(correction, reading("corrects", original, reason, List.of(ref)));
 		db.write(tx -> tx.update("UPDATE fact SET status = 'corrected' WHERE id = ?", original.id()));
-		Applied a = apply(correction,
-				new Proposal(Proposal.CURRENT_SPEC_VERSION, List.of(), List.of(), List.of(ref), List.of()));
+		// A new object is another thing than the one it replaces: the old object is never a candidate for the new
+		// name, so shortening "coding, piano, ..., riding his motorcycle" is not asked about as that same entity
+		// (2026-09-28). Naming the old object exactly still finds it.
+		Set<Long> outer = correctionDistinct;
+		correctionDistinct = original.objectId() != null
+				&& !Objects.equals(ref.object(), readingOf(original, Map.of()).object()) ? Set.of(original.objectId())
+						: Set.of();
+		Applied a;
+		try {
+			a = apply(correction,
+					new Proposal(Proposal.CURRENT_SPEC_VERSION, List.of(), List.of(), List.of(ref), List.of()));
+		} finally {
+			correctionDistinct = outer;
+		}
 		if (a.facts().isEmpty()) {
 			db.write(tx -> tx.update("UPDATE fact SET status = 'current' WHERE id = ?", original.id()));
-			throw MnemicException.invalidArgument("The correction produced no fact: " + String.join("; ", a.warnings())
-					+ (a.questions().isEmpty() ? "" : " " + a.questions()));
+			String held = a.questions().isEmpty() ? ""
+					: " The correction was not made, and its question was withdrawn with it: "
+							+ a.questions().stream().map(q -> String.valueOf(q.get("message"))).toList()
+							+ ". Name the entity you mean by its id (\"object\": \"ent-N\"), or rename the entity"
+							+ " itself with correct(ent-N, {\"name\": ...}).";
+			throw MnemicException
+					.invalidArgument("The correction produced no fact: " + String.join("; ", a.warnings()) + held);
 		}
 		long newId = Long.parseLong(a.facts().getFirst().id().substring(2));
 		db.write(tx -> {
@@ -1629,8 +1796,20 @@ public final class FactService {
 	 * goes is the case this serves: fifteen of them on one store, each needing a full re-read before (2026-09-27).
 	 */
 	public Map<String, Object> retype(long eventId, String type, Observation record) {
+		return retype(eventId, type, null, record);
+	}
+
+	/** As above, with the event's detail: given, kept, or carried over from a sentence type. */
+	public Map<String, Object> retype(long eventId, String type, String detail, Observation record) {
+		return retype(eventId, type, detail, Map.of(), record);
+	}
+
+	/** As above, with roles set on participants by entity id. */
+	public Map<String, Object> retype(
+		long eventId, String type, String detail, Map<Long, String> roles, Observation record) {
 		var out = new LinkedHashMap<String, Object>();
-		if (eventTypes.get(type).isEmpty()) {
+		// A detail given to an event that keeps a sentence for its type does not make the sentence vocabulary.
+		if (eventTypes.get(type).isEmpty() && EventTypeRegistry.typeLike(type)) {
 			EventType et = eventTypes.registerInferred(type, record.id());
 			var inferred = new LinkedHashMap<String, Object>();
 			inferred.put("render", et.render());
@@ -1642,10 +1821,16 @@ public final class FactService {
 			d.put("inferred", inferred);
 			out.put("definitions", List.of(d));
 		}
-		EventService.Retyped moved = events.retype(eventId, type, record.id());
+		EventService.Retyped moved = events.retype(eventId, type, detail, roles, record.id());
 		out.put("before", Map.of("type", moved.type(), "rendering", moved.before()));
 		out.put("after", Map.of("type", type, "rendering", moved.after()));
-		EventType et = eventTypes.get(type).orElseThrow();
+		if (moved.detail() != null) {
+			out.put("detail", moved.detail());
+		}
+		EventType et = eventTypes.get(type).orElse(null);
+		if (et == null) {
+			return out;
+		}
 		var ends = new ArrayList<>(et.closes());
 		ends.addAll(et.supersedes());
 		if (!ends.isEmpty() || et.endsEntity()) {
@@ -1668,7 +1853,9 @@ public final class FactService {
 			if (ev.isEmpty()) {
 				return "unmatched";
 			}
-			retype(ev.get().id(), String.valueOf(reading.get("type")), record);
+			retype(ev.get().id(), String.valueOf(reading.get("type")),
+					reading.get("detail") == null ? null : String.valueOf(reading.get("detail")),
+					rolesByName(ev.get(), reading.get("roles")), record);
 			return "replayed";
 		}
 		boolean retraction = reading.get("retracts") instanceof Map<?, ?>;
@@ -1704,6 +1891,33 @@ public final class FactService {
 		}
 		correctWith(target.get(), p.facts().getFirst(), reason, record);
 		return "replayed";
+	}
+
+	/**
+	 * Roles given by participant name ({@code {"Calle Wilund": "with"}}) as roles by entity id. A name that is not a
+	 * participant, or is the first one, is refused: the first participant carries the sentence.
+	 */
+	public Map<Long, String> rolesByName(Event ev, Object given) {
+		if (!(given instanceof Map<?, ?> m) || m.isEmpty()) {
+			return Map.of();
+		}
+		var out = new LinkedHashMap<Long, String>();
+		for (Map.Entry<?, ?> r : m.entrySet()) {
+			String who = String.valueOf(r.getKey());
+			Entity e = EntityService.SELF.contains(Names.norm(who)) ? entities.owner()
+					: entities.byRef(who).orElseThrow(() -> MnemicException
+							.invalidArgument("No entity '" + who + "' among the participants of " + ev.ref() + "."));
+			if (!ev.participants().contains(e.id())) {
+				throw MnemicException.invalidArgument(e.name() + " is not a participant of " + ev.ref() + "; its "
+						+ "participants are " + ev.participants().stream().map(entities::nameOf).toList() + ".");
+			}
+			if (ev.participants().getFirst() == e.id()) {
+				throw MnemicException.invalidArgument(e.name() + " is the first participant of " + ev.ref()
+						+ ", who carries the sentence and takes no role.");
+			}
+			out.put(e.id(), r.getValue() == null ? "" : String.valueOf(r.getValue()));
+		}
+		return out;
 	}
 
 	/** The event a correction record names by its key (type, participant names, the start it had), if it stands. */
@@ -1937,9 +2151,9 @@ public final class FactService {
 				Optional<Observation> home = db
 						.read(tx -> tx.queryOne("SELECT * FROM observation WHERE id = ?", ev.observationId()))
 						.map(Observation::from);
-				List<Entity> participants = ev.participants().stream().map(id -> entities.get(id).orElse(null))
+				List<Entity> participants = ev.acting().stream().map(id -> entities.get(id).orElse(null))
 						.filter(Objects::nonNull).toList();
-				if (home.isPresent() && participants.size() == ev.participants().size()) {
+				if (home.isPresent() && participants.size() == ev.acting().size()) {
 					events.applyEffects(ev.id(), ev.type(), participants, Bounds.NONE, home.get(), new ArrayList<>());
 				}
 			});

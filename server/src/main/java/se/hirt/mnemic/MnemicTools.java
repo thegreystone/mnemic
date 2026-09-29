@@ -509,6 +509,10 @@ public class MnemicTools {
 			out.put("retired", c.retired());
 			out.put("embedded", c.embedded());
 			capped(out, "duplicates", c.duplicates());
+			capped(out, "repairs", c.repairs());
+			if (!c.notRetired().isEmpty()) {
+				out.put("not_retired", c.notRetired());
+			}
 			return out;
 		});
 	}
@@ -892,9 +896,19 @@ public class MnemicTools {
 		var m = new LinkedHashMap<String, Object>();
 		m.put("id", ev.ref());
 		m.put("type", ev.type());
+		if (ev.detail() != null) {
+			m.put("detail", ev.detail());
+		}
 		m.put("rendering", ev.rendering());
-		m.put("participants", ev.participants().stream()
-				.map(id -> Map.of("id", "ent-" + id, "name", engine.entities().nameOf(id))).toList());
+		m.put("participants", ev.participants().stream().map(id -> {
+			var p = new LinkedHashMap<String, Object>();
+			p.put("id", "ent-" + id);
+			p.put("name", engine.entities().nameOf(id));
+			if (ev.roleOf(id) != null) {
+				p.put("role", ev.roleOf(id));
+			}
+			return p;
+		}).toList());
 		m.put("valid_start", ev.validStart());
 		m.put("observation", "obs-" + ev.observationId());
 		m.put("observations", engine.events().observationsOf(ev.id()).stream().map(o -> "obs-" + o).toList());
@@ -975,6 +989,10 @@ public class MnemicTools {
 		Map<String, Map<String, String>> implies = engine.predicates().impliesOf(p.name());
 		if (!implies.isEmpty()) {
 			m.put("implies", implies);
+		}
+		List<String> ends = engine.predicates().endsOf(p.name());
+		if (!ends.isEmpty()) {
+			m.put("ends", ends);
 		}
 		m.put("domain", p.domain());
 		m.put("range", p.range());

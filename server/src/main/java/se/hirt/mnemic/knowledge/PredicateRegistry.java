@@ -135,6 +135,14 @@ public final class PredicateRegistry {
 	private Map<String, List<Rule>> rules = Map.of();
 	/** What each predicate's terms imply about the subject's attributes, loaded with the cache. */
 	private Map<String, Map<String, Map<String, String>>> implies = Map.of();
+	/** What each predicate ends: the predicates whose open facts a new fact of it closes (decided ends considering). */
+	private Map<String, List<String>> ends = Map.of();
+	/**
+	 * The seed's endings: a decision about a thing, or owning it, ends considering it. A purchase opens owns, so it
+	 * ends a consideration through owns, with nothing said about purchases (2026-09-29).
+	 */
+	static final Map<String, List<String>> SEED_ENDS = Map.of("decided", List.of("considering"), "owns",
+			List.of("considering"));
 
 	/** {@code lang}: the store's language; its templates and cue words are loaded over the base (English) ones. */
 	public PredicateRegistry(Database db, Lang lang, EntityTypeRegistry entityTypes) {
@@ -327,6 +335,15 @@ public final class PredicateRegistry {
 	public synchronized Map<String, Map<String, String>> impliesOf(String name) {
 		load();
 		return implies.getOrDefault(name, Map.of());
+	}
+
+	/**
+	 * The predicates a new fact of this one ends, for the same subject and object: {@code decided} ends
+	 * {@code considering}. Empty when it ends nothing.
+	 */
+	public synchronized List<String> endsOf(String name) {
+		load();
+		return ends.getOrDefault(name, List.of());
 	}
 
 	/**
@@ -1091,10 +1108,26 @@ public final class PredicateRegistry {
 		boolean lasting = p.lasting();
 		boolean lastingStated = p.lastingStated();
 		List<String> groups = p.groups();
+		List<String> newEnds = null;
 		var changes = new ArrayList<String[]>();
 		for (Map.Entry<String, Object> e : replacement.entrySet()) {
 			String old;
 			switch (e.getKey()) {
+			case "ends" -> {
+				old = json(endsOf(p.name()));
+				newEnds = new ArrayList<>();
+				for (String q : strings(e.getValue())) {
+					Predicate target = get(q).orElseThrow(() -> MnemicException
+							.invalidArgument("'ends' names " + "predicates; there is no predicate '" + q + "'."));
+					if (target.name().equals(p.name())) {
+						throw MnemicException.invalidArgument("A predicate does not end itself: a later value of the "
+								+ "same relation is what 'functional' decides.");
+					}
+					if (!newEnds.contains(target.name())) {
+						newEnds.add(target.name());
+					}
+				}
+			}
 			case "groups" -> {
 				old = json(groups);
 				groups = groupNames(strings(e.getValue()));
@@ -1177,7 +1210,7 @@ public final class PredicateRegistry {
 			}
 			default -> throw MnemicException.invalidArgument("Unknown predicate property '" + e.getKey()
 					+ "'; correctable: description, domain, range, render, renders, lexicon, inverse_lexicon, qualifiers, "
-					+ "functional, symmetric, volatility, defined_as, implies, containment, groups, lasting.");
+					+ "functional, symmetric, volatility, defined_as, implies, containment, groups, lasting, ends.");
 			}
 			changes.add(new String[] {e.getKey(), old,
 					"defined_as".equals(e.getKey()) ? rule
@@ -1202,6 +1235,7 @@ public final class PredicateRegistry {
 		final List<String> grp = groups;
 		final boolean last = lasting;
 		final boolean said = lastingStated;
+		final List<String> endsNow = newEnds;
 		db.write(tx -> {
 			tx.update(
 					"""
@@ -1215,6 +1249,9 @@ public final class PredicateRegistry {
 			}
 			if (setImplied) {
 				tx.update("UPDATE predicate SET implies = ? WHERE name = ?", implied, p.name());
+			}
+			if (endsNow != null) {
+				tx.update("UPDATE predicate SET ends = ? WHERE name = ?", json(endsNow), p.name());
 			}
 			for (String[] c : changes) {
 				tx.insert("INSERT INTO predicate_change(predicate, field, old_value, new_value, reason, changed_at) "
@@ -1906,13 +1943,14 @@ public final class PredicateRegistry {
 				seed("uses", "Subject uses object technology or thing.", List.of("*"), List.of("*"), false, null, false,
 						"medium", List.of("use", "uses", "using", "targets", "target", "built"),
 						"{subject} uses {object}[[ ({qualifier})]]", List.of()),
-				seed("decided", "Subject made the decision object (literal).", List.of("*"), List.of("literal"), false,
-						null, false, "low",
+				seed("decided", "Subject made the decision object: a decision in words, or the thing decided on.",
+						List.of("*"), List.of("literal", "*"), false, null, false, "low",
 						List.of("decide", "decided", "decision", "chose", "choice", "pick", "picked"),
 						"{subject} decided {object}[[ ({qualifier})]]", List.of()),
 				seed("considering",
-						"Subject is considering object (literal): a leaning, plan, or intention, not a decision.",
-						List.of("*"), List.of("literal"), false, null, false, "high",
+						"Subject is considering object: a leaning, plan, or intention in words, or the thing it is "
+								+ "about; not a decision.",
+						List.of("*"), List.of("literal", "*"), false, null, false, "high",
 						List.of("considering", "consider", "considers", "leaning", "intend", "intends", "intention",
 								"plan", "plans", "planning", "weighing", "thinking"),
 						"{subject} is considering {object}[[ ({qualifier})]]", List.of()),
@@ -2022,8 +2060,13 @@ public final class PredicateRegistry {
 			var map = new LinkedHashMap<String, Predicate>();
 			var ruleMap = new HashMap<String, List<Rule>>();
 			var impliesMap = new HashMap<String, Map<String, Map<String, String>>>();
+			var endsMap = new HashMap<String, List<String>>();
 			for (Row r : db.read(tx -> tx.query("SELECT * FROM predicate ORDER BY seed DESC, name"))) {
 				map.put(r.str("name"), from(r));
+				List<String> endsOf = list(r.str("ends"));
+				if (!endsOf.isEmpty()) {
+					endsMap.put(r.str("name"), endsOf);
+				}
 				if (r.str("rule") != null) {
 					ruleMap.put(r.str("name"), Rule.fromJson(r.str("rule")));
 				}
@@ -2033,6 +2076,7 @@ public final class PredicateRegistry {
 			}
 			rules = ruleMap;
 			implies = impliesMap;
+			ends = endsMap;
 			negated.clear();
 			if (lang != Lang.EN) {
 				// The store's language: its template replaces the base rendering, its cue words join the base ones.
@@ -2097,6 +2141,9 @@ public final class PredicateRegistry {
 				json(p.qualifiers()), json(p.aliases()), json(p.inverseLexicon()), p.definedBy(), p.seed() ? 1 : 0,
 				p.isInferred() ? 1 : 0, Instant.now().toString(), p.containment() ? 1 : 0, json(p.groups()),
 				p.lasting() ? 1 : 0, p.lastingStated() ? 1 : 0);
+		if (p.seed() && SEED_ENDS.containsKey(p.name())) {
+			tx.update("UPDATE predicate SET ends = ? WHERE name = ?", json(SEED_ENDS.get(p.name())), p.name());
+		}
 		return null;
 	}
 

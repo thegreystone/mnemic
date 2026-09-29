@@ -186,6 +186,13 @@ public final class TestHomes {
 			return this;
 		}
 
+		/** An event whose participants have roles, {@code roles} by participant as written. */
+		public P event(String ref, String type, String start, Map<String, String> roles, String ... participants) {
+			events.add(new EventRef(ref, type, List.of(participants),
+					start == null ? null : new ValidTime(start, null, null), roles));
+			return this;
+		}
+
 		/** A fact about the owner. */
 		public P fact(String predicate, String object) {
 			return fact("self", predicate, object);

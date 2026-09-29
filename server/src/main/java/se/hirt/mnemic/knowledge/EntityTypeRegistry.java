@@ -516,6 +516,41 @@ public final class EntityTypeRegistry {
 		return db.read(tx -> Vocabulary.changes(tx, "entity_type", name));
 	}
 
+	/**
+	 * Removes a type nothing rests on: never a seed, the type of no entity (merged ones included), and the parent of no
+	 * other type. Whether a predicate's domain or range names it is the caller's to check, since the registry does not
+	 * know predicates. The removal is logged; a rebuild that replays the observation that registered it registers it
+	 * again.
+	 */
+	public synchronized EntityType remove(String name, String reason) {
+		EntityType t = get(name).orElseThrow(() -> MnemicException.notFound("No entity type " + name));
+		if (t.seed() || UNKNOWN.equals(t.name())) {
+			throw MnemicException
+					.invalidArgument("'" + t.name() + "' is a seed type and stays; correct what it says " + "instead.");
+		}
+		long used = db.read(tx -> tx.queryLong("SELECT COUNT(*) FROM entity WHERE type = ?", t.name()));
+		if (used > 0) {
+			throw MnemicException
+					.invalidArgument("'" + t.name() + "' is the type of " + used + (used == 1 ? " entity" : " entities")
+							+ "; give them another with correct(ent-N, {\"type\": ...}) " + "first.");
+		}
+		List<String> children = byName.values().stream().filter(x -> t.name().equals(x.parent())).map(EntityType::name)
+				.toList();
+		if (!children.isEmpty()) {
+			throw MnemicException.invalidArgument(
+					"'" + t.name() + "' is the parent of " + children + "; give them another parent first.");
+		}
+		db.write(tx -> {
+			tx.update("DELETE FROM entity_type WHERE name = ?", t.name());
+			var change = new ArrayList<String[]>();
+			change.add(new String[] {"removed", t.parent(), null});
+			Vocabulary.logChanges(tx, "entity_type", t.name(), change, reason);
+			return null;
+		});
+		reload();
+		return t;
+	}
+
 	private static List<String> lower(List<String> words) {
 		return words.stream().map(Names::norm).filter(w -> !w.isEmpty()).distinct().toList();
 	}
@@ -559,9 +594,21 @@ public final class EntityTypeRegistry {
 						List.of("conference", "meeting", "summit", "workshop", "festival", "trip", "review"),
 						List.of("wedding", "party", "concert", "holiday", "vacation", "exam", "appointment")),
 				seed("thing", "A physical object.", null, List.of("object", "item"), List.of(),
-						List.of("car", "vehicle", "bike", "bicycle", "motorcycle", "boat", "phone", "laptop",
-								"computer", "printer", "device", "gadget", "machine", "instrument", "robot", "camera",
-								"watch", "appliance")),
+						List.of("phone", "laptop", "computer", "printer", "device", "gadget", "machine", "instrument",
+								"robot", "camera", "watch", "appliance")),
+				// Means of transport, so that a car is known to be a car and not only a thing: a Polestar and a
+				// motorcycle were both "vehicle", told apart by nothing (2026-09-29).
+				seed("vehicle", "A means of transport: a car, a motorcycle, a bicycle, a boat.", "thing",
+						List.of("vehicles"), List.of(),
+						List.of("truck", "lorry", "van", "bus", "tractor", "bicycle", "bike", "boat", "yacht",
+								"sailboat", "caravan", "camper", "motorhome", "trailer")),
+				seed("car", "A car: a passenger motor vehicle.", "vehicle", List.of("automobile", "auto", "cars"),
+						List.of(),
+						List.of("suv", "sedan", "saloon", "hatchback", "estate", "minivan", "coupe", "convertible",
+								"roadster", "limousine")),
+				seed("motorcycle", "A motorcycle, scooter, or moped.", "vehicle",
+						List.of("motorbike", "motorcycles", "motorbikes"), List.of(),
+						List.of("scooter", "moped", "dirtbike")),
 				seed("animal", "An animal: a pet, livestock, wildlife.", null, List.of("pet", "animals"), List.of(),
 						List.of("dog", "cat", "horse", "pony", "bird", "rabbit", "hamster", "puppy", "kitten", "fish",
 								"cow", "sheep", "goat", "chicken")),

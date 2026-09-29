@@ -191,7 +191,8 @@ public final class Engine implements AutoCloseable {
 			List<Map<String, Object>> merges, List<Map<String, Object>> nameCollisions, int reclosed,
 			List<Map<String, Object>> proposed, List<Map<String, Object>> resolvedQuestions,
 			List<Map<String, Object>> review, List<String> retired, int embedded, List<Map<String, Object>> duplicates,
-			Rebuilt rebuilt, int removedEntities) {
+			Rebuilt rebuilt, int removedEntities, List<Map<String, Object>> repairs,
+			List<Map<String, Object>> notRetired) {
 	}
 
 	/** The vector scheme: 2 since a fact about the owner carries a first-person vector too ({@link OwnerAlias}). */
@@ -229,6 +230,8 @@ public final class Engine implements AutoCloseable {
 		}
 		// Records from before readings were kept on them get one from what they did, so a rebuild can replay them.
 		knowledge.factService().backfillCorrectionReadings();
+		// Events retyped from a sentence before events kept a detail get the sentence back as their detail.
+		knowledge.events().backfillRetypedDetails();
 		if (!VECTOR_SCHEME.equals(db.meta("vector_scheme"))) {
 			vectors.dropKind(VectorStore.FACT); // the backfill makes them again from the renderings
 			db.setMeta("vector_scheme", VECTOR_SCHEME);
@@ -517,7 +520,10 @@ public final class Engine implements AutoCloseable {
 		if (!after.name().equals(before.name()) && merge == null) {
 			rerendered = knowledge.renderer().rerenderMentioning(id);
 		}
+		List<Map<String, Object>> folded = List.of();
 		if (merge != null) {
+			// The facts that now say the same thing twice fold at once, not at the next consolidate (2026-09-28).
+			folded = knowledge.consolidator().foldDuplicatesOf(id);
 			derive();
 		}
 		var out = new LinkedHashMap<String, Object>();
@@ -526,6 +532,9 @@ public final class Engine implements AutoCloseable {
 		out.put("after", entityState(after, knowledge.entities().aliases(id)));
 		if (merge != null) {
 			out.put("merged", merge);
+		}
+		if (!folded.isEmpty()) {
+			out.put("folded", folded);
 		}
 		out.put("rerendered_facts", rerendered);
 		out.put("reason", reason);
@@ -626,15 +635,26 @@ public final class Engine implements AutoCloseable {
 	public Map<String, Object> correctEvent(long eventId, Map<String, Object> replacement, String reason) {
 		Event ev = knowledge.events().get(eventId)
 				.orElseThrow(() -> MnemicException.notFound("No event evt-" + eventId));
-		if (replacement != null && replacement.keySet().equals(Set.of("type"))) {
-			return retypeEvent(ev, String.valueOf(replacement.get("type")), reason);
+		if (replacement != null && !replacement.isEmpty()
+				&& Set.of("type", "detail", "roles").containsAll(replacement.keySet())) {
+			Object type = replacement.get("type");
+			Object detail = replacement.get("detail");
+			Object roles = replacement.get("roles");
+			if (roles != null && !(roles instanceof Map<?, ?>)) {
+				throw MnemicException.invalidArgument("'roles' maps a participant to its role: {\"roles\": "
+						+ "{\"Calle Wilund\": \"with\"}}; an empty role clears one.");
+			}
+			return retypeEvent(ev, type == null ? ev.type() : String.valueOf(type),
+					detail == null ? null : String.valueOf(detail), knowledge.factService().rolesByName(ev, roles),
+					reason);
 		}
 		if (replacement == null || !(replacement.get("valid_time") instanceof Map<?, ?> vt)
 				|| !replacement.keySet().equals(Set.of("valid_time"))) {
 			throw MnemicException.invalidArgument("An event is corrected by its date, {\"valid_time\": {\"start\": "
-					+ "\"2027-06-19\"}} (a year, a month, or a day; 'end' too for a span), or by its type, {\"type\": "
-					+ "\"graduated\"} (a verb or two words), one at a time. To change who took part, re-read its "
-					+ "observation with remember(observation_id, proposal).");
+					+ "\"2027-06-19\"}} (a year, a month, or a day; 'end' too for a span), or by its type and detail, "
+					+ "{\"type\": \"graduated\", \"detail\": \"M.Sc. in Computer Science\"} (a type is a verb or two "
+					+ "words; the detail is what the type and participants leave unsaid), one at a time. To change who "
+					+ "took part, re-read its observation with remember(observation_id, proposal).");
 		}
 		var warnings = new ArrayList<String>();
 		Instant now = options.clock().instant();
@@ -682,16 +702,27 @@ public final class Engine implements AutoCloseable {
 	 * reading put where the type goes becomes a type of a word or two in one call, where a re-read of the whole
 	 * observation was needed before (2026-09-27).
 	 */
-	private Map<String, Object> retypeEvent(Event ev, String given, String reason) {
+	private Map<String, Object> retypeEvent(
+		Event ev, String given, String detail, Map<Long, String> roles, String reason) {
 		String type = EventTypeRegistry.key(given);
-		if (type.isBlank() || !EventTypeRegistry.typeLike(given)) {
-			throw MnemicException
-					.invalidArgument("An event type is a verb or two words (graduated, purchased_property); '" + given
-							+ "' reads as a description. Keep the detail in the observation text.");
+		boolean retyping = !type.equals(ev.type());
+		if (retyping && (type.isBlank() || !EventTypeRegistry.typeLike(given))) {
+			throw MnemicException.invalidArgument("An event type is a verb or two words (graduated, "
+					+ "purchased_property); '" + given + "' reads as a description. Put it in 'detail' instead.");
 		}
-		if (type.equals(ev.type())) {
-			throw MnemicException.invalidArgument(
-					"The correction changes nothing about " + ev.ref() + ": its type is '" + type + "' already.");
+		String newDetail = detail == null || detail.isBlank() ? null : detail.strip();
+		// Only the roles that change: a role said again as it stands is no change.
+		var changedRoles = new LinkedHashMap<Long, String>();
+		for (Map.Entry<Long, String> r : roles.entrySet()) {
+			String now = r.getValue() == null || r.getValue().isBlank() ? null : r.getValue().strip();
+			if (!java.util.Objects.equals(now, ev.roleOf(r.getKey()))) {
+				changedRoles.put(r.getKey(), now == null ? "" : now);
+			}
+		}
+		if (!retyping && (newDetail == null || newDetail.equals(ev.detail())) && changedRoles.isEmpty()) {
+			throw MnemicException.invalidArgument("The correction changes nothing about " + ev.ref() + ": its type is '"
+					+ type + "' already" + (newDetail == null ? "" : ", and so is its detail")
+					+ (roles.isEmpty() ? "." : ", and so are the roles given."));
 		}
 		String why = reason == null || reason.isBlank() ? "" : ": " + reason;
 		Instant now = options.clock().instant();
@@ -700,13 +731,32 @@ public final class Engine implements AutoCloseable {
 		reading.put("retypes", Map.of("type", ev.type(), "participants", names, "valid_start",
 				ev.validStart() == null ? "" : ev.validStart()));
 		reading.put("type", type);
+		if (newDetail != null) {
+			reading.put("detail", newDetail);
+		}
+		var roleNames = new LinkedHashMap<String, String>();
+		changedRoles.forEach((id, role) -> roleNames.put(knowledge.entities().nameOf(id), role));
+		if (!roleNames.isEmpty()) {
+			reading.put("roles", roleNames);
+		}
 		if (reason != null && !reason.isBlank()) {
 			reading.put("reason", reason);
 		}
-		Remembered r = observations.remember("Retyping of " + ev.rendering() + why + " → " + type,
+		var said = new ArrayList<String>();
+		if (retyping) {
+			said.add(type);
+		}
+		if (newDetail != null) {
+			said.add("detail \"" + newDetail + "\"");
+		}
+		roleNames.forEach(
+				(who, role) -> said.add(role.isEmpty() ? who + " without a role" : who + " as \"" + role + "\""));
+		String change = String.join(", ", said);
+		Remembered r = observations.remember(
+				(retyping ? "Retyping of " : "Correction of ") + ev.rendering() + why + " → " + change,
 				new Source("correction", ev.ref(), null, null, null), now, Json.write(reading), null, null);
 		Observation record = observations.get(r.observationId()).orElseThrow();
-		Map<String, Object> changed = knowledge.factService().retype(ev.id(), type, record);
+		Map<String, Object> changed = knowledge.factService().retype(ev.id(), type, newDetail, changedRoles, record);
 		derive();
 		var out = new LinkedHashMap<String, Object>();
 		out.put("event", ev.ref());
@@ -785,6 +835,17 @@ public final class Engine implements AutoCloseable {
 		requireReplacement(replacement, "{\"closes\": [\"works_at\"]} or {\"lexicon\": [\"quit\", \"resigned\"]}");
 		var before = knowledge.eventTypes().get(name)
 				.orElseThrow(() -> MnemicException.notFound("No event type " + name));
+		if (replacement.containsKey("remove")) {
+			if (replacement.size() > 1 || !Boolean.TRUE.equals(replacement.get("remove"))) {
+				throw MnemicException.invalidArgument("{\"remove\": true} stands alone.");
+			}
+			knowledge.eventTypes().remove(before.name(), reason);
+			var out = new LinkedHashMap<String, Object>();
+			out.put("event_type", before.name());
+			out.put("removed", true);
+			out.put("before", eventTypeMap(before));
+			return out;
+		}
 		var after = knowledge.eventTypes().update(name, replacement, reason,
 				p -> knowledge.predicates().get(p).isPresent());
 		int rerendered = knowledge.events().rerender(after.name());
@@ -802,6 +863,24 @@ public final class Engine implements AutoCloseable {
 		requireReplacement(replacement, "{\"parent\": \"place\"} or {\"type_words\": [\"kanton\", \"canton\"]}");
 		var before = knowledge.entityTypes().get(name)
 				.orElseThrow(() -> MnemicException.notFound("No entity type " + name));
+		if (replacement.containsKey("remove")) {
+			if (replacement.size() > 1 || !Boolean.TRUE.equals(replacement.get("remove"))) {
+				throw MnemicException.invalidArgument("{\"remove\": true} stands alone.");
+			}
+			List<String> naming = knowledge.predicates().all().stream()
+					.filter(p -> p.domain().contains(before.name()) || p.range().contains(before.name()))
+					.map(Predicate::name).toList();
+			if (!naming.isEmpty()) {
+				throw MnemicException.invalidArgument(
+						"'" + before.name() + "' is in the domain or range of " + naming + "; correct them first.");
+			}
+			knowledge.entityTypes().remove(before.name(), reason);
+			var out = new LinkedHashMap<String, Object>();
+			out.put("entity_type", before.name());
+			out.put("removed", true);
+			out.put("before", typeMap(before));
+			return out;
+		}
 		var after = knowledge.entityTypes().update(name, replacement, reason);
 		var out = new LinkedHashMap<String, Object>();
 		out.put("entity_type", after.name());
@@ -927,10 +1006,14 @@ public final class Engine implements AutoCloseable {
 	public Consolidation consolidate(boolean dryRun, List<Long> retire, boolean rebuild) {
 		Rebuilt rebuilt = rebuild && !dryRun ? rebuild() : null;
 		var retired = new ArrayList<String>();
+		var notRetired = new ArrayList<Map<String, Object>>();
 		if (!dryRun) {
 			for (long id : retire) {
 				if (observations.retire(id)) {
 					retired.add("obs-" + id);
+				} else {
+					// Said, not dropped: a note that was never in the backlog came back as an empty list (2026-09-28).
+					notRetired.add(Map.of("observation", "obs-" + id, "why", whyNotRetired(id)));
 				}
 			}
 			for (Observation o : observations.backlog(200)) {
@@ -964,11 +1047,24 @@ public final class Engine implements AutoCloseable {
 				recentFirst(c.misfiledRelations(), mark), recentFirst(c.attributeUnknown(), mark), c.merges(),
 				recentFirst(c.nameCollisions(), mark), c.reclosed(), proposed, c.resolvedQuestions(),
 				recentFirst(c.review(), mark), retired, embedded, recentFirst(c.duplicates(), mark), rebuilt,
-				c.removedEntities());
+				c.removedEntities(), c.repairs(), notRetired);
 		if (!dryRun) {
 			db.setMeta(LAST_CONSOLIDATION, String.valueOf(observations.newestId()));
 		}
 		return out;
+	}
+
+	/** Why consolidate's retire left an observation as it was, with the call that does what was likely meant. */
+	private String whyNotRetired(long id) {
+		Optional<Observation> o = observations.get(id);
+		if (o.isEmpty()) {
+			return "no such observation";
+		}
+		if (o.get().forgotten()) {
+			return "forgotten already";
+		}
+		return "not waiting for a reading, so there was no backlog to take it out of; to take it out of recall, "
+				+ "correct(obs-" + id + ", {\"retired\": true})";
 	}
 
 	static final String LAST_CONSOLIDATION = "last_consolidation_observation";

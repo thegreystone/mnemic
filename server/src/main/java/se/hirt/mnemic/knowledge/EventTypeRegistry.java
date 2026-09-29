@@ -329,6 +329,33 @@ public final class EventTypeRegistry {
 		return db.read(tx -> Vocabulary.changes(tx, "event_type", name));
 	}
 
+	/**
+	 * Removes a type nothing uses: one registered from use or defined, never a seed, and named by no event. Left behind
+	 * when its events were retyped (co_created, after participants got roles, 2026-09-29). The removal is logged; a
+	 * rebuild that replays the observation that registered it registers it again.
+	 */
+	public synchronized EventType remove(String name, String reason) {
+		EventType t = get(name).orElseThrow(() -> MnemicException.notFound("No event type " + name));
+		if (t.seed()) {
+			throw MnemicException
+					.invalidArgument("'" + t.name() + "' is a seed type and stays; correct what it does " + "instead.");
+		}
+		long used = db.read(tx -> tx.queryLong("SELECT COUNT(*) FROM event WHERE type = ?", t.name()));
+		if (used > 0) {
+			throw MnemicException.invalidArgument("'" + t.name() + "' is the type of " + used
+					+ (used == 1 ? " event" : " events") + "; retype them first with correct(evt-N, {\"type\": ...}).");
+		}
+		db.write(tx -> {
+			tx.update("DELETE FROM event_type WHERE name = ?", t.name());
+			var change = new ArrayList<String[]>();
+			change.add(new String[] {"removed", t.render(), null});
+			Vocabulary.logChanges(tx, "event_type", t.name(), change, reason);
+			return null;
+		});
+		byName.remove(t.name());
+		return t;
+	}
+
 	/** After two predicates merged: every type that opened, closed, or superseded the old name names the new one. */
 	public synchronized void renamePredicate(String from, String into, String reason) {
 		for (EventType t : List.copyOf(byName.values())) {
