@@ -256,7 +256,7 @@ public final class PredicateRegistry {
 					"liegt,befindet,sitz,standort,hauptsitz,gelegen", ""},
 			new String[] {"has_phone", "{subject} hat die Telefonnummer {object}[[ ({qualifier})]]",
 					"{subject} hat nicht die Telefonnummer {object}",
-					"telefon,telefonnummer,handy,natel,nummer,mobil,mobilnummer,festnetz", ""});
+					"telefon,telefonnummer,handy,handynummer,natel,mobil,mobilnummer,festnetz", ""});
 
 	private void seedRendersIfMissing() {
 		db.write(tx -> {
@@ -1865,7 +1865,7 @@ public final class PredicateRegistry {
 						"Subject's telephone number, a literal; the qualifier names the kind (mobile, home, work). "
 								+ "A person or organization can have several.",
 						List.of("person", "organization"), List.of("literal"), false, null, false, "medium",
-						List.of("phone", "phones", "mobile", "cell", "number", "tel", "telephone"),
+						List.of("phone", "phones", "mobile", "cell", "cellphone", "smartphone", "tel", "telephone"),
 						"{subject} has phone {object}[[ ({qualifier})]]", List.of()),
 				seed("leads", "Subject leads object project, team, product, or organization.", List.of("person"),
 						List.of("project", "team", "product", "organization"), false, null, false, "high",
