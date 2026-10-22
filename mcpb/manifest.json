@@ -16,6 +16,7 @@
   "homepage": "https://github.com/thegreystone/mnemic",
   "documentation": "https://github.com/thegreystone/mnemic/blob/main/README.md",
   "support": "https://github.com/thegreystone/mnemic/issues",
+  "icon": "icon.png",
   "license": "BSD-3-Clause",
   "keywords": ["memory", "knowledge", "recall", "facts", "local-first", "privacy"],
   "server": {

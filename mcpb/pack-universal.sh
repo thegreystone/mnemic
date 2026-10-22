@@ -24,6 +24,7 @@ STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 
 mkdir -p "$STAGE/server"
+cp "$HERE/../docs/assets/mnemic-icon.png" "$STAGE/icon.png"
 for suffix in macos-aarch64 windows-x86_64.exe; do
 	name="mnemic-${VERSION}-${suffix}"
 	if [ ! -f "$SRC/$name" ]; then
