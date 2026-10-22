@@ -1,4 +1,9 @@
-# Mnemic
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/mnemic-logo-light.svg">
+    <img src="docs/assets/mnemic-logo-dark.svg" alt="Mnemic" width="520">
+  </picture>
+</h1>
 
 [![Build](https://github.com/thegreystone/mnemic/actions/workflows/build.yml/badge.svg)](https://github.com/thegreystone/mnemic/actions/workflows/build.yml)
 [![Release](https://img.shields.io/github/v/release/thegreystone/mnemic)](https://github.com/thegreystone/mnemic/releases/latest)
@@ -124,6 +129,17 @@ If the memory will be used for code work, at least the GitHub handle and the add
 worth setting. `status` lists what is configured.
 
 ### Claude Code
+
+On macOS Apple silicon and Windows, the simplest install is the plugin from the
+[AI Plugins marketplace](https://github.com/thegreystone/ai-plugins), which downloads the MCP Bundle for you and
+asks for your name:
+
+```text
+/plugin marketplace add thegreystone/ai-plugins
+/plugin install mnemic@hirt-ai-plugins
+```
+
+On Linux, or to use a binary you installed yourself, register it directly:
 
 ```text
 claude mcp add mnemic -e MNEMIC_OWNER="Alice Example" -e MNEMIC_HOME=/home/alice/.mnemic -- /opt/mnemic/mnemic

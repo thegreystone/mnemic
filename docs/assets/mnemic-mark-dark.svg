@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="650" height="380" viewBox="0 0 650 380" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">Mnemic M (dark)</title>
+  <desc id="desc">The dark folded-ribbon Mnemic M monogram, for light backgrounds.</desc>
+  <defs>
+    <linearGradient id="back-metal" gradientUnits="userSpaceOnUse" x1="175" y1="103" x2="90" y2="337">
+      <stop stop-color="#17243A" />
+      <stop offset=".55" stop-color="#4E5D74" />
+      <stop offset="1" stop-color="#8795AA" />
+    </linearGradient>
+    <linearGradient id="right-metal" gradientUnits="userSpaceOnUse" x1="426" y1="71" x2="550" y2="337">
+      <stop stop-color="#51627B" />
+      <stop offset=".5" stop-color="#354860" />
+      <stop offset=".8" stop-color="#15243A" />
+      <stop offset="1" stop-color="#56667E" />
+    </linearGradient>
+    <linearGradient id="front-metal" gradientUnits="userSpaceOnUse" x1="211" y1="46" x2="350" y2="312">
+      <stop stop-color="#60728B" />
+      <stop offset=".38" stop-color="#405570" />
+      <stop offset="1" stop-color="#1C2D47" />
+    </linearGradient>
+  </defs>
+  <g id="mnemic-mark">
+    <path id="left-fold" fill="url(#back-metal)" d="M43 314 145 112C158 91 178 96 193 117L216 154 143 302C131 326 110 337 83 337H61C46 337 37 329 43 314Z" />
+    <path id="right-ribbon" fill="url(#right-metal)" d="m346 176 46-74c14-21 31-31 53-31 26 0 44 13 59 41l98 179c11 20 1 38-16 43-10 3-22 3-35 3-23 0-40-11-51-32l-65-115c-12-21-27-26-43-26-18 0-32 7-46 20Z" />
+    <path id="front-ribbon" fill="url(#front-metal)" d="m145 112 15-31c13-24 28-35 47-35h17c24 0 40 13 56 36l70 96c14 19 25 32 44 36 15 3 30-7 44-19l-39 80c-13 25-30 37-52 37-23 0-38-12-52-32L193 117c-14-19-34-24-48-5Z" />
+  </g>
+</svg>

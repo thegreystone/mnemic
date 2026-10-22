@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2060" height="390" viewBox="0 0 2060 390" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">Mnemic (dark)</title>
+  <desc id="desc">The dark folded-ribbon Mnemic M monogram and outlined MNEMIC wordmark, for light backgrounds.</desc>
+  <defs>
+    <linearGradient id="back-metal" gradientUnits="userSpaceOnUse" x1="175" y1="103" x2="90" y2="337">
+      <stop stop-color="#17243A"/>
+      <stop offset=".55" stop-color="#4E5D74"/>
+      <stop offset="1" stop-color="#8795AA"/>
+    </linearGradient>
+    <linearGradient id="right-metal" gradientUnits="userSpaceOnUse" x1="426" y1="71" x2="550" y2="337">
+      <stop stop-color="#51627B"/>
+      <stop offset=".5" stop-color="#354860"/>
+      <stop offset=".8" stop-color="#15243A"/>
+      <stop offset="1" stop-color="#56667E"/>
+    </linearGradient>
+    <linearGradient id="front-metal" gradientUnits="userSpaceOnUse" x1="211" y1="46" x2="350" y2="312">
+      <stop stop-color="#60728B"/>
+      <stop offset=".38" stop-color="#405570"/>
+      <stop offset="1" stop-color="#1C2D47"/>
+    </linearGradient>
+    <linearGradient id="wordmark-metal" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#354A67"/>
+      <stop offset=".55" stop-color="#263A56"/>
+      <stop offset="1" stop-color="#14263E"/>
+    </linearGradient>
+  </defs>
+  <g id="mnemic-mark" transform="translate(10)">
+    <path id="left-fold" fill="url(#back-metal)" d="M43 314 145 112C158 91 178 96 193 117L216 154 143 302C131 326 110 337 83 337H61C46 337 37 329 43 314Z"/>
+    <path id="right-ribbon" fill="url(#right-metal)" d="m346 176 46-74c14-21 31-31 53-31 26 0 44 13 59 41l98 179c11 20 1 38-16 43-10 3-22 3-35 3-23 0-40-11-51-32l-65-115c-12-21-27-26-43-26-18 0-32 7-46 20Z"/>
+    <path id="front-ribbon" fill="url(#front-metal)" d="m145 112 15-31c13-24 28-35 47-35h17c24 0 40 13 56 36l70 96c14 19 25 32 44 36 15 3 30-7 44-19l-39 80c-13 25-30 37-52 37-23 0-38-12-52-32L193 117c-14-19-34-24-48-5Z"/>
+  </g>
+  <g transform="translate(720 110)">
+<g id="wordmark" fill="url(#wordmark-metal)" transform="translate(0 12)">
+    <path id="letter-m-first" d="M4 156C1.8 156 0 154.2 0 152V31C0 11.5 10.5 0 28 0C39.5 0 46.8 3.8 56 13L118 75L182 12.5C191 3.7 200 0 211 0C230.5 0 242 11.4 242 31V152C242 154.2 240.2 156 238 156H206C203.8 156 202 154.2 202 152V49L129 120C123 125.8 115 125.8 109 120L40 51V152C40 154.2 38.2 156 36 156Z"/>
+    <path id="letter-n" transform="translate(280 0)" d="M4 156C1.8 156 0 154.2 0 152V32C0 12 10 0 28 0C40 0 48 4 58 13L165 106V7C165 3 168 0 172 0H198C202 0 205 3 205 7V124C205 145 194 156 175 156C163 156 155 152 145 143L40 49V149C40 153 37 156 33 156Z"/>
+    <path id="letter-e" transform="translate(521 0)" d="M38 0H196C198 0 199 1 198 3L188 26C186 30 184 32 179 32H52C44 32 41 35 41 42V62H151C156 62 159 64 161 68L170 88C171 91 170 93 167 93H41V114C41 121 45 124 52 124H181C186 124 189 126 192 131L204 151C206 154 205 156 202 156H38C15 156 0 142 0 119V37C0 14 15 0 38 0Z"/>
+    <path id="letter-m-second" transform="translate(755 0)" d="M4 156C1.8 156 0 154.2 0 152V31C0 11.5 10.5 0 28 0C39.5 0 46.8 3.8 56 13L118 75L182 12.5C191 3.7 200 0 211 0C230.5 0 242 11.4 242 31V152C242 154.2 240.2 156 238 156H206C203.8 156 202 154.2 202 152V49L129 120C123 125.8 115 125.8 109 120L40 51V152C40 154.2 38.2 156 36 156Z"/>
+    <path id="letter-i" transform="translate(1029 0)" d="M7 0H34C38 0 41 3 41 7V152C41 154.2 39.2 156 37 156H4C1.8 156 0 154.2 0 152V7C0 3 3 0 7 0Z"/>
+    <path id="letter-c" transform="translate(1106 0)" d="M41 0H181C185 0 186 1 184 5L174 26C172 30 169 32 165 32H55C45 32 41 36 41 46V111C41 120 45 124 55 124H166C172 124 175 127 178 132L192 151C194 154 193 156 189 156H41C15 156 0 141 0 115V42C0 16 15 0 41 0Z"/>
+  </g>
+  </g>
+</svg>
