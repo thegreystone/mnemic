@@ -1,0 +1,24 @@
+{
+  "name": "mnemic",
+  "displayName": "Mnemic",
+  "description": "Persistent local memory shared by all your AI assistants: what you told them, kept as dated facts in one SQLite file on your machine and recalled before they answer.",
+  "author": {
+    "name": "Marcus Hirt",
+    "url": "https://www.hirt.se"
+  },
+  "homepage": "https://github.com/thegreystone/mnemic",
+  "repository": "https://github.com/thegreystone/mnemic",
+  "documentationUrl": "https://github.com/thegreystone/mnemic/blob/main/README.md",
+  "supportUrl": "https://github.com/thegreystone/mnemic/issues",
+  "license": "BSD-3-Clause",
+  "keywords": [
+    "memory",
+    "knowledge",
+    "recall",
+    "facts",
+    "local-first",
+    "privacy"
+  ],
+  "mcpServers": "https://github.com/thegreystone/mnemic/releases/download/v0.3.2/mnemic-0.3.2-universal.mcpb",
+  "icon": "./assets/icon.png"
+}
