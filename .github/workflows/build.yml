@@ -7,6 +7,28 @@ on:
     branches: [ main, master ]
 
 jobs:
+  codex-plugin:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            node: 18
+          - os: ubuntu-latest
+            node: 22
+          - os: macos-latest
+            node: 22
+          - os: windows-latest
+            node: 22
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Test Codex launcher
+        run: node --test plugin-codex/tests/launcher.test.mjs
+
   build:
     runs-on: ubuntu-latest
 

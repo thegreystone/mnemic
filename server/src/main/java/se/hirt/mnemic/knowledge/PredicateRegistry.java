@@ -253,7 +253,10 @@ public final class PredicateRegistry {
 			new String[] {"part_of", "{subject} ist Teil von {object}", "{subject} ist nicht Teil von {object}",
 					"teil,innerhalb", ""},
 			new String[] {"located_in", "{subject} liegt in {object}", "{subject} liegt nicht in {object}",
-					"liegt,befindet,sitz,standort,hauptsitz,gelegen", ""});
+					"liegt,befindet,sitz,standort,hauptsitz,gelegen", ""},
+			new String[] {"has_phone", "{subject} hat die Telefonnummer {object}[[ ({qualifier})]]",
+					"{subject} hat nicht die Telefonnummer {object}",
+					"telefon,telefonnummer,handy,natel,nummer,mobil,mobilnummer,festnetz", ""});
 
 	private void seedRendersIfMissing() {
 		db.write(tx -> {
@@ -1858,6 +1861,12 @@ public final class PredicateRegistry {
 						List.of("person"), List.of("literal"), true, "scope", false, "high",
 						List.of("role", "title", "position", "director", "vp", "manager", "engineer", "ceo", "cto"),
 						"{subject} holds the role {object}[[ at {scope}]]", List.of()),
+				seed("has_phone",
+						"Subject's telephone number, a literal; the qualifier names the kind (mobile, home, work). "
+								+ "A person or organization can have several.",
+						List.of("person", "organization"), List.of("literal"), false, null, false, "medium",
+						List.of("phone", "phones", "mobile", "cell", "number", "tel", "telephone"),
+						"{subject} has phone {object}[[ ({qualifier})]]", List.of()),
 				seed("leads", "Subject leads object project, team, product, or organization.", List.of("person"),
 						List.of("project", "team", "product", "organization"), false, null, false, "high",
 						List.of("lead", "leads", "leading", "led", "head", "heads"), "{subject} leads {object}",
@@ -1994,7 +2003,7 @@ public final class PredicateRegistry {
 	 * A marriage, a partnership, an engagement, a job, a home, a membership end with the person.
 	 */
 	static final Set<String> LASTING_SEEDS = Set.of("parent_of", "sibling_of", "born_in", "gender", "step_parent_of",
-			"grandparent_of", "aunt_uncle_of", "cousin_of", "in_law_of");
+			"grandparent_of", "aunt_uncle_of", "cousin_of", "in_law_of", "has_phone");
 
 	/**
 	 * A predicate named as a lasting seed carries the flag unless the user changed it (a change on its log), so a store

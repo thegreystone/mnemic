@@ -53,7 +53,7 @@ final class ToolDescriptions {
 			+ "member_of, parent_of[mother|father], step_parent_of, spouse_of, partner_of, engaged_to, sibling_of, owns, "
 			+ "grandparent_of, aunt_uncle_of, cousin_of, in_law_of (these four, and siblings and step-parents, are "
 			+ "derived from parent_of, spouse_of, partner_of, and sibling_of: state the parents and marriages, not the "
-			+ "relations that follow from them), " + "prefers, dislikes, uses, decided, "
+			+ "relations that follow from them), " + "prefers, dislikes, uses, has_phone (a literal number), decided, "
 			+ "considering, related_to, knows, part_of, located_in; inspect('registry') lists them all) and its event "
 			+ "types and entity types when they fit, and write a new name when none does: a predicate, event type, or "
 			+ "entity type the registry lacks registers itself from its first use, and the store asks you, through "

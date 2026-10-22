@@ -1,0 +1,33 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "mnemic",
+  "version": "0.3.3",
+  "description": "Persistent local memory shared by your AI assistants, kept as dated facts in one SQLite file on your machine.",
+  "author": {
+    "name": "Marcus Hirt",
+    "url": "https://www.hirt.se"
+  },
+  "homepage": "https://github.com/thegreystone/mnemic",
+  "repository": "https://github.com/thegreystone/mnemic",
+  "license": "BSD-3-Clause",
+  "keywords": ["memory", "knowledge", "recall", "facts", "local-first", "privacy"],
+  "extensions": {
+    "com.openai": {
+      "requires_local_executor": true,
+      "onboardingSkill": "./skills/setup/SKILL.md",
+      "interface": {
+        "displayName": "Mnemic",
+        "shortDescription": "Memory across conversations",
+        "longDescription": "Remember and recall facts, decisions, preferences and corrections across conversations. Mnemic runs locally and keeps its memory in one SQLite file that other MCP assistants can share. Requires Node.js 18 or newer and a supported native platform; setup downloads the Mnemic binary from GitHub Releases.",
+        "developerName": "Marcus Hirt",
+        "category": "Productivity",
+        "capabilities": ["Remember facts", "Recall shared memory", "Track changes over time"],
+        "websiteURL": "https://github.com/thegreystone/mnemic",
+        "supportURL": "https://github.com/thegreystone/mnemic/issues",
+        "defaultPrompt": ["Check Mnemic's status.", "What do you remember about me?"],
+        "composerIcon": "./assets/icon.png",
+        "logo": "./assets/icon.png"
+      }
+    }
+  }
+}

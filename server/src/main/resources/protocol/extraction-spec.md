@@ -19,11 +19,12 @@ Rules:
 - The owner's configured names, addresses, and handles resolve to the owner: a commit author or an issue mention
   may be written as it appears, and it resolves to `self`.
 - `subject` and `object` are an entity `ref`, an entity name written exactly as in the text, or `self` for the
-  speaker ("I", "me", "my"). Objects of literal predicates (`holds_role`, `decided`) are plain strings.
+  speaker ("I", "me", "my"). Objects of literal predicates (`holds_role`, `decided`, `has_phone`) are plain strings.
 - Entity `type` is one of: person, organization, place, project, team, product, technology, concept, thing, role,
   book, event. Use the most specific that applies.
 - Predicates, with domain → range and whether at most one current value is allowed (functional):
   `works_at` person→organization (functional); `holds_role` person→literal, add `scope` = the organization;
+  `has_phone` person|organization→literal (several allowed; `qualifier` mobile|home|work);
   `leads` person→project|team|product|organization; `lives_in` person→place (functional);
   `born_in` person→place (functional); `member_of` person→organization|team|group|project; `parent_of` person→person with
   `qualifier` mother|father|stepmother|stepfather; `spouse_of` person→person (functional, qualifier wife|husband);

@@ -14,11 +14,11 @@
 [![License: BSD-3](https://img.shields.io/badge/License-BSD--3-green)](https://opensource.org/licenses/BSD-3-Clause)
 
 A persistent, local memory that all your AI assistants share. Tell one of them something once, and every later
-conversation, in Claude Code, Claude Desktop, or any other tool that speaks MCP, can build on it: who someone
+conversation, in Codex, Claude Code, Claude Desktop, or any other tool that speaks MCP, can build on it: who someone
 is, what you decided, where you worked in 2015, what has changed since. Everything stays in one file on your
 own machine.
 
-Mnemic is an MCP server, the open standard that assistants such as Claude Desktop and Claude Code use to reach
+Mnemic is an MCP server, the open standard that assistants such as Codex, Claude Desktop and Claude Code use to reach
 tools. You do not talk to Mnemic. You talk to your assistant, and it remembers and recalls on your behalf.
 
 ## What it does for you
@@ -144,6 +144,27 @@ On Linux, or to use a binary you installed yourself, register it directly:
 ```text
 claude mcp add mnemic -e MNEMIC_OWNER="Alice Example" -e MNEMIC_HOME=/home/alice/.mnemic -- /opt/mnemic/mnemic
 ```
+
+### Codex
+
+Install **Mnemic** from the [AI Plugins marketplace](https://github.com/thegreystone/ai-plugins) in Codex's
+plugin directory, then run the plugin's **Setup** workflow. This package requires **Node.js 18 or newer**
+and downloads the native executable directly from GitHub Releases; no npm package is needed. It supports
+Linux x86_64 and ARM64, macOS Apple silicon, and Windows x86_64. Setup saves your name and data home, prepares
+the binary, and asks you to start a new chat so the MCP server connects. Use the same data home as your other
+assistants to share their memory. See [the Codex plugin README](plugin-codex/README.md) for configuration,
+existing binaries and release pins.
+
+For a binary you installed yourself, register it directly instead of enabling the plugin's MCP server:
+
+```text
+codex mcp add mnemic --env MNEMIC_OWNER="Alice Example" --env MNEMIC_HOME=/home/alice/.mnemic -- /opt/mnemic/mnemic
+```
+
+Start a new conversation and ask for Mnemic's status. The
+[official Codex MCP documentation](https://learn.chatgpt.com/docs/extend/mcp?surface=cli) covers manual
+registration and configuration; [plugin packaging](https://developers.openai.com/plugins/build/plugins)
+describes repository marketplaces and local execution support.
 
 ### Claude Desktop and other JSON-configured clients
 
