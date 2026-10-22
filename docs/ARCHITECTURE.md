@@ -135,8 +135,9 @@ that arrived later, settles entity questions whose subject now exists, and folds
 
 ```text
 recall(query, as_of, budget)
-  Query.analyse           entities spotted, predicate cues (a group word cues every member), each cue bound to the
-                          name before it ("Anna's siblings"), terms, yes/no and tense, the FTS expression
+  Query.analyse           entities spotted, predicate cues (a group word cues every member; a phrase no vocabulary
+                          matched cues by meaning when the model is loaded), each cue bound to the name before it
+                          ("Anna's siblings"), terms, yes/no and tense, the FTS expression
   StructuredProbe.probe   subject × cue over valid time → matched | miss | future | known_false | entity | unresolved,
                           one verdict per cue: the first that answered is primary, the rest come along as "also"
   channels                structured, keys (fact and event renderings), lexical (observation text), semantic, upcoming
@@ -160,7 +161,7 @@ questions, within the budget.
 | Class | Role |
 |---|---|
 | `EntityService` | entities and aliases: the owner, the resolution ladder, query-time spotting, merges |
-| `PredicateRegistry` | the seed vocabulary, caller definitions, resolution of proposed names, cues (a group word cues every member), predicate groups, the lasting flag, corrections |
+| `PredicateRegistry` | the seed vocabulary, caller definitions, resolution of proposed names, cues by vocabulary and by meaning (a group word cues every member), predicate groups, the lasting flag, corrections |
 | `EventTypeRegistry` | which event types open, close, supersede, or end an entity; caller definitions, corrections |
 | `EntityTypeRegistry` | the kinds of entity: synonyms, type words, nesting (a country is a place); caller definitions, corrections |
 | `Vocabulary` | what the registries share: JSON list columns, list-valued corrections, the change log (package-private) |

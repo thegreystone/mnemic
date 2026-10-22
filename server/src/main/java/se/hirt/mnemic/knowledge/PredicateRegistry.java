@@ -117,6 +117,22 @@ public final class PredicateRegistry {
 	static final float SEMANTIC_SIMILAR_LEAD = 0.04f;
 	static final float SEMANTIC_AMBIGUOUS = 0.86f;
 	static final float SEMANTIC_AMBIGUOUS_LEAD = 0.02f;
+	/**
+	 * When a phrase of a question cues a predicate by meaning: a score of 0.87 with a lead of 0.04 over the next
+	 * predicate, or 0.91 with a lead of 0.03. A phone word reaches has_phone at 0.88 to 0.94 in English, German, and
+	 * Swedish alike with a lead of 0.05 or more ("handynummer" lowercased, as the tokeniser hands it over, is the
+	 * lowest at 0.880), "employer" at 0.912 with 0.038, while question words, verbs, and unrelated nouns lead by 0.022
+	 * at most ("address" on located_in: 0.883, lead 0.022; "vad har" on owns: 0.880, lead 0.020). Kinship words score
+	 * high but lead by under 0.02, since the family predicates lie close together, and are left to their lexicons and
+	 * the family group (see {@code CueCalibrationTest}).
+	 */
+	static final float CUE_SEMANTIC = 0.87f;
+	static final float CUE_SEMANTIC_LEAD = 0.04f;
+	static final float CUE_SEMANTIC_HIGH = 0.91f;
+	static final float CUE_SEMANTIC_HIGH_LEAD = 0.03f;
+	/** How many phrases of one question are compared by meaning at most, and how many phrase vectors are kept. */
+	private static final int CUE_PHRASES_MAX = 24;
+	private static final int PHRASE_VECTORS_MAX = 512;
 
 	private final Database db;
 	private final Lang lang;
@@ -127,6 +143,13 @@ public final class PredicateRegistry {
 	private final Map<String, String> negated = new HashMap<>();
 	/** One vector per predicate for {@code vectorModel}, computed when first needed. */
 	private final Map<String, float[]> vectors = new HashMap<>();
+	/** The vectors of the question phrases compared most recently, for {@code vectorModel}; phrases recur. */
+	private final Map<String, float[]> phraseVectors = new LinkedHashMap<>(64, 0.75f, true) {
+		@Override
+		protected boolean removeEldestEntry(Map.Entry<String, float[]> eldest) {
+			return size() > PHRASE_VECTORS_MAX;
+		}
+	};
 	private String vectorModel;
 	private Map<String, Predicate> cache;
 	/** The groups, loaded with the cache. */
@@ -676,10 +699,7 @@ public final class PredicateRegistry {
 		if (emb == null) {
 			return null;
 		}
-		if (!emb.id().equals(vectorModel)) {
-			vectors.clear();
-			vectorModel = emb.id();
-		}
+		ensureModel(emb);
 		float[] q = emb.embed(text);
 		var scored = new ArrayList<Map.Entry<Predicate, Float>>();
 		for (Predicate p : load().values()) {
@@ -812,6 +832,14 @@ public final class PredicateRegistry {
 	 * Terms are compared token by token, so a hyphenated qualifier (half-brother) matches the query's tokens.
 	 */
 	public synchronized List<Cue> cues(String query) {
+		return cues(query, Set.of());
+	}
+
+	/**
+	 * The cues of a question whose entity names are already known: {@code excluded} holds the tokens of the entities
+	 * spotted in it, which no phrase compared by meaning may contain.
+	 */
+	public synchronized List<Cue> cues(String query, Set<String> excluded) {
 		String q = " " + String.join(" ", Names.tokens(query)) + " ";
 		var out = new ArrayList<Cue>();
 		var cued = new HashSet<String>(); // predicates the question names by their own words
@@ -878,6 +906,7 @@ public final class PredicateRegistry {
 				out.add(new Cue(p, null, term, "any", g.name()));
 			}
 		}
+		semanticCues(query, excluded, out, cued);
 		// Longest term first; at equal length a word in a predicate's own vocabulary outranks the same word known
 		// only as another predicate's inverse ("nephews" reaches nibling_of before aunt_uncle_of), both outrank a
 		// free qualifier in use, and a group word comes after them all. A question that uses two of a predicate's
@@ -896,6 +925,89 @@ public final class PredicateRegistry {
 			return byOwn != 0 ? byOwn : Boolean.compare(freeCued.contains(a), freeCued.contains(b));
 		});
 		return out;
+	}
+
+	/**
+	 * Cues by meaning for the phrases of a question that no vocabulary matched: each window of one or two tokens
+	 * outside entity names, stopwords, and the words already cued is embedded and compared with every predicate's
+	 * vector, the literal ones included, and cues the nearest predicate when its score and its lead over the next are
+	 * those of a real match. This is what reaches has_phone from "Handynummer" or "telefonnummer" without a word list
+	 * per language. A predicate the question already names by its own words keeps that cue; the longer window is tried
+	 * first, and a word it cued on is not tried again alone. Nothing happens without a model.
+	 */
+	private void semanticCues(String query, Set<String> excluded, List<Cue> out, Set<String> cued) {
+		Embedding emb = embedding.get();
+		if (emb == null) {
+			return;
+		}
+		List<String> tokens = Names.tokens(query);
+		var taken = new HashSet<>(excluded);
+		for (Cue c : out) {
+			taken.addAll(Names.tokens(c.term()));
+		}
+		var phrases = new LinkedHashSet<String>();
+		for (int width = 2; width >= 1; width--) {
+			for (int i = 0; i + width <= tokens.size(); i++) {
+				List<String> window = tokens.subList(i, i + width);
+				boolean usable = window.stream()
+						.noneMatch(t -> taken.contains(t) || t.length() < 2 || Names.STOPWORDS.contains(t));
+				if (usable) {
+					phrases.add(String.join(" ", window));
+				}
+			}
+		}
+		if (phrases.isEmpty()) {
+			return;
+		}
+		ensureModel(emb);
+		List<Predicate> all = List.copyOf(load().values());
+		var matched = new HashSet<String>();
+		int compared = 0;
+		for (String phrase : phrases) {
+			if (compared >= CUE_PHRASES_MAX) {
+				break;
+			}
+			List<String> words = Names.tokens(phrase);
+			if (words.stream().anyMatch(matched::contains)) {
+				continue;
+			}
+			compared++;
+			float[] q = phraseVectors.computeIfAbsent(phrase, emb::embed);
+			Predicate best = null;
+			float bestScore = 0, second = 0;
+			for (Predicate p : all) {
+				float[] v = vectors.computeIfAbsent(p.name(), k -> emb.embed(embeddingText(p)));
+				float s = Embedding.dot(q, v);
+				if (s > bestScore) {
+					second = bestScore;
+					bestScore = s;
+					best = p;
+				} else if (s > second) {
+					second = s;
+				}
+			}
+			if (best == null || !semanticCue(bestScore, bestScore - second) || cued.contains(best.name())) {
+				continue;
+			}
+			out.add(new Cue(best, null, phrase, !best.symmetric() && best.sameType() ? "object" : "any"));
+			cued.add(best.name());
+			matched.addAll(words);
+		}
+	}
+
+	/** Whether a phrase's nearest predicate is a real match, by its score and its lead over the next one. */
+	public static boolean semanticCue(float score, float lead) {
+		return (score >= CUE_SEMANTIC && lead >= CUE_SEMANTIC_LEAD)
+				|| (score >= CUE_SEMANTIC_HIGH && lead >= CUE_SEMANTIC_HIGH_LEAD);
+	}
+
+	/** Drops the vectors computed for another model, so that a swapped model is never compared with the old one's. */
+	private void ensureModel(Embedding emb) {
+		if (!emb.id().equals(vectorModel)) {
+			vectors.clear();
+			phraseVectors.clear();
+			vectorModel = emb.id();
+		}
 	}
 
 	/** Whether a predicate's own vocabulary (qualifiers, lexicon) names a role, whole or by one of its words. */

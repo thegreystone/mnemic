@@ -134,19 +134,20 @@ public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<Strin
 	public static Query analyse(
 		String text, EntityService entities, PredicateRegistry predicates, EntityTypeRegistry types) {
 		List<Entity> spotted = entities.spot(text);
-		List<Cue> cues = predicates.cues(text);
 		var ownerTokens = new HashSet<String>();
 		for (String a : entities.aliases(entities.owner().id())) {
 			ownerTokens.addAll(Names.tokens(a));
 		}
-		List<String> terms = Names.contentTokens(text).stream().filter(t -> !ownerTokens.contains(t)).distinct()
-				.toList();
 		var entityTokens = new HashSet<>(ownerTokens);
 		for (Entity e : spotted) {
 			for (String a : entities.aliases(e.id())) {
 				entityTokens.addAll(Names.tokens(a));
 			}
 		}
+		// The names found first, so that a phrase compared by meaning never lies inside one of them.
+		List<Cue> cues = predicates.cues(text, entityTokens);
+		List<String> terms = Names.contentTokens(text).stream().filter(t -> !ownerTokens.contains(t)).distinct()
+				.toList();
 		List<String> beyondEntities = terms.stream().filter(t -> !entityTokens.contains(t)).toList();
 		boolean polar = isPolar(text);
 		List<Bound> bound = bind(text, cues, entities.mentions(text), spotted);

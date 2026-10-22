@@ -287,8 +287,10 @@ few seconds and was not measurably behind Claude Haiku on the questions that are
 ### Recall by meaning
 
 Recall finds things by their words and by their structure, and also by meaning: "where do I bank" finds "my
-accounts are at Nordbank", and a question in German finds an answer written in English. This needs a
-small language model, and Mnemic fetches it for you.
+accounts are at Nordbank", and a question in German finds an answer written in English. The same model lets a
+question name a relation in a language its word list does not cover, so "Handynummer" or "telefonnummer"
+asks for a phone number as plainly as "phone number" does. This needs a small language model, and Mnemic
+fetches it for you.
 
 **On first start** Mnemic downloads the `ibm-granite/granite-embedding-311m-multilingual-r2` model from
 Hugging Face, about 350 MB (the 8-bit build on x86; the full-precision 1.3 GB one on ARM), into

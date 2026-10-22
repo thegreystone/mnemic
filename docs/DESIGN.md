@@ -155,7 +155,10 @@ question asks what is coming, and their candidate observations are fused with re
 structured and upcoming channels counting double:
 
 - **structured** — entity spotting and predicate cues resolve to a direct fact lookup over valid time; this channel
-  also produces the verdict (matched, MISS, KNOWN FALSE, NOT YET, events) and the bounds line;
+  also produces the verdict (matched, MISS, KNOWN FALSE, NOT YET, events) and the bounds line. A cue comes from a
+  predicate's vocabulary, or, with the model loaded, from the meaning of a phrase of the question that no vocabulary
+  matched, so "Handynummer" or "telefonnummer" reaches `has_phone` without a word list per language; the thresholds
+  are read off the model (`CueCalibrationTest`);
 - **keys** — BM25 over fact and event renderings ("facts as keys");
 - **lexical** — BM25 over observation text;
 - **semantic** — cosine similarity between the query embedding and the stored observation and fact embeddings,
