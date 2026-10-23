@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "mnemic",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "Persistent local memory shared by your AI assistants, kept as dated facts in one SQLite file on your machine.",
   "author": {
     "name": "Marcus Hirt",

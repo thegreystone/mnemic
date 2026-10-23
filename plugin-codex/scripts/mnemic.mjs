@@ -12,7 +12,7 @@ import { PassThrough, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 
-export const RELEASE_VERSION = '0.3.3';
+export const RELEASE_VERSION = '0.3.4';
 const REPOSITORY = 'thegreystone/mnemic';
 const MAX_DOWNLOAD_BYTES = 1024 * 1024 * 1024;
 const INSTALL_TIMEOUT_MS = 5 * 60 * 1000;

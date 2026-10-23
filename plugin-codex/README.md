@@ -8,7 +8,7 @@ machine. Use the same data home as Claude or another MCP client to share a memor
 
 Requires **Node.js 18 or newer** on the Codex process's PATH. There are no npm packages to install or publish.
 The launcher downloads a native executable directly from the
-[Mnemic GitHub release](https://github.com/thegreystone/mnemic/releases/tag/v0.3.3) and caches it outside the
+[Mnemic GitHub release](https://github.com/thegreystone/mnemic/releases/tag/v0.3.4) and caches it outside the
 plugin installation. Supported release platforms are Linux x86_64 and ARM64, macOS Apple silicon, and
 Windows x86_64. A separately installed binary can be used instead.
 
@@ -17,10 +17,10 @@ Windows hosts running an emulated Node process. It selects exactly one release a
 
 | Host | Release asset |
 |------|---------------|
-| Linux x86_64 | `mnemic-0.3.3-linux-x86_64` |
-| Linux ARM64 | `mnemic-0.3.3-linux-aarch64` |
-| macOS ARM64 | `mnemic-0.3.3-macos-aarch64` |
-| Windows x86_64 | `mnemic-0.3.3-windows-x86_64.exe` |
+| Linux x86_64 | `mnemic-0.3.4-linux-x86_64` |
+| Linux ARM64 | `mnemic-0.3.4-linux-aarch64` |
+| macOS ARM64 | `mnemic-0.3.4-macos-aarch64` |
+| Windows x86_64 | `mnemic-0.3.4-windows-x86_64.exe` |
 
 Unsupported hosts, including Intel Macs and Windows ARM64, get an explicit error before any download.
 Use `MNEMIC_BINARY` or `--binary` for a compatible executable you built or installed yourself.
