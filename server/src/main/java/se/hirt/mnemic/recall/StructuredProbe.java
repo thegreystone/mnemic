@@ -43,6 +43,7 @@ import se.hirt.mnemic.recall.RecallResult.Structured;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -93,8 +94,11 @@ final class StructuredProbe {
 		// In the question's order: the verdict is the first relation the question names that answered.
 		List<Query.Bound> bound = q.bound().stream().sorted((a, b) -> Integer.compare(a.start(), b.start())).toList();
 		var verdicts = new ArrayList<Structured>();
+		// A literal may be checked against several entities and cues. Read its mentions once per recall, so
+		// subsequent recalls still see new aliases and entity merges.
+		var literalMentions = new HashMap<String, List<Entity>>();
 		for (Query.Bound b : bound) {
-			verdicts.add(probeOne(q, b, asOf, now, includeHistory));
+			verdicts.add(probeOne(q, b, asOf, now, includeHistory, literalMentions));
 		}
 		Structured primary = verdicts.stream().filter(Structured::answered).findFirst().orElse(verdicts.getFirst());
 		var also = new ArrayList<Structured>();
@@ -109,7 +113,9 @@ final class StructuredProbe {
 	}
 
 	/** One relation, for the subject the question binds it to, or for every spotted entity when it binds none. */
-	private Structured probeOne(Query q, Query.Bound bound, Instant asOf, Instant now, boolean includeHistory) {
+	private Structured probeOne(
+		Query q, Query.Bound bound, Instant asOf, Instant now, boolean includeHistory,
+		Map<String, List<Entity>> literalMentions) {
 		Cue cue = bound.cue();
 		List<Entity> subjects = bound.hasSubject() ? bound.subjects() : q.spotted();
 		var matched = new ArrayList<Fact>();
@@ -178,17 +184,19 @@ final class StructuredProbe {
 			}
 			List<List<Entity>> required = List.copyOf(families.values());
 			java.util.function.Predicate<Fact> about = f -> q.polar()
-					? required.stream().allMatch(g -> g.stream().anyMatch(x -> touches(f, x)))
-					: required.stream().anyMatch(g -> g.stream().anyMatch(x -> touches(f, x)));
+					? required.stream().allMatch(g -> g.stream().anyMatch(x -> touches(f, x, literalMentions)))
+					: required.stream().anyMatch(g -> g.stream().anyMatch(x -> touches(f, x, literalMentions)));
 			var dropped = matched.stream().filter(f -> !about.test(f)).toList();
 			matched.removeAll(dropped);
 			near.addAll(0, dropped);
 			future.removeIf(f -> !about.test(f));
 			if (matched.isEmpty() && !dropped.isEmpty()) {
+				boolean literals = dropped.stream().allMatch(f -> f.objectId() == null);
 				notes.add("the " + dropped.size() + " " + cue.predicate().name()
 						+ (dropped.size() == 1 ? " fact" : " facts") + " for " + entity.name() + " touch"
 						+ (dropped.size() == 1 ? "es" : "") + " none of "
-						+ String.join(", ", xs.stream().map(Entity::name).toList()) + " (listed as near-misses)");
+						+ String.join(", ", xs.stream().map(Entity::name).toList())
+						+ (literals ? " by link or by name in their wording" : "") + " (listed as near-misses)");
 			}
 		}
 		if (q.polar()) {
@@ -209,7 +217,7 @@ final class StructuredProbe {
 					for (Entity e : subjects) {
 						for (Fact f : facts.probe(e.id(), cue.predicate().name(), asOf, now, false)) {
 							if (f.subjectId() == e.id() && "current".equals(f.state(now))
-									&& xs.stream().noneMatch(x -> touches(f, x))) {
+									&& xs.stream().noneMatch(x -> touches(f, x, literalMentions))) {
 								decidedBy = f;
 								basis = "functional";
 								break;
@@ -651,13 +659,23 @@ final class StructuredProbe {
 		return subjectAsked ? f.objectId() : Long.valueOf(f.subjectId());
 	}
 
-	private boolean touches(Fact f, Entity x) {
+	/**
+	 * Whether a fact is about an entity: as its subject, object, or scope, through the place its object lies in, or,
+	 * when its object is a literal, by naming the entity in it. A decision or a plan is words ("insure the Polestar
+	 * with Zurich rather than Helvetia"), and a question about Zurich is answered by the decisions that name it; by
+	 * link alone every literal fact touched nothing and was a near-miss (2026-10-23). Use the same name recognition as
+	 * the question, so "Zurich Insurance" does not also name the separate city "Zürich".
+	 */
+	private boolean touches(Fact f, Entity x, Map<String, List<Entity>> literalMentions) {
 		if (f.subjectId() == x.id() || (f.objectId() != null && f.objectId() == x.id())
 				|| (f.scopeId() != null && f.scopeId() == x.id())) {
 			return true;
 		}
-		return f.objectId() != null && predicates.canContain(types.lineage(x.type()))
-				&& containment.ancestors(f.objectId()).contains(x.id());
+		if (f.objectId() == null) {
+			return f.objectText() != null && literalMentions.computeIfAbsent(f.objectText(), entities::spot).stream()
+					.anyMatch(e -> e.id() == x.id());
+		}
+		return predicates.canContain(types.lineage(x.type())) && containment.ancestors(f.objectId()).contains(x.id());
 	}
 
 	/**

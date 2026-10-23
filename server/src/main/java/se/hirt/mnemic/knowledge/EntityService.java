@@ -66,7 +66,6 @@ public final class EntityService {
 	static final double AMBIGUOUS = 0.40;
 	/** Across types, or with none given, a match on letters alone (no shared name part) must be this close to ask. */
 	static final double LETTERS_ACROSS_TYPES = 0.60;
-	private static final int MAX_NGRAM = 4;
 
 	private final Database db;
 	private final EntityTypeRegistry types;
@@ -820,7 +819,13 @@ public final class EntityService {
 		List<String> tokens = Names.tokens(query);
 		var found = new ArrayList<Mention>();
 		boolean[] used = new boolean[tokens.size()];
-		for (int n = Math.min(MAX_NGRAM, tokens.size()); n >= 1; n--) {
+		// A fixed word limit could expose a shorter name inside a longer one: "Zurich" in
+		// "Zurich Insurance Company of Switzerland". Bound the search by the names actually on record.
+		int maxNgram = db.read(tx -> tx.queryOne("""
+				SELECT COALESCE(MAX(length(a.alias_norm) - length(replace(a.alias_norm, ' ', '')) + 1), 1) AS words
+				FROM entity_alias a JOIN entity e ON e.id = a.entity_id WHERE e.merged_into IS NULL""").orElseThrow()
+				.intOrNull("words"));
+		for (int n = Math.min(maxNgram, tokens.size()); n >= 1; n--) {
 			for (int i = 0; i + n <= tokens.size(); i++) {
 				if (anyUsed(used, i, n)) {
 					continue;
