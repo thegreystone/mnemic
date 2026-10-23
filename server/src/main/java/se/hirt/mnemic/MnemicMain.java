@@ -58,6 +58,11 @@ public class MnemicMain {
 
 	public static void main(String ... args) {
 		System.setOut(new PrintStream(new FileOutputStream(FileDescriptor.out), true, StandardCharsets.UTF_8));
+		// One data home for the checks before boot and for Quarkus alike: the configured value with a leading ~
+		// expanded, set as the system property, which outranks the MNEMIC_HOME environment variable in the config.
+		// The store and the log file path both read mnemic.home from the config, so expanding it only here would
+		// leave them with the value as written (2026-10-23).
+		System.setProperty("mnemic.home", home().toString());
 		ensureScannableWorkingDirectory();
 		Quarkus.run(args);
 	}
@@ -88,7 +93,11 @@ public class MnemicMain {
 		}
 	}
 
-	/** Same resolution order as {@code mnemic.home}: system property, {@code MNEMIC_HOME}, then {@code ~/.mnemic}. */
+	/**
+	 * The data home as configured, a leading {@code ~} expanded: the {@code mnemic.home} system property, then
+	 * {@code MNEMIC_HOME}, then {@code ~/.mnemic}. {@link #main} writes the result back as the system property, so the
+	 * config's {@code mnemic.home} carries the expanded value.
+	 */
 	static Path home() {
 		String configured = System.getProperty("mnemic.home");
 		if (configured == null || configured.isBlank()) {
