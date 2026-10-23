@@ -95,8 +95,23 @@ public class MnemicMain {
 			configured = System.getenv("MNEMIC_HOME");
 		}
 		if (configured == null || configured.isBlank()) {
-			configured = System.getProperty("user.home") + "/.mnemic";
+			configured = "~/.mnemic";
 		}
-		return Paths.get(configured);
+		return Paths.get(expandHome(configured, System.getProperty("user.home")));
+	}
+
+	/**
+	 * A leading {@code ~} means the user's home directory, as the bundle's settings page promises: a client that hands
+	 * the configured value over as written (Claude Code does, Claude Desktop expands it) would otherwise open a store
+	 * named {@code ~} under the working directory (2026-10-23).
+	 */
+	static String expandHome(String configured, String userHome) {
+		if (configured.equals("~")) {
+			return userHome;
+		}
+		if (configured.startsWith("~/") || configured.startsWith("~\\")) {
+			return userHome + configured.substring(1);
+		}
+		return configured;
 	}
 }

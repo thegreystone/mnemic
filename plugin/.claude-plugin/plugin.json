@@ -19,6 +19,6 @@
     "local-first",
     "privacy"
   ],
-  "mcpServers": "https://github.com/thegreystone/mnemic/releases/download/v0.3.3/mnemic-0.3.3-universal.mcpb",
+  "mcpServers": "https://github.com/thegreystone/mnemic/releases/download/v0.3.4/mnemic-0.3.4-universal.mcpb",
   "icon": "./assets/icon.png"
 }
