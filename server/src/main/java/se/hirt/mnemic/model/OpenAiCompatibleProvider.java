@@ -59,6 +59,7 @@ import java.util.regex.Pattern;
 public final class OpenAiCompatibleProvider implements ModelProvider {
 
 	private static final ObjectMapper MAPPER = new ObjectMapper();
+	private static final int MAX_ATTEMPTS = 5;
 
 	public OpenAiCompatibleProvider() {
 	}
@@ -107,9 +108,8 @@ public final class OpenAiCompatibleProvider implements ModelProvider {
 	}
 
 	static boolean serverAnswers(String endpoint) {
-		try {
+		try (HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()) {
 			URI uri = URI.create(endpoint.replaceAll("/v1/?$", "") + "/api/v0/models");
-			HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
 			return http.send(HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(10)).GET().build(),
 					HttpResponse.BodyHandlers.discarding()).statusCode() / 100 == 2;
 		} catch (IOException | RuntimeException e) {
@@ -127,9 +127,8 @@ public final class OpenAiCompatibleProvider implements ModelProvider {
 	 * Empty when the endpoint does not answer or the model is not loaded.
 	 */
 	static String describeLoaded(String endpoint, String model) {
-		try {
+		try (HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()) {
 			URI uri = URI.create(endpoint.replaceAll("/v1/?$", "") + "/api/v0/models");
-			HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
 			HttpResponse<String> resp = http.send(
 					HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(10)).GET().build(),
 					HttpResponse.BodyHandlers.ofString());
@@ -255,14 +254,20 @@ public final class OpenAiCompatibleProvider implements ModelProvider {
 		private final String model;
 		private final String apiKey;
 		private final boolean local;
+		private final long baseBackoffMs;
 		private volatile boolean reasoningFieldRejected;
 
 		Client(String id, String baseUrl, String model, String apiKey, boolean local) {
+			this(id, baseUrl, model, apiKey, local, 500L);
+		}
+
+		Client(String id, String baseUrl, String model, String apiKey, boolean local, long baseBackoffMs) {
 			this.id = id;
 			this.endpoint = URI.create(baseUrl.replaceAll("/+$", "") + "/chat/completions");
 			this.model = model;
 			this.apiKey = apiKey;
 			this.local = local;
+			this.baseBackoffMs = baseBackoffMs;
 		}
 
 		@Override
@@ -300,19 +305,52 @@ public final class OpenAiCompatibleProvider implements ModelProvider {
 			return turnOf(root.path("choices").path(0).path("message"));
 		}
 
-		/** One request, with the reasoning field dropped for good once a server has rejected it. */
+		/**
+		 * One request with retries on transient transport errors, 429, and 5xx; drops the reasoning field for good once
+		 * a server rejects it.
+		 */
 		private JsonNode complete(List<Map<String, Object>> messages, List<Map<String, Object>> tools)
 				throws IOException, InterruptedException {
-			boolean withReasoning = local && !reasoningFieldRejected;
-			HttpResponse<String> resp = send(messages, tools, withReasoning);
-			if (withReasoning && resp.statusCode() == 400 && resp.body().contains("reasoning")) {
-				reasoningFieldRejected = true; // this server does not know the field; never send it again
-				resp = send(messages, tools, false);
+			IOException last = null;
+			for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+				boolean withReasoning = local && !reasoningFieldRejected;
+				HttpResponse<String> resp;
+				try {
+					resp = send(messages, tools, withReasoning);
+					if (withReasoning && resp.statusCode() == 400 && resp.body().contains("reasoning")) {
+						reasoningFieldRejected = true; // this server does not know the field; never send it again
+						resp = send(messages, tools, false);
+					}
+				} catch (IOException e) {
+					last = e;
+					if (attempt < MAX_ATTEMPTS) {
+						backoff(attempt);
+						continue;
+					}
+					throw e;
+				}
+				int status = resp.statusCode();
+				if (status == 429 || status / 100 == 5) {
+					last = new IOException("Model endpoint returned " + status + ": " + resp.body());
+					if (attempt < MAX_ATTEMPTS) {
+						backoff(attempt);
+						continue;
+					}
+					throw last;
+				}
+				if (status / 100 != 2) {
+					throw new IOException("Model endpoint returned " + status + ": " + resp.body());
+				}
+				return MAPPER.readTree(resp.body());
 			}
-			if (resp.statusCode() / 100 != 2) {
-				throw new IOException("Model endpoint returned " + resp.statusCode() + ": " + resp.body());
+			throw last == null ? new IOException("Model endpoint: no response") : last;
+		}
+
+		private void backoff(int attempt) throws InterruptedException {
+			if (baseBackoffMs <= 0) {
+				return;
 			}
-			return MAPPER.readTree(resp.body());
+			Thread.sleep(Math.min(30_000L, baseBackoffMs * (1L << Math.min(attempt, 6))));
 		}
 
 		private HttpResponse<String> send(
@@ -330,7 +368,8 @@ public final class OpenAiCompatibleProvider implements ModelProvider {
 				payload.put("tools", tools);
 			}
 			String body = MAPPER.writeValueAsString(payload);
-			HttpRequest.Builder req = HttpRequest.newBuilder(endpoint).timeout(Duration.ofMinutes(10))
+			Duration timeout = local ? Duration.ofMinutes(10) : Duration.ofMinutes(3);
+			HttpRequest.Builder req = HttpRequest.newBuilder(endpoint).timeout(timeout)
 					.header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(body));
 			if (apiKey != null && !apiKey.isBlank()) {
 				req.header("Authorization", "Bearer " + apiKey);

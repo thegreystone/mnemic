@@ -84,64 +84,65 @@ public final class Deriver {
 	}
 
 	/** Brings the derived rows in line with the current facts and rules. */
-	public synchronized Outcome derive() {
-		List<Predicate> derived = ordered();
-		if (derived.isEmpty() && attributePredicates().isEmpty()) {
-			return new Outcome(0, 0, 0, 0);
-		}
-		return db.write(tx -> {
-			Graph g = Graph.load(tx, predicates);
-			int made = 0;
-			int gone = 0;
-			int changed = 0;
-			int corroborated = 0;
-			// What the record implies about attributes stands as facts too: "Britt is female" from her being a
-			// mother, resting on the facts that say so, so it can be asked about and seen, and steps aside for a
-			// statement.
-			for (String attribute : attributePredicates()) {
-				int[] n = materialiseImplied(tx, g, attribute);
-				made += n[0];
-				changed += n[1];
-				gone += n[2];
+	public Outcome derive() {
+		return db.withLock(() -> {
+			List<Predicate> derived = ordered();
+			if (derived.isEmpty() && attributePredicates().isEmpty()) {
+				return new Outcome(0, 0, 0, 0);
 			}
-			for (Predicate p : derived) {
-				Map<Key, Candidate> wanted = evaluate(g, p, predicates.rulesOf(p.name()));
-				Map<Key, Fact> asserted = current(tx, p, false);
-				Map<Key, Fact> have = current(tx, p, true);
-				var kept = new HashSet<Long>();
-				for (Map.Entry<Key, Candidate> e : wanted.entrySet()) {
-					Candidate c = e.getValue();
-					Fact stated = asserted.get(e.getKey());
-					if (stated != null) {
-						corroborated += corroborate(tx, stated, c);
-						continue;
-					}
-					Fact row = have.get(e.getKey());
-					if (row == null) {
-						insert(tx, p, c);
-						made++;
-					} else {
-						kept.add(row.id());
-						if (!same(tx, row, c)) {
-							rewrite(tx, row, c);
-							changed++;
+			return db.write(tx -> {
+				Graph g = Graph.load(tx, predicates);
+				int made = 0;
+				int gone = 0;
+				int changed = 0;
+				int corroborated = 0;
+				// What the record implies about attributes stands as facts too: "Britt is female" from her being a
+				// mother, resting on the facts that say so, so it can be asked about and seen, and steps aside for a
+				// statement.
+				for (String attribute : attributePredicates()) {
+					int[] n = materialiseImplied(tx, g, attribute);
+					made += n[0];
+					changed += n[1];
+					gone += n[2];
+				}
+				for (Predicate p : derived) {
+					Map<Key, Candidate> wanted = evaluate(g, p, predicates.rulesOf(p.name()));
+					Map<Key, Fact> asserted = current(tx, p, false);
+					Map<Key, Fact> have = current(tx, p, true);
+					var kept = new HashSet<Long>();
+					for (Map.Entry<Key, Candidate> e : wanted.entrySet()) {
+						Candidate c = e.getValue();
+						Fact stated = asserted.get(e.getKey());
+						if (stated != null) {
+							corroborated += corroborate(tx, stated, c);
+							continue;
+						}
+						Fact row = have.get(e.getKey());
+						if (row == null) {
+							insert(tx, p, c);
+							made++;
+						} else {
+							kept.add(row.id());
+							if (!same(tx, row, c)) {
+								rewrite(tx, row, c);
+								changed++;
+							}
 						}
 					}
-				}
-				for (Fact row : have.values()) {
-					if (!kept.contains(row.id())) {
-						invalidate(tx, row);
-						gone++;
+					for (Fact row : have.values()) {
+						if (!kept.contains(row.id())) {
+							invalidate(tx, row);
+							gone++;
+						}
+					}
+					// Its rows, as they now stand, are base facts for the rules that rest on it.
+					for (Row r : tx.query("SELECT * FROM fact WHERE predicate = ? AND status = 'current' AND "
+							+ "object_id IS NOT NULL", p.name())) {
+						g.add(Fact.from(r), p.symmetric());
 					}
 				}
-				// Its rows, as they now stand, are base facts for the rules that rest on it.
-				for (Row r : tx.query(
-						"SELECT * FROM fact WHERE predicate = ? AND status = 'current' AND " + "object_id IS NOT NULL",
-						p.name())) {
-					g.add(Fact.from(r), p.symmetric());
-				}
-			}
-			return new Outcome(made, gone, changed, corroborated);
+				return new Outcome(made, gone, changed, corroborated);
+			});
 		});
 	}
 

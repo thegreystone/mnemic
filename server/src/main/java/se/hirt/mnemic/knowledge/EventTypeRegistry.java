@@ -73,6 +73,7 @@ public final class EventTypeRegistry {
 
 	private final Database db;
 	private final Map<String, EventType> byName = new LinkedHashMap<>();
+	private long dataVersion = -1;
 
 	public EventTypeRegistry(Database db) {
 		this.db = db;
@@ -97,16 +98,32 @@ public final class EventTypeRegistry {
 				registerInferred(stored, null);
 			}
 		}
+		this.dataVersion = db.dataVersion();
+	}
+
+	private void refreshIfStale() {
+		long dv = db.dataVersion();
+		if (dv != dataVersion) {
+			byName.clear();
+			load();
+			dataVersion = dv;
+		}
 	}
 
 	/** Reads the table again, after a change made beside the registry. */
-	public synchronized void reload() {
-		byName.clear();
-		load();
+	public void reload() {
+		db.withLock(() -> {
+			byName.clear();
+			load();
+			dataVersion = db.dataVersion();
+		});
 	}
 
-	public synchronized Optional<EventType> get(String name) {
-		return name == null ? Optional.empty() : Optional.ofNullable(byName.get(key(name)));
+	public Optional<EventType> get(String name) {
+		return db.withLock(() -> {
+			refreshIfStale();
+			return name == null ? Optional.empty() : Optional.ofNullable(byName.get(key(name)));
+		});
 	}
 
 	/** The registry's spelling of a name: its words, lowercase, joined by underscores ({@code purchased_property}). */
@@ -125,8 +142,11 @@ public final class EventTypeRegistry {
 				&& tokens.stream().noneMatch(t -> t.chars().allMatch(Character::isDigit));
 	}
 
-	public synchronized List<EventType> all() {
-		return List.copyOf(byName.values());
+	public List<EventType> all() {
+		return db.withLock(() -> {
+			refreshIfStale();
+			return List.copyOf(byName.values());
+		});
 	}
 
 	/** Whether an event type opens, closes, or supersedes facts of the predicate. */
@@ -146,44 +166,47 @@ public final class EventTypeRegistry {
 	 * {object}]]}); a template that names no object gets the others in parentheses. Without a template,
 	 * {@code type(a, b)}.
 	 */
-	public synchronized String render(String type, List<String> participants) {
-		EventType t = byName.get(type);
-		String template = t == null ? null : t.render();
-		if (template == null || template.isBlank()) {
-			return type.replace('_', ' ') + " (" + String.join(", ", participants) + ")";
-		}
-		String subject = participants.isEmpty() ? "" : participants.getFirst();
-		List<String> rest = participants.size() < 2 ? List.of() : participants.subList(1, participants.size());
-		// A template may give the third and fourth participants their own slots ({object2}, {object3}) or the rest
-		// one ({others}): "{subject} paid {object}[[ for {object2}]]". Without them {object} is everyone but the
-		// subject, joined, as before.
-		int named = template.contains("{object3}") ? 3 : template.contains("{object2}") ? 2 : 1;
-		boolean slotted = named > 1 || template.contains("{others}");
-		String object = rest.isEmpty() ? "" : slotted ? rest.getFirst() : String.join(", ", rest);
-		var slots = new LinkedHashMap<String, String>();
-		slots.put("{subject}", subject);
-		slots.put("{object}", object);
-		slots.put("{object2}", rest.size() > 1 ? rest.get(1) : "");
-		slots.put("{object3}", rest.size() > 2 ? rest.get(2) : "");
-		slots.put("{others}", rest.size() > 1 ? String.join(", ", rest.subList(1, rest.size())) : "");
-		// An optional segment vanishes when any slot in it has nothing to say.
-		String out = OPTIONAL.matcher(template).replaceAll(m -> {
-			String segment = m.group(1);
-			boolean empty = slots.entrySet().stream()
-					.anyMatch(s -> segment.contains(s.getKey()) && s.getValue().isEmpty());
-			return empty ? "" : Matcher.quoteReplacement(segment);
+	public String render(String type, List<String> participants) {
+		return db.withLock(() -> {
+			refreshIfStale();
+			EventType t = byName.get(type);
+			String template = t == null ? null : t.render();
+			if (template == null || template.isBlank()) {
+				return type.replace('_', ' ') + " (" + String.join(", ", participants) + ")";
+			}
+			String subject = participants.isEmpty() ? "" : participants.getFirst();
+			List<String> rest = participants.size() < 2 ? List.of() : participants.subList(1, participants.size());
+			// A template may give the third and fourth participants their own slots ({object2}, {object3}) or the rest
+			// one ({others}): "{subject} paid {object}[[ for {object2}]]". Without them {object} is everyone but the
+			// subject, joined, as before.
+			int named = template.contains("{object3}") ? 3 : template.contains("{object2}") ? 2 : 1;
+			boolean slotted = named > 1 || template.contains("{others}");
+			String object = rest.isEmpty() ? "" : slotted ? rest.getFirst() : String.join(", ", rest);
+			var slots = new LinkedHashMap<String, String>();
+			slots.put("{subject}", subject);
+			slots.put("{object}", object);
+			slots.put("{object2}", rest.size() > 1 ? rest.get(1) : "");
+			slots.put("{object3}", rest.size() > 2 ? rest.get(2) : "");
+			slots.put("{others}", rest.size() > 1 ? String.join(", ", rest.subList(1, rest.size())) : "");
+			// An optional segment vanishes when any slot in it has nothing to say.
+			String out = OPTIONAL.matcher(template).replaceAll(m -> {
+				String segment = m.group(1);
+				boolean empty = slots.entrySet().stream()
+						.anyMatch(s -> segment.contains(s.getKey()) && s.getValue().isEmpty());
+				return empty ? "" : Matcher.quoteReplacement(segment);
+			});
+			for (Map.Entry<String, String> s : slots.entrySet()) {
+				out = out.replace(s.getKey(), s.getValue());
+			}
+			if (!object.isEmpty() && !template.contains("{object}")) {
+				out += " (" + object + ")";
+			}
+			// Participants the template has no slot for are not lost: they follow in parentheses.
+			if (slotted && !template.contains("{others}") && rest.size() > named) {
+				out += " (" + String.join(", ", rest.subList(named, rest.size())) + ")";
+			}
+			return out.replaceAll("\\s+", " ").trim();
 		});
-		for (Map.Entry<String, String> s : slots.entrySet()) {
-			out = out.replace(s.getKey(), s.getValue());
-		}
-		if (!object.isEmpty() && !template.contains("{object}")) {
-			out += " (" + object + ")";
-		}
-		// Participants the template has no slot for are not lost: they follow in parentheses.
-		if (slotted && !template.contains("{others}") && rest.size() > named) {
-			out += " (" + String.join(", ", rest.subList(named, rest.size())) + ")";
-		}
-		return out.replaceAll("\\s+", " ").trim();
 	}
 
 	private static final Pattern OPTIONAL = Pattern.compile("\\[\\[(.*?)]]");
@@ -192,137 +215,145 @@ public final class EventTypeRegistry {
 	 * Registers a caller-defined type; an existing name is returned as it is. {@code registered} says which predicates
 	 * exist, since a type may only open, close, or supersede those.
 	 */
-	public synchronized EventType register(
-		EventTypeDef def, Long observationId, java.util.function.Predicate<String> registered) {
-		if (def.name() == null || def.name().isBlank()) {
-			throw MnemicException.invalidArgument("An event type definition needs a 'name'.");
-		}
-		String name = key(def.name());
-		EventType existing = byName.get(name);
-		if (existing != null) {
-			if (!existing.inferred() || bare(def)) {
-				return existing;
+	public EventType register(EventTypeDef def, Long observationId, java.util.function.Predicate<String> registered) {
+		return db.withLock(() -> {
+			refreshIfStale();
+			if (def.name() == null || def.name().isBlank()) {
+				throw MnemicException.invalidArgument("An event type definition needs a 'name'.");
 			}
-			// A definition for a type registered from use: what it states replaces what was inferred.
-			var replacement = new LinkedHashMap<String, Object>();
-			if (def.description() != null) {
-				replacement.put("description", def.description());
+			String name = key(def.name());
+			EventType existing = byName.get(name);
+			if (existing != null) {
+				if (!existing.inferred() || bare(def)) {
+					return existing;
+				}
+				// A definition for a type registered from use: what it states replaces what was inferred.
+				var replacement = new LinkedHashMap<String, Object>();
+				if (def.description() != null) {
+					replacement.put("description", def.description());
+				}
+				if (!def.opens().isEmpty()) {
+					replacement.put("opens", def.opens());
+				}
+				if (!def.closes().isEmpty()) {
+					replacement.put("closes", def.closes());
+				}
+				if (!def.supersedes().isEmpty()) {
+					replacement.put("supersedes", def.supersedes());
+				}
+				if (def.endsEntity() != null) {
+					replacement.put("ends_entity", def.endsEntity());
+				}
+				if (!def.lexicon().isEmpty()) {
+					replacement.put("lexicon", def.lexicon());
+				}
+				if (def.render() != null && !def.render().isBlank()) {
+					replacement.put("render", def.render());
+				}
+				return update(name, replacement, "defined after registration from use", registered);
 			}
-			if (!def.opens().isEmpty()) {
-				replacement.put("opens", def.opens());
+			for (String p : concat(def.opens(), def.closes(), def.supersedes())) {
+				if (!registered.test(p)) {
+					throw MnemicException.invalidArgument("Event type '" + name + "' names an unknown predicate '" + p
+							+ "'; define it in 'predicates' first.");
+				}
 			}
-			if (!def.closes().isEmpty()) {
-				replacement.put("closes", def.closes());
-			}
-			if (!def.supersedes().isEmpty()) {
-				replacement.put("supersedes", def.supersedes());
-			}
-			if (def.endsEntity() != null) {
-				replacement.put("ends_entity", def.endsEntity());
-			}
-			if (!def.lexicon().isEmpty()) {
-				replacement.put("lexicon", def.lexicon());
-			}
-			if (def.render() != null && !def.render().isBlank()) {
-				replacement.put("render", def.render());
-			}
-			return update(name, replacement, "defined after registration from use", registered);
-		}
-		for (String p : concat(def.opens(), def.closes(), def.supersedes())) {
-			if (!registered.test(p)) {
-				throw MnemicException.invalidArgument("Event type '" + name + "' names an unknown predicate '" + p
-						+ "'; define it in 'predicates' first.");
-			}
-		}
-		var t = new EventType(name, def.description(), def.opens(), def.closes(), def.supersedes(),
-				Boolean.TRUE.equals(def.endsEntity()), false, lower(def.lexicon()), observationId,
-				template(def.render()), false);
-		insert(t);
-		return t;
+			var t = new EventType(name, def.description(), def.opens(), def.closes(), def.supersedes(),
+					Boolean.TRUE.equals(def.endsEntity()), false, lower(def.lexicon()), observationId,
+					template(def.render()), false);
+			insert(t);
+			return t;
+		});
 	}
 
 	/**
 	 * Registers a type from its first use: no effects, the name's words as lexicon, a template made from the name, and
 	 * no description until somebody answers what it does. An existing name is returned as it is.
 	 */
-	public synchronized EventType registerInferred(String name, Long observationId) {
-		String n = key(name);
-		if (byName.containsKey(n)) {
-			return byName.get(n);
-		}
-		var t = new EventType(n, null, List.of(), List.of(), List.of(), false, false, Predicate.lexiconOf(n),
-				observationId, "{subject} " + n.replace('_', ' ') + " {object}", true);
-		insert(t);
-		return t;
+	public EventType registerInferred(String name, Long observationId) {
+		return db.withLock(() -> {
+			refreshIfStale();
+			String n = key(name);
+			if (byName.containsKey(n)) {
+				return byName.get(n);
+			}
+			var t = new EventType(n, null, List.of(), List.of(), List.of(), false, false, Predicate.lexiconOf(n),
+					observationId, "{subject} " + n.replace('_', ' ') + " {object}", true);
+			insert(t);
+			return t;
+		});
 	}
 
 	/**
 	 * Corrects {@code description}, {@code opens}, {@code closes}, {@code supersedes}, {@code ends_entity},
 	 * {@code lexicon}, or {@code render}; every change is logged. The caller re-renders the type's events.
 	 */
-	public synchronized EventType update(
+	public EventType update(
 		String name, Map<String, Object> replacement, String reason, java.util.function.Predicate<String> registered) {
-		EventType t = get(name).orElseThrow(() -> MnemicException.notFound("No event type " + name));
-		String description = t.description();
-		List<String> opens = t.opens();
-		List<String> closes = t.closes();
-		List<String> supersedes = t.supersedes();
-		boolean endsEntity = t.endsEntity();
-		List<String> lexicon = t.lexicon();
-		String render = t.render();
-		var changes = new ArrayList<String[]>();
-		for (Map.Entry<String, Object> c : replacement.entrySet()) {
-			String old;
-			String value = Vocabulary.text(c.getValue());
-			switch (c.getKey()) {
-			case "description" -> {
-				old = description;
-				description = value;
+		return db.withLock(() -> {
+			refreshIfStale();
+			EventType t = get(name).orElseThrow(() -> MnemicException.notFound("No event type " + name));
+			String description = t.description();
+			List<String> opens = t.opens();
+			List<String> closes = t.closes();
+			List<String> supersedes = t.supersedes();
+			boolean endsEntity = t.endsEntity();
+			List<String> lexicon = t.lexicon();
+			String render = t.render();
+			var changes = new ArrayList<String[]>();
+			for (Map.Entry<String, Object> c : replacement.entrySet()) {
+				String old;
+				String value = Vocabulary.text(c.getValue());
+				switch (c.getKey()) {
+				case "description" -> {
+					old = description;
+					description = value;
+				}
+				case "opens" -> {
+					old = Vocabulary.json(opens);
+					opens = predicates("opens", c.getValue(), registered);
+				}
+				case "closes" -> {
+					old = Vocabulary.json(closes);
+					closes = predicates("closes", c.getValue(), registered);
+				}
+				case "supersedes" -> {
+					old = Vocabulary.json(supersedes);
+					supersedes = predicates("supersedes", c.getValue(), registered);
+				}
+				case "ends_entity" -> {
+					old = String.valueOf(endsEntity);
+					endsEntity = Boolean.parseBoolean(value);
+				}
+				case "lexicon" -> {
+					old = Vocabulary.json(lexicon);
+					lexicon = lower(Vocabulary.strings(c.getValue()));
+				}
+				case "render" -> {
+					old = render;
+					render = template(value);
+				}
+				default -> throw MnemicException.invalidArgument("Unknown event type property '" + c.getKey()
+						+ "'; correctable: description, opens, closes, supersedes, ends_entity, lexicon, render.");
+				}
+				changes.add(new String[] {c.getKey(), old, value});
 			}
-			case "opens" -> {
-				old = Vocabulary.json(opens);
-				opens = predicates("opens", c.getValue(), registered);
-			}
-			case "closes" -> {
-				old = Vocabulary.json(closes);
-				closes = predicates("closes", c.getValue(), registered);
-			}
-			case "supersedes" -> {
-				old = Vocabulary.json(supersedes);
-				supersedes = predicates("supersedes", c.getValue(), registered);
-			}
-			case "ends_entity" -> {
-				old = String.valueOf(endsEntity);
-				endsEntity = Boolean.parseBoolean(value);
-			}
-			case "lexicon" -> {
-				old = Vocabulary.json(lexicon);
-				lexicon = lower(Vocabulary.strings(c.getValue()));
-			}
-			case "render" -> {
-				old = render;
-				render = template(value);
-			}
-			default -> throw MnemicException.invalidArgument("Unknown event type property '" + c.getKey()
-					+ "'; correctable: description, opens, closes, supersedes, ends_entity, lexicon, render.");
-			}
-			changes.add(new String[] {c.getKey(), old, value});
-		}
-		var updated = new EventType(t.name(), description, opens, closes, supersedes, endsEntity, t.seed(), lexicon,
-				t.definedBy(), render, false);
-		db.write(tx -> {
-			tx.update(
-					"""
-							UPDATE event_type SET description = ?, opens = ?, closes = ?, supersedes = ?, ends_entity = ?, lexicon = ?,
-							                      render = ?, inferred = 0 WHERE name = ?""",
-					updated.description(), Vocabulary.json(updated.opens()), Vocabulary.json(updated.closes()),
-					Vocabulary.json(updated.supersedes()), updated.endsEntity() ? 1 : 0,
-					Vocabulary.json(updated.lexicon()), updated.render(), updated.name());
-			Vocabulary.logChanges(tx, "event_type", updated.name(), changes, reason);
-			return null;
+			var updated = new EventType(t.name(), description, opens, closes, supersedes, endsEntity, t.seed(), lexicon,
+					t.definedBy(), render, false);
+			db.write(tx -> {
+				tx.update(
+						"""
+								UPDATE event_type SET description = ?, opens = ?, closes = ?, supersedes = ?, ends_entity = ?, lexicon = ?,
+								                      render = ?, inferred = 0 WHERE name = ?""",
+						updated.description(), Vocabulary.json(updated.opens()), Vocabulary.json(updated.closes()),
+						Vocabulary.json(updated.supersedes()), updated.endsEntity() ? 1 : 0,
+						Vocabulary.json(updated.lexicon()), updated.render(), updated.name());
+				Vocabulary.logChanges(tx, "event_type", updated.name(), changes, reason);
+				return null;
+			});
+			byName.put(updated.name(), updated);
+			return updated;
 		});
-		byName.put(updated.name(), updated);
-		return updated;
 	}
 
 	public List<Map<String, Object>> changes(String name) {
@@ -334,45 +365,52 @@ public final class EventTypeRegistry {
 	 * when its events were retyped (co_created, after participants got roles, 2026-09-29). The removal is logged; a
 	 * rebuild that replays the observation that registered it registers it again.
 	 */
-	public synchronized EventType remove(String name, String reason) {
-		EventType t = get(name).orElseThrow(() -> MnemicException.notFound("No event type " + name));
-		if (t.seed()) {
-			throw MnemicException
-					.invalidArgument("'" + t.name() + "' is a seed type and stays; correct what it does " + "instead.");
-		}
-		long used = db.read(tx -> tx.queryLong("SELECT COUNT(*) FROM event WHERE type = ?", t.name()));
-		if (used > 0) {
-			throw MnemicException.invalidArgument("'" + t.name() + "' is the type of " + used
-					+ (used == 1 ? " event" : " events") + "; retype them first with correct(evt-N, {\"type\": ...}).");
-		}
-		db.write(tx -> {
-			tx.update("DELETE FROM event_type WHERE name = ?", t.name());
-			var change = new ArrayList<String[]>();
-			change.add(new String[] {"removed", t.render(), null});
-			Vocabulary.logChanges(tx, "event_type", t.name(), change, reason);
-			return null;
+	public EventType remove(String name, String reason) {
+		return db.withLock(() -> {
+			refreshIfStale();
+			EventType t = get(name).orElseThrow(() -> MnemicException.notFound("No event type " + name));
+			if (t.seed()) {
+				throw MnemicException.invalidArgument(
+						"'" + t.name() + "' is a seed type and stays; correct what it does " + "instead.");
+			}
+			long used = db.read(tx -> tx.queryLong("SELECT COUNT(*) FROM event WHERE type = ?", t.name()));
+			if (used > 0) {
+				throw MnemicException.invalidArgument(
+						"'" + t.name() + "' is the type of " + used + (used == 1 ? " event" : " events")
+								+ "; retype them first with correct(evt-N, {\"type\": ...}).");
+			}
+			db.write(tx -> {
+				tx.update("DELETE FROM event_type WHERE name = ?", t.name());
+				var change = new ArrayList<String[]>();
+				change.add(new String[] {"removed", t.render(), null});
+				Vocabulary.logChanges(tx, "event_type", t.name(), change, reason);
+				return null;
+			});
+			byName.remove(t.name());
+			return t;
 		});
-		byName.remove(t.name());
-		return t;
 	}
 
 	/** After two predicates merged: every type that opened, closed, or superseded the old name names the new one. */
-	public synchronized void renamePredicate(String from, String into, String reason) {
-		for (EventType t : List.copyOf(byName.values())) {
-			var replacement = new LinkedHashMap<String, Object>();
-			if (t.opens().contains(from)) {
-				replacement.put("opens", rename(t.opens(), from, into));
+	public void renamePredicate(String from, String into, String reason) {
+		db.withLock(() -> {
+			refreshIfStale();
+			for (EventType t : List.copyOf(byName.values())) {
+				var replacement = new LinkedHashMap<String, Object>();
+				if (t.opens().contains(from)) {
+					replacement.put("opens", rename(t.opens(), from, into));
+				}
+				if (t.closes().contains(from)) {
+					replacement.put("closes", rename(t.closes(), from, into));
+				}
+				if (t.supersedes().contains(from)) {
+					replacement.put("supersedes", rename(t.supersedes(), from, into));
+				}
+				if (!replacement.isEmpty()) {
+					update(t.name(), replacement, reason, p -> true);
+				}
 			}
-			if (t.closes().contains(from)) {
-				replacement.put("closes", rename(t.closes(), from, into));
-			}
-			if (t.supersedes().contains(from)) {
-				replacement.put("supersedes", rename(t.supersedes(), from, into));
-			}
-			if (!replacement.isEmpty()) {
-				update(t.name(), replacement, reason, p -> true);
-			}
-		}
+		});
 	}
 
 	private static List<String> rename(List<String> names, String from, String into) {
@@ -427,41 +465,44 @@ public final class EventTypeRegistry {
 	 * unregistered one through its own name, longest term first. {@code storedTypes} are the type names present in the
 	 * store, so an event a caller recorded under a type nobody registered is still reachable.
 	 */
-	public synchronized Optional<String> cue(List<String> tokens, List<String> storedTypes) {
-		String best = null;
-		int bestLen = 0;
-		for (EventType t : byName.values()) {
-			for (String term : t.lexicon()) {
-				if (tokens.contains(Names.norm(term)) && term.length() > bestLen) {
+	public Optional<String> cue(List<String> tokens, List<String> storedTypes) {
+		return db.withLock(() -> {
+			refreshIfStale();
+			String best = null;
+			int bestLen = 0;
+			for (EventType t : byName.values()) {
+				for (String term : t.lexicon()) {
+					if (tokens.contains(Names.norm(term)) && term.length() > bestLen) {
+						best = t.name();
+						bestLen = term.length();
+					}
+				}
+				if (tokens.contains(t.name()) && t.name().length() > bestLen) {
 					best = t.name();
-					bestLen = term.length();
+					bestLen = t.name().length();
 				}
 			}
-			if (tokens.contains(t.name()) && t.name().length() > bestLen) {
-				best = t.name();
-				bestLen = t.name().length();
-			}
-		}
-		for (String stored : storedTypes) {
-			// A stored type is matched word by word: "purchased property" is named by "purchased", and by "buy"
-			// when a registered type with that lexicon term ("purchased") is one of its words.
-			for (String word : Names.contentTokens(stored)) {
-				for (String tok : tokens) {
-					// "inherit" names the stored type "inherited": a prefix either way, four letters or more.
-					boolean hit = tok.equals(word) || (tok.length() >= 4 && word.length() >= 4
-							&& (word.startsWith(tok) || tok.startsWith(word)));
-					if (!hit) {
-						EventType reg = byName.get(word);
-						hit = reg != null && reg.lexicon().stream().anyMatch(term -> Names.norm(term).equals(tok));
-					}
-					if (hit && word.length() > bestLen) {
-						best = stored;
-						bestLen = word.length();
+			for (String stored : storedTypes) {
+				// A stored type is matched word by word: "purchased property" is named by "purchased", and by "buy"
+				// when a registered type with that lexicon term ("purchased") is one of its words.
+				for (String word : Names.contentTokens(stored)) {
+					for (String tok : tokens) {
+						// "inherit" names the stored type "inherited": a prefix either way, four letters or more.
+						boolean hit = tok.equals(word) || (tok.length() >= 4 && word.length() >= 4
+								&& (word.startsWith(tok) || tok.startsWith(word)));
+						if (!hit) {
+							EventType reg = byName.get(word);
+							hit = reg != null && reg.lexicon().stream().anyMatch(term -> Names.norm(term).equals(tok));
+						}
+						if (hit && word.length() > bestLen) {
+							best = stored;
+							bestLen = word.length();
+						}
 					}
 				}
 			}
-		}
-		return Optional.ofNullable(best);
+			return Optional.ofNullable(best);
+		});
 	}
 
 	// ── seed ─────────────────────────────────────────────────────────────

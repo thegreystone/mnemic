@@ -106,7 +106,12 @@ public class MnemicMain {
 		if (configured == null || configured.isBlank()) {
 			configured = "~/.mnemic";
 		}
-		return Paths.get(expandHome(configured, System.getProperty("user.home")));
+		return Paths.get(expandHome(configured));
+	}
+
+	/** Expands a leading {@code ~} against {@code user.home}. */
+	public static String expandHome(String configured) {
+		return expandHome(configured, System.getProperty("user.home"));
 	}
 
 	/**
@@ -114,7 +119,10 @@ public class MnemicMain {
 	 * the configured value over as written (Claude Code does, Claude Desktop expands it) would otherwise open a store
 	 * named {@code ~} under the working directory (2026-10-23).
 	 */
-	static String expandHome(String configured, String userHome) {
+	public static String expandHome(String configured, String userHome) {
+		if (configured == null || userHome == null) {
+			return configured;
+		}
 		if (configured.equals("~")) {
 			return userHome;
 		}

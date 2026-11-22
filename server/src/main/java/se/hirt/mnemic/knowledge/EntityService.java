@@ -34,7 +34,7 @@ import se.hirt.mnemic.persistence.Tx;
 import se.hirt.mnemic.protocol.Json;
 import se.hirt.mnemic.protocol.MnemicException;
 
-import java.time.Instant;
+import java.time.Clock;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -69,7 +69,9 @@ public final class EntityService {
 
 	private final Database db;
 	private final EntityTypeRegistry types;
-	private final Entity owner;
+	private final Clock clock;
+	private volatile Entity owner;
+	private long ownerDataVersion;
 
 	/** {@code ownerIdentity}: configured aliases, e-mail addresses, and handles, seeded as aliases of the owner. */
 	private final Set<String> ownerIdentityNorms;
@@ -78,15 +80,39 @@ public final class EntityService {
 
 	public EntityService(Database db, EntityTypeRegistry types, PredicateRegistry predicates, String ownerName,
 			List<String> ownerIdentity) {
+		this(db, types, predicates, ownerName, ownerIdentity, Clock.systemUTC());
+	}
+
+	public EntityService(Database db, EntityTypeRegistry types, PredicateRegistry predicates, String ownerName,
+			List<String> ownerIdentity, Clock clock) {
 		this.db = db;
 		this.types = types;
 		this.predicates = predicates;
+		this.clock = clock == null ? Clock.systemUTC() : clock;
 		this.owner = ensureOwner(ownerName, ownerIdentity);
+		this.ownerDataVersion = db.dataVersion();
 		this.ownerIdentityNorms = ownerIdentity.stream().map(Names::norm).collect(Collectors.toSet());
 	}
 
 	public Entity owner() {
-		return owner;
+		return db.withLock(() -> {
+			long dv = db.dataVersion();
+			if (dv != ownerDataVersion) {
+				db.read(tx -> tx.queryOne("SELECT * FROM entity WHERE id = ?", owner.id()).map(Entity::from))
+						.ifPresent(updated -> this.owner = updated);
+				this.ownerDataVersion = dv;
+			}
+			return owner;
+		});
+	}
+
+	/** Refreshes the cached owner row from the database (e.g. after a rolled-back transaction). */
+	public void reloadOwner() {
+		db.withLock(() -> {
+			db.read(tx -> tx.queryOne("SELECT * FROM entity WHERE id = ?", owner.id()).map(Entity::from))
+					.ifPresent(updated -> this.owner = updated);
+			this.ownerDataVersion = db.dataVersion();
+		});
 	}
 
 	// ── resolution ───────────────────────────────────────────────────────
@@ -141,7 +167,7 @@ public final class EntityService {
 		}
 		String norm = Names.norm(name);
 		if (SELF.contains(norm)) {
-			return new Resolved(owner, "owner", 1.0, List.of());
+			return new Resolved(owner(), "owner", 1.0, List.of());
 		}
 		String given = types.canonical(type);
 		// The expectation stands in for a type nobody gave, and shapes the candidates for a kind nobody has placed;
@@ -356,28 +382,26 @@ public final class EntityService {
 	 * owner's configured identity are never dropped; an alias that names another entity is not taken.
 	 */
 	public Entity correct(long id, Map<String, Object> replacement) {
-		Entity e = get(id).orElseThrow(() -> MnemicException.notFound("No entity ent-" + id));
-		for (Map.Entry<String, Object> c : replacement.entrySet()) {
-			switch (c.getKey()) {
-			case "name" -> {
-				String name = String.valueOf(c.getValue()).trim();
-				if (name.isEmpty()) {
-					throw MnemicException.invalidArgument("'name' must not be empty.");
-				}
-				db.write(tx -> {
+		Entity updated = db.write(tx -> {
+			get(id).orElseThrow(() -> MnemicException.notFound("No entity ent-" + id));
+			for (Map.Entry<String, Object> c : replacement.entrySet()) {
+				switch (c.getKey()) {
+				case "name" -> {
+					String name = String.valueOf(c.getValue()).trim();
+					if (name.isEmpty()) {
+						throw MnemicException.invalidArgument("'name' must not be empty.");
+					}
 					tx.update("UPDATE entity SET name = ? WHERE id = ?", name, id);
 					addAliases(tx, id, List.of(name), null);
-					return null;
-				});
-			}
-			case "type" -> retype(id, String.valueOf(c.getValue()));
-			case "aliases" -> {
-				if (!(c.getValue() instanceof List<?> keep)) {
-					throw MnemicException.invalidArgument("'aliases' takes the list of aliases to keep.");
 				}
-				Set<String> kept = keep.stream().map(x -> Names.norm(String.valueOf(x))).collect(Collectors.toSet());
-				String own = Names.norm(get(id).orElseThrow().name());
-				db.write(tx -> {
+				case "type" -> retype(id, String.valueOf(c.getValue()));
+				case "aliases" -> {
+					if (!(c.getValue() instanceof List<?> keep)) {
+						throw MnemicException.invalidArgument("'aliases' takes the list of aliases to keep.");
+					}
+					Set<String> kept = keep.stream().map(x -> Names.norm(String.valueOf(x)))
+							.collect(Collectors.toSet());
+					String own = Names.norm(get(id).orElseThrow().name());
 					for (Row r : tx.query(
 							"SELECT id, alias_norm, source_observation FROM entity_alias WHERE entity_id = ?", id)) {
 						String norm = r.str("alias_norm");
@@ -391,20 +415,29 @@ public final class EntityService {
 					}
 					var add = keep.stream().map(String::valueOf).toList();
 					addAliases(tx, id, add, null);
-					return null;
-				});
+				}
+				default -> throw MnemicException.invalidArgument(
+						"Unknown entity property '" + c.getKey() + "'; correctable: name, type, aliases.");
+				}
 			}
-			default -> throw MnemicException
-					.invalidArgument("Unknown entity property '" + c.getKey() + "'; correctable: name, type, aliases.");
-			}
+			return get(id).orElseThrow();
+		});
+		if (id == owner.id()) {
+			db.withLock(() -> {
+				this.owner = updated;
+				this.ownerDataVersion = db.dataVersion();
+			});
 		}
-		return get(id).orElseThrow();
+		return updated;
 	}
 
 	/** Changes an entity's type: the answer to a type mismatch that blamed the entity. */
 	public void retype(long id, String type) {
 		String t = types.canonical(type);
 		db.write(tx -> tx.update("UPDATE entity SET type = ? WHERE id = ?", t, id));
+		if (id == owner.id()) {
+			reloadOwner();
+		}
 	}
 
 	/** Creates an entity outright (used when a question is answered with "new"). */
@@ -412,9 +445,9 @@ public final class EntityService {
 		return db.write(tx -> create(tx, name, types.canonical(type), aliases, observationId));
 	}
 
-	private static Entity create(Tx tx, String name, String type, List<String> aliases, Long observationId) {
+	private Entity create(Tx tx, String name, String type, List<String> aliases, Long observationId) {
 		long id = tx.insert("INSERT INTO entity(name, type, created_from, created_at) VALUES (?,?,?,?)", name.trim(),
-				type, observationId, Instant.now().toString());
+				type, observationId, clock.instant().toString());
 		var all = new ArrayList<String>(aliases);
 		all.add(name.trim());
 		addAliases(tx, id, all, observationId);
@@ -687,7 +720,7 @@ public final class EntityService {
 		return db.write(tx -> merge(tx, get(tx, fromId), get(tx, intoId), observationId, reason));
 	}
 
-	private static Map<String, Object> merge(Tx tx, Entity from, Entity into, Long observationId, String reason) {
+	private Map<String, Object> merge(Tx tx, Entity from, Entity into, Long observationId, String reason) {
 		if (from.id() == into.id()) {
 			return Map.of();
 		}
@@ -718,7 +751,7 @@ public final class EntityService {
 						INSERT INTO entity_merge(from_id, into_id, from_name, moved_facts, moved_aliases, observation_id, reason,
 						                         merged_at) VALUES (?,?,?,?,?,?,?,?)""",
 				from.id(), into.id(), from.name(), Json.write(facts), Json.write(aliases), observationId, reason,
-				Instant.now().toString());
+				clock.instant().toString());
 		var m = new LinkedHashMap<String, Object>();
 		m.put("merge", "merge-" + id);
 		m.put("from", from.ref());
@@ -786,7 +819,7 @@ public final class EntityService {
 		}
 		String norm = Names.norm(ref);
 		if (SELF.contains(norm)) {
-			return Optional.of(owner);
+			return Optional.of(owner());
 		}
 		return db.read(tx -> byAlias(tx, norm, "unknown"));
 	}
@@ -832,7 +865,7 @@ public final class EntityService {
 				}
 				String gram = String.join(" ", tokens.subList(i, i + n));
 				if (SELF.contains(gram)) {
-					found.add(new Mention(owner, i, i + n));
+					found.add(new Mention(owner(), i, i + n));
 					mark(used, i, n);
 					continue;
 				}
@@ -993,14 +1026,17 @@ public final class EntityService {
 			Optional<Row> existing = tx.queryOne(
 					"SELECT * FROM entity WHERE created_from IS NULL AND type = 'person' ORDER BY id LIMIT 1");
 			long id;
+			String effectiveName = name;
 			if (existing.isPresent()) {
 				id = existing.get().lng("id");
 				if (!existing.get().str("name").equals(name) && !"the user".equals(name)) {
 					tx.update("UPDATE entity SET name = ? WHERE id = ?", name, id);
+				} else {
+					effectiveName = existing.get().str("name");
 				}
 			} else {
 				id = tx.insert("INSERT INTO entity(name, type, created_from, created_at) VALUES (?,?,NULL,?)", name,
-						"person", Instant.now().toString());
+						"person", clock.instant().toString());
 			}
 			var aliases = new LinkedHashSet<String>(List.of(name, "I", "me", "my", "myself", "self", "the user"));
 			String[] parts = name.split("\\s+");
@@ -1011,7 +1047,7 @@ public final class EntityService {
 			// the owner too. A surname alone is not an alias unless configured, since it is shared with family.
 			aliases.addAll(ownerIdentity);
 			addAliases(tx, id, new ArrayList<>(aliases), null);
-			return new Entity(id, name, "person", null, null);
+			return new Entity(id, effectiveName, "person", null, null);
 		});
 	}
 }

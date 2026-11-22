@@ -84,6 +84,7 @@ public final class EntityTypeRegistry {
 	private final Set<String> typeWords = new HashSet<>();
 	/** Seed rows read with no kinds column value at all: filled from the seed once, at this start. */
 	private final Set<String> kindsUnset = new HashSet<>();
+	private long dataVersion = -1;
 
 	public EntityTypeRegistry(Database db) {
 		this.db = db;
@@ -124,31 +125,55 @@ public final class EntityTypeRegistry {
 				registerInferred(type, null);
 			}
 		}
+		this.dataVersion = db.dataVersion();
+	}
+
+	private void refreshIfStale() {
+		long dv = db.dataVersion();
+		if (dv != dataVersion) {
+			byName.clear();
+			bySynonym.clear();
+			typeWords.clear();
+			load();
+			dataVersion = dv;
+		}
 	}
 
 	/** Reads the table again, after a change made beside the registry. */
-	public synchronized void reload() {
-		byName.clear();
-		bySynonym.clear();
-		typeWords.clear();
-		load();
+	public void reload() {
+		db.withLock(() -> {
+			byName.clear();
+			bySynonym.clear();
+			typeWords.clear();
+			load();
+			dataVersion = db.dataVersion();
+		});
 	}
 
-	public synchronized List<EntityType> all() {
-		return List.copyOf(byName.values());
+	public List<EntityType> all() {
+		return db.withLock(() -> {
+			refreshIfStale();
+			return List.copyOf(byName.values());
+		});
 	}
 
-	public synchronized Optional<EntityType> get(String name) {
-		return name == null ? Optional.empty() : Optional.ofNullable(byName.get(key(name)));
+	public Optional<EntityType> get(String name) {
+		return db.withLock(() -> {
+			refreshIfStale();
+			return name == null ? Optional.empty() : Optional.ofNullable(byName.get(key(name)));
+		});
 	}
 
 	/** The registered name for a proposed type, through its synonyms; unknown types pass through lowercased. */
-	public synchronized String canonical(String type) {
-		if (type == null || type.isBlank()) {
-			return UNKNOWN;
-		}
-		String t = key(type);
-		return byName.containsKey(t) ? t : bySynonym.getOrDefault(t, t);
+	public String canonical(String type) {
+		return db.withLock(() -> {
+			refreshIfStale();
+			if (type == null || type.isBlank()) {
+				return UNKNOWN;
+			}
+			String t = key(type);
+			return byName.containsKey(t) ? t : bySynonym.getOrDefault(t, t);
+		});
 	}
 
 	/** Registered names are lowercase with underscores: "Sports club" and "sports_club" are one type. */
@@ -157,20 +182,26 @@ public final class EntityTypeRegistry {
 	}
 
 	/** Types with no parent: the kinds a new type can be a kind of. */
-	public synchronized List<String> roots() {
-		return byName.values().stream().filter(t -> t.parent() == null).map(EntityType::name).toList();
+	public List<String> roots() {
+		return db.withLock(() -> {
+			refreshIfStale();
+			return byName.values().stream().filter(t -> t.parent() == null).map(EntityType::name).toList();
+		});
 	}
 
 	/** The type and its ancestors, nearest first: {@code country, place}; a synonym ("cats") reads as its type. */
-	public synchronized List<String> lineage(String type) {
-		var out = new ArrayList<String>();
-		String at = type == null ? UNKNOWN : canonical(type);
-		while (at != null && !out.contains(at)) {
-			out.add(at);
-			EntityType e = byName.get(at);
-			at = e == null ? null : e.parent();
-		}
-		return out;
+	public List<String> lineage(String type) {
+		return db.withLock(() -> {
+			refreshIfStale();
+			var out = new ArrayList<String>();
+			String at = type == null ? UNKNOWN : canonical(type);
+			while (at != null && !out.contains(at)) {
+				out.add(at);
+				EntityType e = byName.get(at);
+				at = e == null ? null : e.parent();
+			}
+			return out;
+		});
 	}
 
 	/** Whether {@code type} is {@code kind} or nests within it: a country is a place. */
@@ -187,12 +218,15 @@ public final class EntityTypeRegistry {
 	 * A kind nobody has placed: registered from use with no parent and no description, or not registered at all. It
 	 * separates no identities until the user says what it is a kind of, or a kind of its own.
 	 */
-	public synchronized boolean unplaced(String type) {
-		if (type == null || type.isBlank() || UNKNOWN.equals(type)) {
-			return false;
-		}
-		EntityType e = byName.get(canonical(type));
-		return e == null || (e.inferred() && e.parent() == null);
+	public boolean unplaced(String type) {
+		return db.withLock(() -> {
+			refreshIfStale();
+			if (type == null || type.isBlank() || UNKNOWN.equals(type)) {
+				return false;
+			}
+			EntityType e = byName.get(canonical(type));
+			return e == null || (e.inferred() && e.parent() == null);
+		});
 	}
 
 	/**
@@ -208,53 +242,65 @@ public final class EntityTypeRegistry {
 	 * The registered type a word of a question names ("vehicles", "companies", "objects"): by name, synonym, or type
 	 * word, singular or plural.
 	 */
-	public synchronized Optional<String> kindNamedBy(String word) {
-		for (String w : Lang.singulars(word)) {
-			String k = key(w);
-			if (byName.containsKey(k)) {
-				return Optional.of(k);
-			}
-			if (bySynonym.containsKey(k)) {
-				return Optional.of(bySynonym.get(k));
-			}
-			for (EntityType t : byName.values()) {
-				if (t.typeWords().contains(k)) {
-					return Optional.of(t.name());
+	public Optional<String> kindNamedBy(String word) {
+		return db.withLock(() -> {
+			refreshIfStale();
+			for (String w : Lang.singulars(word)) {
+				String k = key(w);
+				if (byName.containsKey(k)) {
+					return Optional.of(k);
+				}
+				if (bySynonym.containsKey(k)) {
+					return Optional.of(bySynonym.get(k));
+				}
+				for (EntityType t : byName.values()) {
+					if (t.typeWords().contains(k)) {
+						return Optional.of(t.name());
+					}
 				}
 			}
-		}
-		return Optional.empty();
+			return Optional.empty();
+		});
 	}
 
 	/** A word that says what kind of thing something is (Inc, Kanton, Team) rather than which one, for any type. */
-	public synchronized boolean isTypeWord(String token) {
-		return typeWords.contains(token);
+	public boolean isTypeWord(String token) {
+		return db.withLock(() -> {
+			refreshIfStale();
+			return typeWords.contains(token);
+		});
 	}
 
 	/** Content tokens of a name that identify it: the type words of its kind are removed. */
-	public synchronized List<String> identityTokens(String name, String type) {
-		var drop = new HashSet<String>();
-		for (String kind : lineage(canonical(type))) {
-			EntityType e = byName.get(kind);
-			if (e != null) {
-				drop.addAll(e.typeWords());
+	public List<String> identityTokens(String name, String type) {
+		return db.withLock(() -> {
+			refreshIfStale();
+			var drop = new HashSet<String>();
+			for (String kind : lineage(canonical(type))) {
+				EntityType e = byName.get(kind);
+				if (e != null) {
+					drop.addAll(e.typeWords());
+				}
 			}
-		}
-		List<String> kept = Names.contentTokens(name).stream().filter(t -> !drop.contains(t)).toList();
-		return kept.isEmpty() ? Names.contentTokens(name) : kept; // "Kanton" alone stays "kanton"
+			List<String> kept = Names.contentTokens(name).stream().filter(t -> !drop.contains(t)).toList();
+			return kept.isEmpty() ? Names.contentTokens(name) : kept; // "Kanton" alone stays "kanton"
+		});
 	}
 
 	/**
 	 * Registers a type from its first use: no parent, no words, no description. An existing name is returned as it is.
 	 */
-	public synchronized EntityType registerInferred(String name, Long observationId) {
-		String n = key(name);
-		if (byName.containsKey(n)) {
-			return byName.get(n);
-		}
-		var e = new EntityType(n, null, null, List.of(), List.of(), List.of(), observationId, false, true, false);
-		insert(e);
-		return e;
+	public EntityType registerInferred(String name, Long observationId) {
+		return db.withLock(() -> {
+			refreshIfStale();
+			String n = key(name);
+			if (byName.containsKey(n)) {
+				return byName.get(n);
+			}
+			var e = new EntityType(n, null, null, List.of(), List.of(), List.of(), observationId, false, true, false);
+			insert(e);
+			return e;
+		});
 	}
 
 	/**
@@ -273,46 +319,49 @@ public final class EntityTypeRegistry {
 	 * What the store creates stays inferred, so a definition or a correction can move it. Empty when nothing in the
 	 * spelling says, or when two types claim the word, and the caller asks.
 	 */
-	public synchronized Optional<Placement> placeFromUse(String name, Long observationId) {
-		String n = key(name);
-		if (n.isBlank() || UNKNOWN.equals(n) || byName.containsKey(n) || bySynonym.containsKey(n)) {
-			return Optional.empty();
-		}
-		for (String form : Lang.singulars(n)) {
-			Optional<EntityType> named = named(form);
-			if (named.isPresent() && !form.equals(n)) {
-				EntityType t = named.get();
-				String why = "'" + n + "' is the plural of " + form
-						+ (form.equals(t.name()) ? "" : ", a synonym of " + t.name());
-				return Optional.of(new Placement(update(t.name(), Map.of("synonyms", plus(t.synonyms(), n)), why, true),
-						why, false));
+	public Optional<Placement> placeFromUse(String name, Long observationId) {
+		return db.withLock(() -> {
+			refreshIfStale();
+			String n = key(name);
+			if (n.isBlank() || UNKNOWN.equals(n) || byName.containsKey(n) || bySynonym.containsKey(n)) {
+				return Optional.empty();
 			}
-		}
-		for (String form : Lang.singulars(n)) {
-			Optional<String> parent = kindNamedByWord(form);
-			if (parent.isPresent()) {
-				var e = new EntityType(form, "A kind of " + parent.get() + ".", parent.get(),
-						form.equals(n) ? List.of() : List.of(n), List.of(), List.of(), observationId, false, true,
-						false);
-				insert(e);
-				adopt(e);
-				return Optional.of(new Placement(e, "'" + form + "' is a kind of " + parent.get(), true));
-			}
-		}
-		int cut = n.lastIndexOf('_');
-		if (cut > 0) {
-			for (String form : Lang.singulars(n.substring(cut + 1))) {
-				Optional<String> parent = named(form).map(EntityType::name).or(() -> kindNamedByWord(form));
-				if (parent.isPresent() && !parent.get().equals(n)) {
-					var e = new EntityType(n, "A kind of " + parent.get() + ".", parent.get(), List.of(), List.of(),
-							List.of(), observationId, false, true, false);
-					insert(e);
-					return Optional.of(new Placement(e,
-							"'" + form + "', the head of '" + n + "', is a kind of " + parent.get(), true));
+			for (String form : Lang.singulars(n)) {
+				Optional<EntityType> named = named(form);
+				if (named.isPresent() && !form.equals(n)) {
+					EntityType t = named.get();
+					String why = "'" + n + "' is the plural of " + form
+							+ (form.equals(t.name()) ? "" : ", a synonym of " + t.name());
+					return Optional.of(new Placement(
+							update(t.name(), Map.of("synonyms", plus(t.synonyms(), n)), why, true), why, false));
 				}
 			}
-		}
-		return Optional.empty();
+			for (String form : Lang.singulars(n)) {
+				Optional<String> parent = kindNamedByWord(form);
+				if (parent.isPresent()) {
+					var e = new EntityType(form, "A kind of " + parent.get() + ".", parent.get(),
+							form.equals(n) ? List.of() : List.of(n), List.of(), List.of(), observationId, false, true,
+							false);
+					insert(e);
+					adopt(e);
+					return Optional.of(new Placement(e, "'" + form + "' is a kind of " + parent.get(), true));
+				}
+			}
+			int cut = n.lastIndexOf('_');
+			if (cut > 0) {
+				for (String form : Lang.singulars(n.substring(cut + 1))) {
+					Optional<String> parent = named(form).map(EntityType::name).or(() -> kindNamedByWord(form));
+					if (parent.isPresent() && !parent.get().equals(n)) {
+						var e = new EntityType(n, "A kind of " + parent.get() + ".", parent.get(), List.of(), List.of(),
+								List.of(), observationId, false, true, false);
+						insert(e);
+						return Optional.of(new Placement(e,
+								"'" + form + "', the head of '" + n + "', is a kind of " + parent.get(), true));
+					}
+				}
+			}
+			return Optional.empty();
+		});
 	}
 
 	/** The registered type a word names outright: by name or by synonym. */
@@ -328,27 +377,30 @@ public final class EntityTypeRegistry {
 	 * defined with kinds [van, truck]): each becomes a kind of it, logged as such. Returns the names placed, so the
 	 * caller can settle the questions that asked what they were.
 	 */
-	public synchronized List<String> adoptKinds(String typeName) {
-		EntityType parent = byName.get(key(typeName));
-		if (parent == null) {
-			return List.of();
-		}
-		var placed = new ArrayList<String>();
-		for (String word : parent.kinds()) {
-			if (!kindNamedByWord(word).filter(parent.name()::equals).isPresent()) {
-				continue; // another type claims the word too: nothing is placed, as from use
+	public List<String> adoptKinds(String typeName) {
+		return db.withLock(() -> {
+			refreshIfStale();
+			EntityType parent = byName.get(key(typeName));
+			if (parent == null) {
+				return List.of();
 			}
-			for (EntityType t : List.copyOf(byName.values())) {
-				boolean named = t.name().equals(word) || Lang.singulars(t.name()).contains(word);
-				if (named && t.inferred() && t.parent() == null && !t.name().equals(parent.name())
-						&& !lineage(parent.name()).contains(t.name())) {
-					update(t.name(), Map.of("parent", parent.name()), "'" + word + "' is a kind of " + parent.name(),
-							true);
-					placed.add(t.name());
+			var placed = new ArrayList<String>();
+			for (String word : parent.kinds()) {
+				if (!kindNamedByWord(word).filter(parent.name()::equals).isPresent()) {
+					continue; // another type claims the word too: nothing is placed, as from use
+				}
+				for (EntityType t : List.copyOf(byName.values())) {
+					boolean named = t.name().equals(word) || Lang.singulars(t.name()).contains(word);
+					if (named && t.inferred() && t.parent() == null && !t.name().equals(parent.name())
+							&& !lineage(parent.name()).contains(t.name())) {
+						update(t.name(), Map.of("parent", parent.name()),
+								"'" + word + "' is a kind of " + parent.name(), true);
+						placed.add(t.name());
+					}
 				}
 			}
-		}
-		return placed;
+			return placed;
+		});
 	}
 
 	/** The one registered type whose kinds hold the word; empty when none or several do. */
@@ -384,48 +436,51 @@ public final class EntityTypeRegistry {
 	}
 
 	/** Registers a caller-defined type; an existing name is returned as it is. */
-	public synchronized EntityType register(EntityTypeDef def, Long observationId) {
-		if (def.name() == null || def.name().isBlank()) {
-			throw MnemicException.invalidArgument("An entity type definition needs a 'name'.");
-		}
-		String name = key(def.name());
-		EntityType existing = byName.get(name);
-		if (existing != null) {
-			if (!existing.inferred() || bare(def)) {
-				return existing;
+	public EntityType register(EntityTypeDef def, Long observationId) {
+		return db.withLock(() -> {
+			refreshIfStale();
+			if (def.name() == null || def.name().isBlank()) {
+				throw MnemicException.invalidArgument("An entity type definition needs a 'name'.");
 			}
-			// A definition for a type registered from use: what it states replaces what was inferred.
-			var replacement = new LinkedHashMap<String, Object>();
-			if (def.description() != null) {
-				replacement.put("description", def.description());
+			String name = key(def.name());
+			EntityType existing = byName.get(name);
+			if (existing != null) {
+				if (!existing.inferred() || bare(def)) {
+					return existing;
+				}
+				// A definition for a type registered from use: what it states replaces what was inferred.
+				var replacement = new LinkedHashMap<String, Object>();
+				if (def.description() != null) {
+					replacement.put("description", def.description());
+				}
+				if (def.parent() != null && !def.parent().isBlank()) {
+					replacement.put("parent", def.parent());
+				}
+				if (!def.synonyms().isEmpty()) {
+					replacement.put("synonyms", def.synonyms());
+				}
+				if (!def.typeWords().isEmpty()) {
+					replacement.put("type_words", def.typeWords());
+				}
+				if (!def.kinds().isEmpty()) {
+					replacement.put("kinds", def.kinds());
+				}
+				if (def.disjoint() != null) {
+					replacement.put("disjoint", def.disjoint());
+				}
+				return update(name, replacement, "defined after registration from use");
 			}
-			if (def.parent() != null && !def.parent().isBlank()) {
-				replacement.put("parent", def.parent());
+			String parent = def.parent() == null || def.parent().isBlank() ? null : canonical(def.parent());
+			if (parent != null && !byName.containsKey(parent)) {
+				throw MnemicException.invalidArgument("Entity type '" + name + "' names an unknown parent '"
+						+ def.parent() + "'; register the parent first or leave it out.");
 			}
-			if (!def.synonyms().isEmpty()) {
-				replacement.put("synonyms", def.synonyms());
-			}
-			if (!def.typeWords().isEmpty()) {
-				replacement.put("type_words", def.typeWords());
-			}
-			if (!def.kinds().isEmpty()) {
-				replacement.put("kinds", def.kinds());
-			}
-			if (def.disjoint() != null) {
-				replacement.put("disjoint", def.disjoint());
-			}
-			return update(name, replacement, "defined after registration from use");
-		}
-		String parent = def.parent() == null || def.parent().isBlank() ? null : canonical(def.parent());
-		if (parent != null && !byName.containsKey(parent)) {
-			throw MnemicException.invalidArgument("Entity type '" + name + "' names an unknown parent '" + def.parent()
-					+ "'; register the parent first or leave it out.");
-		}
-		var e = new EntityType(name, def.description(), parent, lower(def.synonyms()), lower(def.typeWords()),
-				lower(def.kinds()), observationId, false, false, Boolean.TRUE.equals(def.disjoint()));
-		insert(e);
-		adopt(e);
-		return e;
+			var e = new EntityType(name, def.description(), parent, lower(def.synonyms()), lower(def.typeWords()),
+					lower(def.kinds()), observationId, false, false, Boolean.TRUE.equals(def.disjoint()));
+			insert(e);
+			adopt(e);
+			return e;
+		});
 	}
 
 	/** Entities typed by one of the type's synonyms before it was registered take the registered name. */
@@ -439,7 +494,7 @@ public final class EntityTypeRegistry {
 	 * Corrects {@code description}, {@code parent}, {@code synonyms}, {@code type_words}, {@code kinds}, or
 	 * {@code disjoint}; every change is logged.
 	 */
-	public synchronized EntityType update(String name, Map<String, Object> replacement, String reason) {
+	public EntityType update(String name, Map<String, Object> replacement, String reason) {
 		return update(name, replacement, reason, false);
 	}
 
@@ -447,69 +502,71 @@ public final class EntityTypeRegistry {
 	 * As above; {@code keepInferred} leaves a type registered from use as inferred, for a change the store makes on its
 	 * own (a plural noted as a synonym, a placement under a kind), so that a definition can still move it.
 	 */
-	private synchronized EntityType update(
-		String name, Map<String, Object> replacement, String reason, boolean keepInferred) {
-		EntityType e = get(name).orElseThrow(() -> MnemicException.notFound("No entity type " + name));
-		String description = e.description();
-		String parent = e.parent();
-		List<String> synonyms = e.synonyms();
-		List<String> words = e.typeWords();
-		List<String> kinds = e.kinds();
-		boolean disjoint = e.disjoint();
-		var changes = new ArrayList<String[]>();
-		for (Map.Entry<String, Object> c : replacement.entrySet()) {
-			String old;
-			String value = Vocabulary.text(c.getValue());
-			switch (c.getKey()) {
-			case "description" -> {
-				old = description;
-				description = value;
-			}
-			case "parent" -> {
-				old = parent;
-				parent = value == null || value.isBlank() ? null : canonical(value);
-				if (parent != null && (!byName.containsKey(parent) || lineage(parent).contains(e.name()))) {
-					throw MnemicException.invalidArgument("'" + value
-							+ "' is not a registered entity type, or would nest " + e.name() + " within itself.");
+	private EntityType update(String name, Map<String, Object> replacement, String reason, boolean keepInferred) {
+		return db.withLock(() -> {
+			refreshIfStale();
+			EntityType e = get(name).orElseThrow(() -> MnemicException.notFound("No entity type " + name));
+			String description = e.description();
+			String parent = e.parent();
+			List<String> synonyms = e.synonyms();
+			List<String> words = e.typeWords();
+			List<String> kinds = e.kinds();
+			boolean disjoint = e.disjoint();
+			var changes = new ArrayList<String[]>();
+			for (Map.Entry<String, Object> c : replacement.entrySet()) {
+				String old;
+				String value = Vocabulary.text(c.getValue());
+				switch (c.getKey()) {
+				case "description" -> {
+					old = description;
+					description = value;
 				}
+				case "parent" -> {
+					old = parent;
+					parent = value == null || value.isBlank() ? null : canonical(value);
+					if (parent != null && (!byName.containsKey(parent) || lineage(parent).contains(e.name()))) {
+						throw MnemicException.invalidArgument("'" + value
+								+ "' is not a registered entity type, or would nest " + e.name() + " within itself.");
+					}
+				}
+				case "synonyms" -> {
+					old = Vocabulary.json(synonyms);
+					synonyms = lower(Vocabulary.strings(c.getValue()));
+				}
+				case "type_words" -> {
+					old = Vocabulary.json(words);
+					words = lower(Vocabulary.strings(c.getValue()));
+				}
+				case "kinds" -> {
+					old = Vocabulary.json(kinds);
+					kinds = lower(Vocabulary.strings(c.getValue()));
+				}
+				case "disjoint" -> {
+					old = String.valueOf(disjoint);
+					disjoint = Boolean.parseBoolean(String.valueOf(c.getValue()));
+				}
+				default -> throw MnemicException.invalidArgument("Unknown entity type property '" + c.getKey()
+						+ "'; correctable: description, parent, synonyms, type_words, kinds, disjoint.");
+				}
+				changes.add(new String[] {c.getKey(), old, value});
 			}
-			case "synonyms" -> {
-				old = Vocabulary.json(synonyms);
-				synonyms = lower(Vocabulary.strings(c.getValue()));
-			}
-			case "type_words" -> {
-				old = Vocabulary.json(words);
-				words = lower(Vocabulary.strings(c.getValue()));
-			}
-			case "kinds" -> {
-				old = Vocabulary.json(kinds);
-				kinds = lower(Vocabulary.strings(c.getValue()));
-			}
-			case "disjoint" -> {
-				old = String.valueOf(disjoint);
-				disjoint = Boolean.parseBoolean(String.valueOf(c.getValue()));
-			}
-			default -> throw MnemicException.invalidArgument("Unknown entity type property '" + c.getKey()
-					+ "'; correctable: description, parent, synonyms, type_words, kinds, disjoint.");
-			}
-			changes.add(new String[] {c.getKey(), old, value});
-		}
-		boolean inferred = keepInferred && e.inferred();
-		var updated = new EntityType(e.name(), description, parent, synonyms, words, kinds, e.definedBy(), e.seed(),
-				inferred, disjoint);
-		db.write(tx -> {
-			tx.update(
-					"UPDATE entity_type SET description = ?, parent = ?, synonyms = ?, type_words = ?, kinds = ?, "
-							+ "disjoint = ?, inferred = ? WHERE name = ?",
-					updated.description(), updated.parent(), Vocabulary.json(updated.synonyms()),
-					Vocabulary.json(updated.typeWords()), Vocabulary.json(updated.kinds()), updated.disjoint() ? 1 : 0,
-					inferred ? 1 : 0, updated.name());
-			Vocabulary.logChanges(tx, "entity_type", updated.name(), changes, reason);
-			return null;
+			boolean inferred = keepInferred && e.inferred();
+			var updated = new EntityType(e.name(), description, parent, synonyms, words, kinds, e.definedBy(), e.seed(),
+					inferred, disjoint);
+			db.write(tx -> {
+				tx.update(
+						"UPDATE entity_type SET description = ?, parent = ?, synonyms = ?, type_words = ?, kinds = ?, "
+								+ "disjoint = ?, inferred = ? WHERE name = ?",
+						updated.description(), updated.parent(), Vocabulary.json(updated.synonyms()),
+						Vocabulary.json(updated.typeWords()), Vocabulary.json(updated.kinds()),
+						updated.disjoint() ? 1 : 0, inferred ? 1 : 0, updated.name());
+				Vocabulary.logChanges(tx, "entity_type", updated.name(), changes, reason);
+				return null;
+			});
+			index(updated);
+			adopt(updated);
+			return updated;
 		});
-		index(updated);
-		adopt(updated);
-		return updated;
 	}
 
 	public List<Map<String, Object>> changes(String name) {
@@ -522,33 +579,36 @@ public final class EntityTypeRegistry {
 	 * know predicates. The removal is logged; a rebuild that replays the observation that registered it registers it
 	 * again.
 	 */
-	public synchronized EntityType remove(String name, String reason) {
-		EntityType t = get(name).orElseThrow(() -> MnemicException.notFound("No entity type " + name));
-		if (t.seed() || UNKNOWN.equals(t.name())) {
-			throw MnemicException
-					.invalidArgument("'" + t.name() + "' is a seed type and stays; correct what it says " + "instead.");
-		}
-		long used = db.read(tx -> tx.queryLong("SELECT COUNT(*) FROM entity WHERE type = ?", t.name()));
-		if (used > 0) {
-			throw MnemicException
-					.invalidArgument("'" + t.name() + "' is the type of " + used + (used == 1 ? " entity" : " entities")
-							+ "; give them another with correct(ent-N, {\"type\": ...}) " + "first.");
-		}
-		List<String> children = byName.values().stream().filter(x -> t.name().equals(x.parent())).map(EntityType::name)
-				.toList();
-		if (!children.isEmpty()) {
-			throw MnemicException.invalidArgument(
-					"'" + t.name() + "' is the parent of " + children + "; give them another parent first.");
-		}
-		db.write(tx -> {
-			tx.update("DELETE FROM entity_type WHERE name = ?", t.name());
-			var change = new ArrayList<String[]>();
-			change.add(new String[] {"removed", t.parent(), null});
-			Vocabulary.logChanges(tx, "entity_type", t.name(), change, reason);
-			return null;
+	public EntityType remove(String name, String reason) {
+		return db.withLock(() -> {
+			refreshIfStale();
+			EntityType t = get(name).orElseThrow(() -> MnemicException.notFound("No entity type " + name));
+			if (t.seed() || UNKNOWN.equals(t.name())) {
+				throw MnemicException.invalidArgument(
+						"'" + t.name() + "' is a seed type and stays; correct what it says " + "instead.");
+			}
+			long used = db.read(tx -> tx.queryLong("SELECT COUNT(*) FROM entity WHERE type = ?", t.name()));
+			if (used > 0) {
+				throw MnemicException.invalidArgument(
+						"'" + t.name() + "' is the type of " + used + (used == 1 ? " entity" : " entities")
+								+ "; give them another with correct(ent-N, {\"type\": ...}) " + "first.");
+			}
+			List<String> children = byName.values().stream().filter(x -> t.name().equals(x.parent()))
+					.map(EntityType::name).toList();
+			if (!children.isEmpty()) {
+				throw MnemicException.invalidArgument(
+						"'" + t.name() + "' is the parent of " + children + "; give them another parent first.");
+			}
+			db.write(tx -> {
+				tx.update("DELETE FROM entity_type WHERE name = ?", t.name());
+				var change = new ArrayList<String[]>();
+				change.add(new String[] {"removed", t.parent(), null});
+				Vocabulary.logChanges(tx, "entity_type", t.name(), change, reason);
+				return null;
+			});
+			reload();
+			return t;
 		});
-		reload();
-		return t;
 	}
 
 	private static List<String> lower(List<String> words) {
@@ -633,14 +693,17 @@ public final class EntityTypeRegistry {
 	}
 
 	/** Whether two different things of the type (or of a kind it nests within) never overlap. */
-	public synchronized boolean isDisjoint(String type) {
-		for (String t : lineage(canonical(type))) {
-			EntityType e = byName.get(t);
-			if (e != null && e.disjoint()) {
-				return true;
+	public boolean isDisjoint(String type) {
+		return db.withLock(() -> {
+			refreshIfStale();
+			for (String t : lineage(canonical(type))) {
+				EntityType e = byName.get(t);
+				if (e != null && e.disjoint()) {
+					return true;
+				}
 			}
-		}
-		return false;
+			return false;
+		});
 	}
 
 	// ── persistence ──────────────────────────────────────────────────────

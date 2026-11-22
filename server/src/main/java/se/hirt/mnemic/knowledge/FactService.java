@@ -155,10 +155,16 @@ public final class FactService {
 		final List<PredicateOut> predicateOut = new ArrayList<>();
 		/** Vocabulary the proposal defined or used for the first time: {@code {kind, name, resolution}}. */
 		final List<Map<String, Object>> definitions = new ArrayList<>();
+		/**
+		 * Ids of entities declared together in this proposal (plus the replaced object during a correction), so none is
+		 * offered as an ambiguity for another's name.
+		 */
+		final Set<Long> declared;
 
-		Application(Observation obs, Proposal p, Map<String, Entity> bound) {
+		Application(Observation obs, Proposal p, Map<String, Entity> bound, Set<Long> declared) {
 			this.obs = obs;
 			this.p = p;
+			this.declared = declared;
 			for (Map.Entry<String, Entity> e : bound.entrySet()) {
 				bind(e.getKey(), e.getValue());
 			}
@@ -221,15 +227,6 @@ public final class FactService {
 	private final Deriver deriver;
 	private final Lang lang;
 
-	/**
-	 * Ids of the entities the proposal being applied declares. Two entities declared together are distinct by
-	 * assertion, so neither is offered as an ambiguity for the other's name. Set for the duration of one
-	 * {@link #apply}; the engine is single-threaded per store, and nested applies save and restore it.
-	 */
-	private Set<Long> declaredInProposal = Set.of();
-	/** The object a running correction replaces: never a candidate for the new object's name. */
-	private Set<Long> correctionDistinct = Set.of();
-
 	FactService(Database db, EntityService entities, PredicateRegistry predicates, EventTypeRegistry eventTypes,
 			EventService events, QuestionService questions, FactQueries queries, FactQuestions asks,
 			FactRenderer renderer, FactLedger ledger, EntityTypeRegistry types, Deriver deriver) {
@@ -257,31 +254,29 @@ public final class FactService {
 
 	/** {@code bound} pre-binds names to entities: the answers to entity questions. */
 	public Applied apply(Observation obs, Proposal p, Map<String, Entity> bound) {
-		Set<Long> outer = declaredInProposal;
-		try {
-			var declared = new HashSet<Long>(correctionDistinct);
-			for (EntityRef er : p.entities()) {
-				declared.addAll(entities.exactIds(er.name(), er.aliases(), er.type()));
-			}
-			declaredInProposal = declared;
-			var a = new Application(obs, p, bound);
-			registerVocabulary(a);
-			resolveEntities(a);
-			List<FactRef> opened = applyEvents(a);
-			applyFacts(a, opened);
-			applyClosures(a);
-			return a.result();
-		} finally {
-			declaredInProposal = outer;
+		return apply(obs, p, bound, Set.of());
+	}
+
+	private Applied apply(Observation obs, Proposal p, Map<String, Entity> bound, Set<Long> extraDistinct) {
+		var declared = new HashSet<Long>(extraDistinct);
+		for (EntityRef er : p.entities()) {
+			declared.addAll(entities.exactIds(er.name(), er.aliases(), er.type()));
 		}
+		var a = new Application(obs, p, bound, declared);
+		registerVocabulary(a);
+		resolveEntities(a);
+		List<FactRef> opened = applyEvents(a);
+		applyFacts(a, opened);
+		applyClosures(a);
+		return a.result();
 	}
 
 	/**
 	 * Everything a name must not be confused with: the proposal's other declared entities and those already resolved.
 	 */
-	private Set<Long> distinctFrom(Map<String, Entity> refs, Set<Long> own) {
-		var out = new HashSet<>(declaredInProposal);
-		for (Entity e : refs.values()) {
+	private Set<Long> distinctFrom(Application a, Set<Long> own) {
+		var out = new HashSet<>(a.declared);
+		for (Entity e : a.refs.values()) {
 			if (e != null) {
 				out.add(e.id());
 			}
@@ -549,8 +544,7 @@ public final class FactService {
 			Resolved r;
 			try {
 				r = entities.resolve(er.name(), er.type(), er.aliases(), a.obs.id(),
-						distinctFrom(a.refs, entities.exactIds(er.name(), er.aliases(), er.type())),
-						expectedKinds(a, er));
+						distinctFrom(a, entities.exactIds(er.name(), er.aliases(), er.type())), expectedKinds(a, er));
 			} catch (MnemicException e) {
 				if (e.code() != MnemicException.Code.INVALID_ARGUMENT) {
 					throw e;
@@ -728,7 +722,8 @@ public final class FactService {
 				continue;
 			}
 			var a = new Application(obs.get(),
-					new Proposal(Proposal.CURRENT_SPEC_VERSION, List.of(), List.of(), List.of(), List.of()), Map.of());
+					new Proposal(Proposal.CURRENT_SPEC_VERSION, List.of(), List.of(), List.of(), List.of()), Map.of(),
+					Set.of());
 			List<String> names = new ArrayList<>();
 			for (Entity e : participants) {
 				a.bind(e.name(), e);
@@ -1413,7 +1408,7 @@ public final class FactService {
 			throw MnemicException.invalidArgument("'" + ref + "' refers to no entity in this proposal.");
 		}
 		Resolved r = entities.resolve(ref, null, List.of(), a.obs.id(),
-				distinctFrom(a.refs, entities.exactIds(ref, List.of(), null)), expected);
+				distinctFrom(a, entities.exactIds(ref, List.of(), null)), expected);
 		if (r.ambiguous()) {
 			var er = new EntityRef(null, ref, null, List.of());
 			a.ask(asks.entity(a.obs, ref, null, r.candidates(), FactQuestions.heldProposal(a.p, er)));
@@ -1674,17 +1669,12 @@ public final class FactService {
 		// A new object is another thing than the one it replaces: the old object is never a candidate for the new
 		// name, so shortening "coding, piano, ..., riding his motorcycle" is not asked about as that same entity
 		// (2026-09-28). Naming the old object exactly still finds it.
-		Set<Long> outer = correctionDistinct;
-		correctionDistinct = original.objectId() != null
+		Set<Long> distinct = original.objectId() != null
 				&& !Objects.equals(ref.object(), readingOf(original, Map.of()).object()) ? Set.of(original.objectId())
 						: Set.of();
-		Applied a;
-		try {
-			a = apply(correction,
-					new Proposal(Proposal.CURRENT_SPEC_VERSION, List.of(), List.of(), List.of(ref), List.of()));
-		} finally {
-			correctionDistinct = outer;
-		}
+		Applied a = apply(correction,
+				new Proposal(Proposal.CURRENT_SPEC_VERSION, List.of(), List.of(), List.of(ref), List.of()), Map.of(),
+				distinct);
 		if (a.facts().isEmpty()) {
 			db.write(tx -> tx.update("UPDATE fact SET status = 'current' WHERE id = ?", original.id()));
 			String held = a.questions().isEmpty() ? ""
@@ -2063,8 +2053,13 @@ public final class FactService {
 					INSERT OR IGNORE INTO forgotten_link(observation_id, entity_id)
 					SELECT observation_id, object_id FROM fact WHERE observation_id = ? AND object_id IS NOT NULL""",
 					observationId);
-			tx.update("UPDATE question SET status = 'dismissed', answer = 'forgotten' WHERE observation_id = ? "
-					+ "AND status = 'open'", observationId);
+			if (!keepEntities) {
+				// Privacy forget: questions carry entity names, excerpts, and payloads from the observation.
+				tx.update("DELETE FROM question WHERE observation_id = ?", observationId);
+			} else {
+				tx.update("UPDATE question SET status = 'dismissed', answer = 'forgotten' WHERE observation_id = ? "
+						+ "AND status = 'open'", observationId);
+			}
 			var facts = new ArrayList<Map<String, Object>>();
 			var goneFacts = new ArrayList<Long>();
 			for (Row r : tx.query("SELECT * FROM fact WHERE observation_id = ?", observationId)) {

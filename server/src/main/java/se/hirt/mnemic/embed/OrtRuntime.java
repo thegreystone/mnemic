@@ -42,6 +42,7 @@ import java.lang.invoke.MethodHandle;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.Locale;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * The ONNX Runtime C API over foreign-function downcalls, the entries of {@code OrtApi} the embedder uses and nothing
@@ -53,7 +54,7 @@ import java.util.Locale;
  * Status handling: nearly every call returns an {@code OrtStatus*}, null on success. {@link #check} turns a non-null
  * status into an exception carrying the runtime's message and releases it.
  */
-public final class OrtRuntime {
+public final class OrtRuntime implements AutoCloseable {
 
 	/** ORT_API_VERSION the table is requested for; 1.30 serves 23 and every later runtime serves it too. */
 	public static final int API_VERSION = 23;
@@ -79,6 +80,7 @@ public final class OrtRuntime {
 	static final int OPT_ALL = 99;
 
 	private final Arena arena = Arena.ofShared();
+	private final AtomicBoolean closed = new AtomicBoolean();
 	private final MemorySegment api;
 	private final MethodHandle getErrorMessage, createEnv, createSession, run, createSessionOptions, setGraphOpt,
 			setIntraThreads, inputCount, outputCount, inputName, outputName, createTensor, tensorData, dimsCount, dims,
@@ -102,6 +104,7 @@ public final class OrtRuntime {
 			}
 			api = table.reinterpret(512 * PTR.byteSize());
 		} catch (Throwable t) {
+			close();
 			throw new IllegalStateException("Cannot load ONNX Runtime from " + library + ": " + t.getMessage(), t);
 		}
 		getErrorMessage = fn(GET_ERROR_MESSAGE, FunctionDescriptor.of(PTR, PTR));
@@ -315,6 +318,13 @@ public final class OrtRuntime {
 			releaseEnv.invoke(env);
 		} catch (Throwable t) {
 			throw rethrow(t);
+		}
+	}
+
+	@Override
+	public void close() {
+		if (closed.compareAndSet(false, true)) {
+			arena.close();
 		}
 	}
 

@@ -136,6 +136,32 @@ class GranularityAndForgettingTest {
 	}
 
 	@Test
+	void forgetScrubsFtsAndWalImmediatelyWhileEngineStaysOpen() throws Exception {
+		Path home = fresh("d2-open-scrub");
+		try (Engine e = engine(home)) {
+			String secret = "SECRET_TOKEN_X9Q7Z2";
+			String entitySecret = "VaultAlphaX9Q7Z2";
+			long id = remember(e, "My " + secret + " is stored at " + entitySecret + ".",
+					proposal().entity("e1", entitySecret, "organization").fact("self", "uses", "e1").event("ev1",
+							"visited", "2025-01-10", "self", "e1"))
+					.observation().observationId();
+			assertTrue(e.forget(id));
+
+			// Inspect the database AND WAL before close(): FTS5 shadow tables must be rebuilt and -wal truncated now.
+			String dbRaw = new String(Files.readAllBytes(home.resolve(Engine.DB_FILE)),
+					java.nio.charset.StandardCharsets.ISO_8859_1);
+			assertFalse(dbRaw.contains(secret), "forgotten observation text must not survive in mnemic.db while open");
+			assertFalse(dbRaw.contains(entitySecret),
+					"forgotten derived entity/fact/event text must not survive in mnemic.db while open");
+
+			Path wal = home.resolve(Engine.DB_FILE + "-wal");
+			if (Files.exists(wal)) {
+				assertEquals(0L, Files.size(wal), "WAL must be truncated immediately on forget()");
+			}
+		}
+	}
+
+	@Test
 	@Scenario("E5")
 	void connectorObservationsDoNotBecomeFactsOnTheirOwn() {
 		try (Engine e = engine("e5")) {

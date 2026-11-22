@@ -33,7 +33,11 @@ package se.hirt.mnemic.embed;
 
 import org.junit.jupiter.api.Test;
 
+import com.sun.net.httpserver.HttpServer;
+
 import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -124,5 +128,52 @@ class ModelFetcherTest {
 		assertTrue(mirrored.get(0).url().toString().startsWith("file:///m/model/onnx/model"),
 				mirrored.get(0).url().toString());
 		assertEquals(plan.get(0).sha256(), mirrored.get(0).sha256());
+	}
+
+	@Test
+	void fetchesOverHttpAndHandlesHttpErrorsCleanly() throws Exception {
+		byte[] payload = "http-model-payload".getBytes(StandardCharsets.UTF_8);
+		Path tmp = temp("http-hash").resolve("payload.bin");
+		Files.write(tmp, payload);
+		String hash = ModelFetcher.sha256(tmp);
+
+		HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+		server.createContext("/ok", exchange -> {
+			exchange.sendResponseHeaders(200, payload.length);
+			try (var out = exchange.getResponseBody()) {
+				out.write(payload);
+			}
+		});
+		server.createContext("/err", exchange -> {
+			byte[] err = "upstream failure".getBytes(StandardCharsets.UTF_8);
+			exchange.sendResponseHeaders(500, err.length);
+			try (var out = exchange.getResponseBody()) {
+				out.write(err);
+			}
+		});
+		server.start();
+		try {
+			int port = server.getAddress().getPort();
+			Path modelsOk = temp("http-models-ok");
+			Path targetOk = modelsOk.resolve("m").resolve("model.onnx");
+			ModelFetcher.fetch(modelsOk, List.of(new ModelFetcher.Item("model.onnx",
+					URI.create("http://127.0.0.1:" + port + "/ok"), hash, payload.length, targetOk)), r -> {
+					});
+			assertEquals("http-model-payload", Files.readString(targetOk));
+
+			Path modelsErr = temp("http-models-err");
+			Path targetErr = modelsErr.resolve("m").resolve("model.onnx");
+			IOException ex = assertThrows(IOException.class,
+					() -> ModelFetcher.fetch(
+							modelsErr, List.of(new ModelFetcher.Item("model.onnx",
+									URI.create("http://127.0.0.1:" + port + "/err"), hash, payload.length, targetErr)),
+							r -> {
+							}));
+			assertTrue(ex.getMessage().contains("returned 500"), ex.getMessage());
+			assertFalse(Files.exists(targetErr));
+			assertFalse(Files.exists(modelsErr.resolve("m").resolve("model.onnx.part")));
+		} finally {
+			server.stop(0);
+		}
 	}
 }

@@ -34,6 +34,7 @@ import se.hirt.mnemic.persistence.Tx;
 import se.hirt.mnemic.protocol.Json;
 import se.hirt.mnemic.protocol.MnemicException;
 
+import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -56,10 +57,16 @@ public final class ObservationService {
 
 	private final Database db;
 	private final int softLimitChars;
+	private final Clock clock;
 
 	public ObservationService(Database db, int softLimitChars) {
+		this(db, softLimitChars, Clock.systemUTC());
+	}
+
+	public ObservationService(Database db, int softLimitChars, Clock clock) {
 		this.db = db;
 		this.softLimitChars = softLimitChars;
+		this.clock = clock == null ? Clock.systemUTC() : clock;
 	}
 
 	public Remembered remember(
@@ -75,7 +82,7 @@ public final class ObservationService {
 					+ "observations, never facts (EXTRACTION.md). Store it without one, then read it and give it its facts with "
 					+ "remember(observation_id, proposal), or let a configured proposer handle it in consolidate.");
 		}
-		Instant observed = observedAt == null ? Instant.now() : observedAt;
+		Instant observed = observedAt == null ? clock.instant() : observedAt;
 		String hash = Json.hashText(text);
 		var warnings = new ArrayList<String>();
 		if (text.length() > softLimitChars) {
@@ -98,7 +105,7 @@ public final class ObservationService {
 					                        observed_at, recorded_at, proposal_json, spec_version, content_hash,
 					                        idempotency_key)
 					VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""", text, src.kind(), src.ref(), src.chunk(), src.assistant(),
-					src.session(), observed.toString(), Instant.now().toString(), proposalJson, specVersion, hash,
+					src.session(), observed.toString(), clock.instant().toString(), proposalJson, specVersion, hash,
 					idempotencyKey == null || idempotencyKey.isBlank() ? null : idempotencyKey);
 			return new Remembered(id, false, duplicate, List.copyOf(warnings), pending(tx));
 		});
@@ -187,7 +194,7 @@ public final class ObservationService {
 		return db.write(tx -> tx.update("""
 				UPDATE observation SET retired_at = ?, retired_reason = ?, superseded_by = ?,
 				                       proposal_json = COALESCE(proposal_json, '{}')
-				WHERE id = ? AND forgotten_at IS NULL AND retired_at IS NULL""", Instant.now().toString(), reason,
+				WHERE id = ? AND forgotten_at IS NULL AND retired_at IS NULL""", clock.instant().toString(), reason,
 				supersededBy, id)) > 0;
 	}
 
@@ -213,6 +220,6 @@ public final class ObservationService {
 	public boolean forget(long id) {
 		return db.write(
 				tx -> tx.update("UPDATE observation SET text = '', proposal_json = NULL, forgotten_at = ? WHERE id = ? "
-						+ "AND forgotten_at IS NULL", Instant.now().toString(), id) == 1);
+						+ "AND forgotten_at IS NULL", clock.instant().toString(), id) == 1);
 	}
 }

@@ -46,6 +46,7 @@ import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
@@ -124,8 +125,9 @@ public final class ModelFetcher {
 		Files.createDirectories(modelsDir);
 		Path lockFile = modelsDir.resolve(".lock");
 		try (FileChannel channel = FileChannel.open(lockFile, StandardOpenOption.CREATE, StandardOpenOption.WRITE);
-				FileLock lock = channel.lock()) {
-			HttpClient http = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL).build();
+				FileLock lock = channel.lock();
+				HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(30))
+						.followRedirects(HttpClient.Redirect.NORMAL).build()) {
 			long done = 0;
 			for (Item item : plan) {
 				if (Files.exists(item.target())) {
@@ -163,25 +165,27 @@ public final class ModelFetcher {
 		try {
 			HttpResponse<InputStream> resp = http.send(HttpRequest.newBuilder(item.url()).GET().build(),
 					HttpResponse.BodyHandlers.ofInputStream());
-			if (resp.statusCode() / 100 != 2) {
-				throw new IOException(
-						"Fetching " + item.name() + " from " + item.url() + " returned " + resp.statusCode());
-			}
-			long received = 0;
-			try (InputStream in = resp.body(); OutputStream out = Files.newOutputStream(to)) {
-				byte[] buf = new byte[1 << 16];
-				int n;
-				long lastReport = 0;
-				while ((n = in.read(buf)) > 0) {
-					out.write(buf, 0, n);
-					received += n;
-					if (received - lastReport >= (1 << 20)) {
-						progress.accept(received);
-						lastReport = received;
+			try (InputStream in = resp.body()) {
+				if (resp.statusCode() / 100 != 2) {
+					throw new IOException(
+							"Fetching " + item.name() + " from " + item.url() + " returned " + resp.statusCode());
+				}
+				long received = 0;
+				try (OutputStream out = Files.newOutputStream(to)) {
+					byte[] buf = new byte[1 << 16];
+					int n;
+					long lastReport = 0;
+					while ((n = in.read(buf)) > 0) {
+						out.write(buf, 0, n);
+						received += n;
+						if (received - lastReport >= (1 << 20)) {
+							progress.accept(received);
+							lastReport = received;
+						}
 					}
 				}
+				progress.accept(received);
 			}
-			progress.accept(received);
 		} catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
 			throw new IOException("Interrupted while fetching " + item.name());

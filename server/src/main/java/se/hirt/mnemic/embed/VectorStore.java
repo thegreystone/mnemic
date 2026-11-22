@@ -36,7 +36,7 @@ import se.hirt.mnemic.persistence.Row;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.time.Instant;
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -57,9 +57,15 @@ public final class VectorStore {
 	public static final String FACT = "fact";
 
 	private final Database db;
+	private final Clock clock;
 
 	public VectorStore(Database db) {
+		this(db, Clock.systemUTC());
+	}
+
+	public VectorStore(Database db, Clock clock) {
 		this.db = db;
+		this.clock = clock == null ? Clock.systemUTC() : clock;
 	}
 
 	public void put(String kind, long id, String model, float[] vector) {
@@ -79,7 +85,7 @@ public final class VectorStore {
 				tx.update("""
 						INSERT INTO embedding(item_kind, item_id, model, chunk, dims, vec, created_at)
 						VALUES (?,?,?,?,?,?,?)""", kind, id, model, chunk++, vector.length, buf.array(),
-						Instant.now().toString());
+						clock.instant().toString());
 			}
 			return null;
 		});
