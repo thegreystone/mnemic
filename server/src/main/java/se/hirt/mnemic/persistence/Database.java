@@ -38,6 +38,7 @@ import java.sql.Statement;
 import java.util.Properties;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  * The one SQLite file per data home (DESIGN.md, Persistence). All work in this process is serialised through one
@@ -49,6 +50,8 @@ public final class Database implements AutoCloseable {
 	private final Path file;
 	private final Connection conn;
 	private final ReentrantLock lock = new ReentrantLock();
+	private int txDepth;
+	private boolean txWritable;
 	/** How many migrations this open applied; the engine re-renders every fact after any. */
 	private final int migrated;
 	/** The loaded sqlite-vec version, or null when no library was configured. */
@@ -105,15 +108,36 @@ public final class Database implements AutoCloseable {
 		return file;
 	}
 
-	/** A read-only unit of work; always rolled back so no read transaction outlives the call (WAL growth). */
+	/**
+	 * A read-only unit of work; always rolled back so no read transaction outlives the call (WAL growth). Nested calls
+	 * on the same thread reuse the enclosing transaction.
+	 */
 	public <T> T read(Function<Tx, T> work) {
 		lock.lock();
 		try {
+			if (txDepth > 0) {
+				return work.apply(new Tx(conn, false));
+			}
 			execute("BEGIN");
+			txDepth = 1;
+			txWritable = false;
+			Throwable failure = null;
 			try {
 				return work.apply(new Tx(conn, false));
+			} catch (RuntimeException | Error t) {
+				failure = t;
+				throw t;
 			} finally {
-				execute("ROLLBACK");
+				txDepth = 0;
+				try {
+					execute("ROLLBACK");
+				} catch (SQLException rb) {
+					if (failure != null) {
+						failure.addSuppressed(rb);
+					} else {
+						throw MnemicException.internal("Read transaction rollback failed", rb);
+					}
+				}
 			}
 		} catch (SQLException e) {
 			throw MnemicException.internal("Read transaction failed", e);
@@ -122,21 +146,119 @@ public final class Database implements AutoCloseable {
 		}
 	}
 
-	/** A mutating unit of work, committed atomically; any exception rolls back and propagates. */
+	/**
+	 * A mutating unit of work, committed atomically; any throwable rolls back and propagates without masking the
+	 * original failure. Nested calls on the same thread run inside a savepoint of the enclosing write transaction.
+	 */
 	public <T> T write(Function<Tx, T> work) {
 		lock.lock();
 		try {
+			if (txDepth > 0) {
+				if (!txWritable) {
+					throw MnemicException.internal("Cannot start a write transaction inside a read transaction", null);
+				}
+				String sp = "sp_" + txDepth;
+				execute("SAVEPOINT " + sp);
+				txDepth++;
+				try {
+					T result = work.apply(new Tx(conn, true));
+					execute("RELEASE SAVEPOINT " + sp);
+					return result;
+				} catch (Throwable t) {
+					try {
+						execute("ROLLBACK TO SAVEPOINT " + sp);
+						execute("RELEASE SAVEPOINT " + sp);
+					} catch (SQLException rb) {
+						t.addSuppressed(rb);
+					}
+					throw rethrowTx(t);
+				} finally {
+					txDepth--;
+				}
+			}
 			execute("BEGIN IMMEDIATE");
+			txDepth = 1;
+			txWritable = true;
 			try {
 				T result = work.apply(new Tx(conn, true));
 				execute("COMMIT");
 				return result;
-			} catch (RuntimeException e) {
-				execute("ROLLBACK");
-				throw e;
+			} catch (Throwable t) {
+				try {
+					execute("ROLLBACK");
+				} catch (SQLException rb) {
+					t.addSuppressed(rb);
+				}
+				throw rethrowTx(t);
+			} finally {
+				txDepth = 0;
+				txWritable = false;
 			}
 		} catch (SQLException e) {
 			throw MnemicException.internal("Transaction failed", e);
+		} finally {
+			lock.unlock();
+		}
+	}
+
+	private static RuntimeException rethrowTx(Throwable t) {
+		if (t instanceof RuntimeException r) {
+			throw r;
+		}
+		if (t instanceof Error e) {
+			throw e;
+		}
+		return MnemicException.internal("Transaction failed", t);
+	}
+
+	/**
+	 * Runs {@code work} under the database's reentrant lock so in-memory registry caches and SQLite transactions share
+	 * one lock order and can never deadlock under concurrent access.
+	 */
+	public <T> T withLock(Supplier<T> work) {
+		lock.lock();
+		try {
+			return work.get();
+		} finally {
+			lock.unlock();
+		}
+	}
+
+	/** Void overload of {@link #withLock(Supplier)}. */
+	public void withLock(Runnable work) {
+		lock.lock();
+		try {
+			work.run();
+		} finally {
+			lock.unlock();
+		}
+	}
+
+	/**
+	 * SQLite's {@code PRAGMA data_version}: changes whenever another connection commits to the file, so in-process
+	 * registry caches can detect external writes from a second MCP server without re-reading tables on every lookup.
+	 */
+	public long dataVersion() {
+		lock.lock();
+		try (Statement st = conn.createStatement(); var rs = st.executeQuery("PRAGMA data_version")) {
+			return rs.next() ? rs.getLong(1) : 0L;
+		} catch (SQLException e) {
+			throw MnemicException.internal("Cannot read database data_version", e);
+		} finally {
+			lock.unlock();
+		}
+	}
+
+	/**
+	 * Checkpoints and truncates the WAL file so committed changes (such as {@code forget} zeroing pages under
+	 * {@code secure_delete}) take effect in the main file and no forgotten plaintext lingers in {@code -wal}.
+	 */
+	public void checkpoint() {
+		lock.lock();
+		try {
+			execute("PRAGMA wal_checkpoint(TRUNCATE)");
+		} catch (SQLException e) {
+			throw MnemicException.internal("WAL checkpoint failed", e);
 		} finally {
 			lock.unlock();
 		}

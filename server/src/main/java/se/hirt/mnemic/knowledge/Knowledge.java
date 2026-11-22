@@ -52,7 +52,7 @@ public record Knowledge(EntityService entities, EntityTypeRegistry entityTypes, 
 		var entityTypes = new EntityTypeRegistry(db);
 		var predicates = new PredicateRegistry(db, lang, entityTypes, embedding);
 		var eventTypes = new EventTypeRegistry(db);
-		var entities = new EntityService(db, entityTypes, predicates, ownerName, ownerIdentity);
+		var entities = new EntityService(db, entityTypes, predicates, ownerName, ownerIdentity, clock);
 		var questions = new QuestionService(db);
 		var renderer = new FactRenderer(db, predicates);
 		var ledger = new FactLedger(renderer, predicates);

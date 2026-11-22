@@ -152,6 +152,7 @@ public final class PredicateRegistry {
 	};
 	private String vectorModel;
 	private Map<String, Predicate> cache;
+	private long dataVersion = -1;
 	/** The groups, loaded with the cache. */
 	private Map<String, Group> groupCache = Map.of();
 	/** The rules of the derived predicates, loaded with the cache. */
@@ -203,8 +204,10 @@ public final class PredicateRegistry {
 
 	/** The language's negation template for a predicate, or null for the generic rule. */
 	public String negatedTemplate(String predicate) {
-		load();
-		return negated.get(predicate);
+		return db.withLock(() -> {
+			load();
+			return negated.get(predicate);
+		});
 	}
 
 	/**
@@ -301,21 +304,23 @@ public final class PredicateRegistry {
 	 * {@code render}, {@code negated}, {@code lexicon}, and {@code inverse_lexicon}. Applied when the store is in that
 	 * language.
 	 */
-	public synchronized void putRender(String predicate, String language, Object spec) {
-		String render = spec instanceof Map<?, ?> m ? text(m.get("render")) : text(spec);
-		if (render == null || render.isBlank()) {
-			throw MnemicException.invalidArgument(
-					"renders." + language + " needs a 'render' template, e.g. " + "\"{subject} betreut {object}\".");
-		}
-		String negated = spec instanceof Map<?, ?> m ? text(m.get("negated")) : null;
-		List<String> lexicon = spec instanceof Map<?, ?> m && m.get("lexicon") != null ? strings(m.get("lexicon"))
-				: List.of();
-		List<String> inverse = spec instanceof Map<?, ?> m && m.get("inverse_lexicon") != null
-				? strings(m.get("inverse_lexicon")) : List.of();
-		db.write(tx -> tx.update("""
-				INSERT OR REPLACE INTO predicate_render(name, language, render, negated, lexicon, inverse_lexicon)
-				VALUES (?,?,?,?,?,?)""", predicate, language, render, negated, json(lexicon), json(inverse)));
-		cache = null;
+	public void putRender(String predicate, String language, Object spec) {
+		db.withLock(() -> {
+			String render = spec instanceof Map<?, ?> m ? text(m.get("render")) : text(spec);
+			if (render == null || render.isBlank()) {
+				throw MnemicException.invalidArgument("renders." + language + " needs a 'render' template, e.g. "
+						+ "\"{subject} betreut {object}\".");
+			}
+			String negated = spec instanceof Map<?, ?> m ? text(m.get("negated")) : null;
+			List<String> lexicon = spec instanceof Map<?, ?> m && m.get("lexicon") != null ? strings(m.get("lexicon"))
+					: List.of();
+			List<String> inverse = spec instanceof Map<?, ?> m && m.get("inverse_lexicon") != null
+					? strings(m.get("inverse_lexicon")) : List.of();
+			db.write(tx -> tx.update("""
+					INSERT OR REPLACE INTO predicate_render(name, language, render, negated, lexicon, inverse_lexicon)
+					VALUES (?,?,?,?,?,?)""", predicate, language, render, negated, json(lexicon), json(inverse)));
+			cache = null;
+		});
 	}
 
 	private void putRenders(String predicate, Map<String, Object> renders) {
@@ -346,65 +351,74 @@ public final class PredicateRegistry {
 	// ── read ─────────────────────────────────────────────────────────────
 
 	/** Reads the table again, after a change made beside the registry. */
-	public synchronized void reload() {
-		cache = null;
+	public void reload() {
+		db.withLock(() -> {
+			cache = null;
+			vectors.clear();
+		});
 	}
 
-	public synchronized List<Predicate> all() {
-		return List.copyOf(load().values());
+	public List<Predicate> all() {
+		return db.withLock(() -> List.copyOf(load().values()));
 	}
 
 	/**
 	 * What a predicate's qualifiers or literal values imply about the subject's attributes: term → attribute → value
 	 * (parent_of: mother → gender female; gender: woman → gender female). Empty when it declares none.
 	 */
-	public synchronized Map<String, Map<String, String>> impliesOf(String name) {
-		load();
-		return implies.getOrDefault(name, Map.of());
+	public Map<String, Map<String, String>> impliesOf(String name) {
+		return db.withLock(() -> {
+			load();
+			return implies.getOrDefault(name, Map.of());
+		});
 	}
 
 	/**
 	 * The predicates a new fact of this one ends, for the same subject and object: {@code decided} ends
 	 * {@code considering}. Empty when it ends nothing.
 	 */
-	public synchronized List<String> endsOf(String name) {
-		load();
-		return ends.getOrDefault(name, List.of());
+	public List<String> endsOf(String name) {
+		return db.withLock(() -> {
+			load();
+			return ends.getOrDefault(name, List.of());
+		});
 	}
 
 	/**
 	 * Parses an {@code implies} value: an object from a qualifier or literal value to the attributes it fixes, each
 	 * attribute a registered predicate. Terms and values are lowercased.
 	 */
-	public synchronized Map<String, Map<String, String>> parseImplies(String name, Object implies) {
-		if (implies == null) {
-			return Map.of();
-		}
-		if (!(implies instanceof Map<?, ?> m)) {
-			throw MnemicException
-					.invalidArgument("'implies' takes an object from a qualifier or value to the attributes "
-							+ "it fixes, e.g. {\"mother\": {\"gender\": \"female\"}}.");
-		}
-		var out = new LinkedHashMap<String, Map<String, String>>();
-		for (Map.Entry<?, ?> e : m.entrySet()) {
-			String term = String.valueOf(e.getKey()).trim().toLowerCase(Locale.ROOT);
-			if (!(e.getValue() instanceof Map<?, ?> assigns) || assigns.isEmpty()) {
-				throw MnemicException.invalidArgument("'implies' for '" + term + "' on '" + name
-						+ "' takes an object of attribute predicate to value, e.g. {\"gender\": \"female\"}.");
+	public Map<String, Map<String, String>> parseImplies(String name, Object implies) {
+		return db.withLock(() -> {
+			if (implies == null) {
+				return Map.of();
 			}
-			var a = new LinkedHashMap<String, String>();
-			for (Map.Entry<?, ?> x : assigns.entrySet()) {
-				String attribute = String.valueOf(x.getKey()).trim().toLowerCase(Locale.ROOT);
-				if (!load().containsKey(attribute)) {
-					throw MnemicException.invalidArgument(
-							"'implies' on '" + name + "' names unknown attribute predicate '" + attribute
-									+ "': register it first (a predicate whose facts give a literal value).");
+			if (!(implies instanceof Map<?, ?> m)) {
+				throw MnemicException
+						.invalidArgument("'implies' takes an object from a qualifier or value to the attributes "
+								+ "it fixes, e.g. {\"mother\": {\"gender\": \"female\"}}.");
+			}
+			var out = new LinkedHashMap<String, Map<String, String>>();
+			for (Map.Entry<?, ?> e : m.entrySet()) {
+				String term = String.valueOf(e.getKey()).trim().toLowerCase(Locale.ROOT);
+				if (!(e.getValue() instanceof Map<?, ?> assigns) || assigns.isEmpty()) {
+					throw MnemicException.invalidArgument("'implies' for '" + term + "' on '" + name
+							+ "' takes an object of attribute predicate to value, e.g. {\"gender\": \"female\"}.");
 				}
-				a.put(attribute, String.valueOf(x.getValue()).trim().toLowerCase(Locale.ROOT));
+				var a = new LinkedHashMap<String, String>();
+				for (Map.Entry<?, ?> x : assigns.entrySet()) {
+					String attribute = String.valueOf(x.getKey()).trim().toLowerCase(Locale.ROOT);
+					if (!load().containsKey(attribute)) {
+						throw MnemicException.invalidArgument(
+								"'implies' on '" + name + "' names unknown attribute predicate '" + attribute
+										+ "': register it first (a predicate whose facts give a literal value).");
+					}
+					a.put(attribute, String.valueOf(x.getValue()).trim().toLowerCase(Locale.ROOT));
+				}
+				out.put(term, a);
 			}
-			out.put(term, a);
-		}
-		return out;
+			return out;
+		});
 	}
 
 	private static String impliesJson(Map<String, Map<String, String>> implies) {
@@ -433,13 +447,15 @@ public final class PredicateRegistry {
 	}
 
 	/** The predicates whose facts nest the subject inside the object: the chains bounds and closures are checked on. */
-	public synchronized List<String> containmentPredicates() {
-		return load().values().stream().filter(Predicate::containment).map(Predicate::name).toList();
+	public List<String> containmentPredicates() {
+		return db.withLock(() -> load().values().stream().filter(Predicate::containment).map(Predicate::name).toList());
 	}
 
-	public synchronized boolean isContainment(String name) {
-		Predicate p = load().get(name);
-		return p != null && p.containment();
+	public boolean isContainment(String name) {
+		return db.withLock(() -> {
+			Predicate p = load().get(name);
+			return p != null && p.containment();
+		});
 	}
 
 	/**
@@ -447,33 +463,37 @@ public final class PredicateRegistry {
 	 * kind as its range. A containment predicate whose range is anything (part_of) nests what it is given but declares
 	 * no kind a container, so a domain name or a printer is not asked where it lies.
 	 */
-	public synchronized boolean canContain(List<String> lineage) {
-		return load().values().stream()
-				.anyMatch(p -> p.containment() && !p.range().contains("*") && p.acceptsObject(lineage));
+	public boolean canContain(List<String> lineage) {
+		return db.withLock(() -> load().values().stream()
+				.anyMatch(p -> p.containment() && !p.range().contains("*") && p.acceptsObject(lineage)));
 	}
 
 	/** The containment predicate that nests a thing of one kind inside a thing of another, or the first there is. */
-	public synchronized Optional<Predicate> containmentFor(List<String> inner, List<String> outer) {
-		List<Predicate> within = load().values().stream().filter(Predicate::containment).toList();
-		// The predicate made for these kinds first (unit_of: department → organization), then any that takes them
-		// (part_of: anything → anything), then whatever there is.
-		return within.stream()
-				.filter(p -> !p.domain().contains("*") && !p.range().contains("*") && p.acceptsSubject(inner)
-						&& p.acceptsObject(outer))
-				.findFirst()
-				.or(() -> within.stream().filter(p -> p.acceptsSubject(inner) && p.acceptsObject(outer)).findFirst())
-				.or(() -> within.stream().findFirst());
+	public Optional<Predicate> containmentFor(List<String> inner, List<String> outer) {
+		return db.withLock(() -> {
+			List<Predicate> within = load().values().stream().filter(Predicate::containment).toList();
+			// The predicate made for these kinds first (unit_of: department → organization), then any that takes them
+			// (part_of: anything → anything), then whatever there is.
+			return within.stream()
+					.filter(p -> !p.domain().contains("*") && !p.range().contains("*") && p.acceptsSubject(inner)
+							&& p.acceptsObject(outer))
+					.findFirst().or(() -> within.stream().filter(p -> p.acceptsSubject(inner) && p.acceptsObject(outer))
+							.findFirst())
+					.or(() -> within.stream().findFirst());
+		});
 	}
 
 	/** The rules that define a derived predicate (family K); none for an asserted one. */
-	public synchronized List<Rule> rulesOf(String name) {
-		load();
-		return rules.getOrDefault(name, List.of());
+	public List<Rule> rulesOf(String name) {
+		return db.withLock(() -> {
+			load();
+			return rules.getOrDefault(name, List.of());
+		});
 	}
 
 	/** The predicates that are derived: defined by rules over other predicates. */
-	public synchronized List<Predicate> derived() {
-		return load().values().stream().filter(p -> !rulesOf(p.name()).isEmpty()).toList();
+	public List<Predicate> derived() {
+		return db.withLock(() -> load().values().stream().filter(p -> !rulesOf(p.name()).isEmpty()).toList());
 	}
 
 	/**
@@ -569,22 +589,24 @@ public final class PredicateRegistry {
 		cache = null;
 	}
 
-	public synchronized Optional<Predicate> get(String name) {
-		if (name == null) {
-			return Optional.empty();
-		}
-		Map<String, Predicate> all = load();
-		Predicate p = all.get(name);
-		if (p != null) {
-			return Optional.of(p);
-		}
-		String n = Names.norm(name);
-		for (Predicate q : all.values()) {
-			if (q.aliases().stream().anyMatch(a -> Names.norm(a).equals(n))) {
-				return Optional.of(q);
+	public Optional<Predicate> get(String name) {
+		return db.withLock(() -> {
+			if (name == null) {
+				return Optional.empty();
 			}
-		}
-		return Optional.empty();
+			Map<String, Predicate> all = load();
+			Predicate p = all.get(name);
+			if (p != null) {
+				return Optional.of(p);
+			}
+			String n = Names.norm(name);
+			for (Predicate q : all.values()) {
+				if (q.aliases().stream().anyMatch(a -> Names.norm(a).equals(n))) {
+					return Optional.of(q);
+				}
+			}
+			return Optional.empty();
+		});
 	}
 
 	/**
@@ -597,42 +619,45 @@ public final class PredicateRegistry {
 	 * this use when nothing on record shares one: everything is inferred from the name, and a description can follow
 	 * through {@code correct}.
 	 */
-	public synchronized Resolution resolve(String name, PredicateDef def, Long observationId, List<String> warnings) {
-		if (name == null || name.isBlank()) {
-			throw MnemicException.invalidArgument("A fact needs a 'predicate'. Example: \"predicate\": \"works_at\"");
-		}
-		if (name.startsWith("x:")) {
-			name = name.substring(2); // how a 2.2 reading spelled a predicate it had not defined
-		}
-		Optional<Predicate> exact = get(name);
-		if (exact.isPresent()) {
-			return new Resolution(exact.get(), name.equals(exact.get().name()) ? "exact" : "alias", null);
-		}
-		if (def == null) {
-			def = new PredicateDef(name, null, null, null, null, null, null, null, null, List.of(), null, List.of(),
-					List.of());
-		}
-		Similar similar = similar(def);
-		Nearest near = nearest(embeddingText(def), types(def.domain()), types(def.range()), null);
-		if (similar != null && (similar.overlap() >= SIMILAR_MIN_OVERLAP || def.description() == null)) {
-			return new Resolution(null, "similar", similar.predicate(), closest(similar, near, similar.predicate()));
-		}
-		boolean described = def.description() != null && !def.description().isBlank();
-		if (similar != null && similar.overlap() == 1 && !described) {
-			return new Resolution(null, "ambiguous", similar.predicate(), closest(similar, near, similar.predicate()));
-		}
-		if (near != null && near.similar()) {
-			return new Resolution(null, "semantic", near.predicate(), closest(similar, near, near.predicate()));
-		}
-		if (near != null && near.ambiguous() && !described) {
-			return new Resolution(null, "ambiguous", near.predicate(), closest(similar, near, near.predicate()));
-		}
-		// A described predicate on a weak signal (one shared word, a close but not leading meaning) is registered
-		// as the caller defined it, the neighbour named so that the reply and consolidate can point at it: the
-		// caller said what it means, and 'size' is not 'color' for sharing the word 'product' (2026-09-27).
-		Predicate neighbour = similar != null && similar.overlap() == 1 ? similar.predicate()
-				: near != null && near.ambiguous() ? near.predicate() : null;
-		return new Resolution(register(def, observationId), bare(def) ? "inferred" : "registered", neighbour);
+	public Resolution resolve(String name, PredicateDef def, Long observationId, List<String> warnings) {
+		return db.withLock(() -> {
+			if (name == null || name.isBlank()) {
+				throw MnemicException
+						.invalidArgument("A fact needs a 'predicate'. Example: \"predicate\": \"works_at\"");
+			}
+			String target = name.startsWith("x:") ? name.substring(2) : name;
+			Optional<Predicate> exact = get(target);
+			if (exact.isPresent()) {
+				return new Resolution(exact.get(), target.equals(exact.get().name()) ? "exact" : "alias", null);
+			}
+			PredicateDef resolvedDef = def != null ? def : new PredicateDef(target, null, null, null, null, null, null,
+					null, null, List.of(), null, List.of(), List.of());
+			Similar similar = similar(resolvedDef);
+			Nearest near = nearest(embeddingText(resolvedDef), types(resolvedDef.domain()), types(resolvedDef.range()),
+					null);
+			if (similar != null && (similar.overlap() >= SIMILAR_MIN_OVERLAP || resolvedDef.description() == null)) {
+				return new Resolution(null, "similar", similar.predicate(),
+						closest(similar, near, similar.predicate()));
+			}
+			boolean described = resolvedDef.description() != null && !resolvedDef.description().isBlank();
+			if (similar != null && similar.overlap() == 1 && !described) {
+				return new Resolution(null, "ambiguous", similar.predicate(),
+						closest(similar, near, similar.predicate()));
+			}
+			if (near != null && near.similar()) {
+				return new Resolution(null, "semantic", near.predicate(), closest(similar, near, near.predicate()));
+			}
+			if (near != null && near.ambiguous() && !described) {
+				return new Resolution(null, "ambiguous", near.predicate(), closest(similar, near, near.predicate()));
+			}
+			// A described predicate on a weak signal (one shared word, a close but not leading meaning) is registered
+			// as the caller defined it, the neighbour named so that the reply and consolidate can point at it: the
+			// caller said what it means, and 'size' is not 'color' for sharing the word 'product' (2026-09-27).
+			Predicate neighbour = similar != null && similar.overlap() == 1 ? similar.predicate()
+					: near != null && near.ambiguous() ? near.predicate() : null;
+			return new Resolution(register(resolvedDef, observationId), bare(resolvedDef) ? "inferred" : "registered",
+					neighbour);
+		});
 	}
 
 	/** A definition that states nothing beyond the name. */
@@ -694,36 +719,38 @@ public final class PredicateRegistry {
 	 * and that are not {@code except}; null when no model is loaded or the registry is empty. Vectors are computed once
 	 * per predicate and model and dropped when the predicate changes.
 	 */
-	private synchronized Nearest nearest(String text, List<String> domain, List<String> range, String except) {
-		Embedding emb = embedding.get();
-		if (emb == null) {
-			return null;
-		}
-		ensureModel(emb);
-		float[] q = emb.embed(text);
-		var scored = new ArrayList<Map.Entry<Predicate, Float>>();
-		for (Predicate p : load().values()) {
-			if (p.name().equals(except) || p.literalRange() || !overlaps(p.domain(), domain)
-					|| !overlaps(p.range(), range)) {
-				continue;
+	private Nearest nearest(String text, List<String> domain, List<String> range, String except) {
+		return db.withLock(() -> {
+			Embedding emb = embedding.get();
+			if (emb == null) {
+				return null;
 			}
-			float[] v = vectors.computeIfAbsent(p.name(), k -> emb.embed(embeddingText(p)));
-			scored.add(Map.entry(p, Embedding.dot(q, v)));
-		}
-		if (scored.isEmpty()) {
-			return null;
-		}
-		scored.sort((a, b) -> Float.compare(b.getValue(), a.getValue()));
-		float bestScore = scored.getFirst().getValue();
-		float second = scored.size() > 1 ? scored.get(1).getValue() : 0;
-		// The next ones close enough to be asked about alongside the best, at most two.
-		var alternatives = new ArrayList<Predicate>();
-		for (int i = 1; i < scored.size() && alternatives.size() < 2; i++) {
-			if (scored.get(i).getValue() >= SEMANTIC_AMBIGUOUS) {
-				alternatives.add(scored.get(i).getKey());
+			ensureModel(emb);
+			float[] q = emb.embed(text);
+			var scored = new ArrayList<Map.Entry<Predicate, Float>>();
+			for (Predicate p : load().values()) {
+				if (p.name().equals(except) || p.literalRange() || !overlaps(p.domain(), domain)
+						|| !overlaps(p.range(), range)) {
+					continue;
+				}
+				float[] v = vectors.computeIfAbsent(p.name(), k -> emb.embed(embeddingText(p)));
+				scored.add(Map.entry(p, Embedding.dot(q, v)));
 			}
-		}
-		return new Nearest(scored.getFirst().getKey(), bestScore, bestScore - second, List.copyOf(alternatives));
+			if (scored.isEmpty()) {
+				return null;
+			}
+			scored.sort((a, b) -> Float.compare(b.getValue(), a.getValue()));
+			float bestScore = scored.getFirst().getValue();
+			float second = scored.size() > 1 ? scored.get(1).getValue() : 0;
+			// The next ones close enough to be asked about alongside the best, at most two.
+			var alternatives = new ArrayList<Predicate>();
+			for (int i = 1; i < scored.size() && alternatives.size() < 2; i++) {
+				if (scored.get(i).getValue() >= SEMANTIC_AMBIGUOUS) {
+					alternatives.add(scored.get(i).getKey());
+				}
+			}
+			return new Nearest(scored.getFirst().getKey(), bestScore, bestScore - second, List.copyOf(alternatives));
+		});
 	}
 
 	/**
@@ -758,66 +785,70 @@ public final class PredicateRegistry {
 	 * Predicates registered from use that lie close in meaning to another predicate, each pair once:
 	 * {@code {predicate, close_to, score}}. Empty without a model.
 	 */
-	public synchronized List<Map<String, Object>> closePairs() {
-		var out = new ArrayList<Map<String, Object>>();
-		var seen = new HashSet<String>();
-		for (Predicate p : load().values()) {
-			if (!p.isInferred()) {
-				continue;
+	public List<Map<String, Object>> closePairs() {
+		return db.withLock(() -> {
+			var out = new ArrayList<Map<String, Object>>();
+			var seen = new HashSet<String>();
+			for (Predicate p : load().values()) {
+				if (!p.isInferred()) {
+					continue;
+				}
+				Nearest n = nearest(embeddingText(p), p.domain(), p.range(), p.name());
+				if (n == null || !n.ambiguous()) {
+					continue;
+				}
+				String pair = p.name().compareTo(n.predicate().name()) < 0 ? p.name() + "|" + n.predicate().name()
+						: n.predicate().name() + "|" + p.name();
+				if (!seen.add(pair)) {
+					continue;
+				}
+				var m = new LinkedHashMap<String, Object>();
+				m.put("predicate", p.name());
+				m.put("close_to", n.predicate().name());
+				m.put("score", Math.round(n.score() * 100) / 100.0);
+				out.add(m);
 			}
-			Nearest n = nearest(embeddingText(p), p.domain(), p.range(), p.name());
-			if (n == null || !n.ambiguous()) {
-				continue;
-			}
-			String pair = p.name().compareTo(n.predicate().name()) < 0 ? p.name() + "|" + n.predicate().name()
-					: n.predicate().name() + "|" + p.name();
-			if (!seen.add(pair)) {
-				continue;
-			}
-			var m = new LinkedHashMap<String, Object>();
-			m.put("predicate", p.name());
-			m.put("close_to", n.predicate().name());
-			m.put("score", Math.round(n.score() * 100) / 100.0);
-			out.add(m);
-		}
-		return out;
+			return out;
+		});
 	}
 
 	/**
 	 * Folds one predicate into another: its facts are re-keyed, its name and aliases become aliases of the target,
 	 * event types that named it name the target, and its registration goes. The count of facts moved.
 	 */
-	public synchronized int merge(String from, String into, String reason) {
-		Predicate f = Optional.ofNullable(load().get(from))
-				.orElseThrow(() -> MnemicException.notFound("No predicate " + from));
-		Predicate t = get(into).orElseThrow(() -> MnemicException.notFound("No predicate " + into));
-		if (f.name().equals(t.name())) {
-			throw MnemicException.invalidArgument("'" + from + "' and '" + into + "' are the same predicate.");
-		}
-		if (f.seed()) {
-			throw MnemicException.invalidArgument("'" + from + "' is a seed predicate; merge the other way round.");
-		}
-		var aliases = new ArrayList<>(t.aliases());
-		for (String a : concat(List.of(f.name()), f.aliases())) {
-			if (!aliases.contains(a)) {
-				aliases.add(a);
+	public int merge(String from, String into, String reason) {
+		return db.withLock(() -> {
+			Predicate f = Optional.ofNullable(load().get(from))
+					.orElseThrow(() -> MnemicException.notFound("No predicate " + from));
+			Predicate t = get(into).orElseThrow(() -> MnemicException.notFound("No predicate " + into));
+			if (f.name().equals(t.name())) {
+				throw MnemicException.invalidArgument("'" + from + "' and '" + into + "' are the same predicate.");
 			}
-		}
-		int moved = db.write(tx -> {
-			int n = tx.update("UPDATE fact SET predicate = ? WHERE predicate = ?", t.name(), f.name());
-			tx.update("UPDATE question SET predicate = ? WHERE predicate = ?", t.name(), f.name());
-			tx.update("DELETE FROM predicate WHERE name = ?", f.name());
-			tx.update("UPDATE predicate SET aliases = ?, inferred = 0 WHERE name = ?", json(aliases), t.name());
-			tx.insert(
-					"INSERT INTO predicate_change(predicate, field, old_value, new_value, reason, changed_at) "
-							+ "VALUES (?,?,?,?,?,?)",
-					t.name(), "merged", f.name(), t.name(), reason, Instant.now().toString());
-			return n;
+			if (f.seed()) {
+				throw MnemicException.invalidArgument("'" + from + "' is a seed predicate; merge the other way round.");
+			}
+			var aliases = new ArrayList<>(t.aliases());
+			for (String a : concat(List.of(f.name()), f.aliases())) {
+				if (!aliases.contains(a)) {
+					aliases.add(a);
+				}
+			}
+			int moved = db.write(tx -> {
+				int n = tx.update("UPDATE fact SET predicate = ? WHERE predicate = ?", t.name(), f.name());
+				tx.update("UPDATE question SET predicate = ? WHERE predicate = ?", t.name(), f.name());
+				tx.update("DELETE FROM predicate WHERE name = ?", f.name());
+				tx.update("UPDATE predicate SET aliases = ?, inferred = 0 WHERE name = ?", json(aliases), t.name());
+				tx.insert(
+						"INSERT INTO predicate_change(predicate, field, old_value, new_value, reason, changed_at) "
+								+ "VALUES (?,?,?,?,?,?)",
+						t.name(), "merged", f.name(), t.name(), reason, Instant.now().toString());
+				return n;
+			});
+			vectors.remove(f.name());
+			vectors.remove(t.name());
+			cache = null;
+			return moved;
 		});
-		vectors.remove(f.name());
-		vectors.remove(t.name());
-		cache = null;
-		return moved;
 	}
 
 	private static List<String> concat(List<String> a, List<String> b) {
@@ -831,7 +862,7 @@ public final class PredicateRegistry {
 	 * vocabulary that the question uses, so a question using two of its words ("children" and "parents") carries two.
 	 * Terms are compared token by token, so a hyphenated qualifier (half-brother) matches the query's tokens.
 	 */
-	public synchronized List<Cue> cues(String query) {
+	public List<Cue> cues(String query) {
 		return cues(query, Set.of());
 	}
 
@@ -839,92 +870,94 @@ public final class PredicateRegistry {
 	 * The cues of a question whose entity names are already known: {@code excluded} holds the tokens of the entities
 	 * spotted in it, which no phrase compared by meaning may contain.
 	 */
-	public synchronized List<Cue> cues(String query, Set<String> excluded) {
-		String q = " " + String.join(" ", Names.tokens(query)) + " ";
-		var out = new ArrayList<Cue>();
-		var cued = new HashSet<String>(); // predicates the question names by their own words
-		var freeCued = new HashSet<Cue>();
-		var viaInverse = new HashSet<Cue>();
-		Map<String, List<String>> inUse = qualifiersInUse();
-		for (Predicate p : load().values()) {
-			var terms = new LinkedHashMap<String, Cue>(); // each word of the predicate's vocabulary in the question
-			// A predicate with a vocabulary is cued by it; one that takes free text is cued by the qualifiers actually
-			// stored under it ("cousin" on related_to), from either side.
-			boolean free = p.qualifiers().isEmpty();
-			for (String term : free ? inUse.getOrDefault(p.name(), List.of()) : p.qualifiers()) {
-				String key = String.join(" ", Names.tokens(term));
-				if (!q.contains(" " + key + " ") || terms.containsKey(key)) {
+	public List<Cue> cues(String query, Set<String> excluded) {
+		return db.withLock(() -> {
+			String q = " " + String.join(" ", Names.tokens(query)) + " ";
+			var out = new ArrayList<Cue>();
+			var cued = new HashSet<String>(); // predicates the question names by their own words
+			var freeCued = new HashSet<Cue>();
+			var viaInverse = new HashSet<Cue>();
+			Map<String, List<String>> inUse = qualifiersInUse();
+			for (Predicate p : load().values()) {
+				var terms = new LinkedHashMap<String, Cue>(); // each word of the predicate's vocabulary in the question
+				// A predicate with a vocabulary is cued by it; one that takes free text is cued by the qualifiers actually
+				// stored under it ("cousin" on related_to), from either side.
+				boolean free = p.qualifiers().isEmpty();
+				for (String term : free ? inUse.getOrDefault(p.name(), List.of()) : p.qualifiers()) {
+					String key = String.join(" ", Names.tokens(term));
+					if (!q.contains(" " + key + " ") || terms.containsKey(key)) {
+						continue;
+					}
+					Cue c = new Cue(p, term, term, free || p.symmetric() ? "any" : "object");
+					terms.put(key, c);
+					if (free) {
+						freeCued.add(c);
+					}
+				}
+				for (String term : p.inverseLexicon()) {
+					String key = String.join(" ", Names.tokens(term));
+					if (!q.contains(" " + key + " ") || terms.containsKey(key)) {
+						continue;
+					}
+					Cue c = new Cue(p, null, term, p.symmetric() ? "any" : "subject");
+					terms.put(key, c);
+					viaInverse.add(c);
+				}
+				var own = new ArrayList<>(p.lexicon());
+				for (String alias : p.aliases()) {
+					own.addAll(Predicate.lexiconOf(alias)); // a name the caller once used, in any language
+				}
+				for (String term : own) {
+					String key = String.join(" ", Names.tokens(term));
+					if (!q.contains(" " + key + " ") || terms.containsKey(key)) {
+						continue;
+					}
+					terms.put(key, new Cue(p, null, term, !p.symmetric() && p.sameType() ? "object" : "any"));
+				}
+				if (!terms.isEmpty()) {
+					out.addAll(terms.values());
+					cued.add(p.name());
+				}
+			}
+			// A group word ("family") cues every predicate under the group, the ones the question also names by their
+			// own words included: "Alexander's children and Christian's family" asks parent_of twice, once each. The
+			// binding drops the group's copy where it would ask the same relation of the same subject twice. The group
+			// says nothing about the side, so the entity's type decides it.
+			for (Group g : groupCache.values()) {
+				String term = null;
+				for (String t : g.lexicon()) {
+					if (q.contains(" " + String.join(" ", Names.tokens(t)) + " ")
+							&& (term == null || t.length() > term.length())) {
+						term = t;
+					}
+				}
+				if (term == null) {
 					continue;
 				}
-				Cue c = new Cue(p, term, term, free || p.symmetric() ? "any" : "object");
-				terms.put(key, c);
-				if (free) {
-					freeCued.add(c);
+				for (Predicate p : membersOf(g.name())) {
+					out.add(new Cue(p, null, term, "any", g.name()));
 				}
 			}
-			for (String term : p.inverseLexicon()) {
-				String key = String.join(" ", Names.tokens(term));
-				if (!q.contains(" " + key + " ") || terms.containsKey(key)) {
-					continue;
+			semanticCues(query, excluded, out, cued);
+			// Longest term first; at equal length a word in a predicate's own vocabulary outranks the same word known
+			// only as another predicate's inverse ("nephews" reaches nibling_of before aunt_uncle_of), both outrank a
+			// free qualifier in use, and a group word comes after them all. A question that uses two of a predicate's
+			// words ("Konrad's children and Mattias's parents") carries a cue for each; where they stand decides which
+			// is asked of whom.
+			out.sort((a, b) -> {
+				int byLength = Integer.compare(b.term().length(), a.term().length());
+				if (byLength != 0) {
+					return byLength;
 				}
-				Cue c = new Cue(p, null, term, p.symmetric() ? "any" : "subject");
-				terms.put(key, c);
-				viaInverse.add(c);
-			}
-			var own = new ArrayList<>(p.lexicon());
-			for (String alias : p.aliases()) {
-				own.addAll(Predicate.lexiconOf(alias)); // a name the caller once used, in any language
-			}
-			for (String term : own) {
-				String key = String.join(" ", Names.tokens(term));
-				if (!q.contains(" " + key + " ") || terms.containsKey(key)) {
-					continue;
+				int byGroup = Boolean.compare(a.viaGroup(), b.viaGroup());
+				if (byGroup != 0) {
+					return byGroup;
 				}
-				terms.put(key, new Cue(p, null, term, !p.symmetric() && p.sameType() ? "object" : "any"));
-			}
-			if (!terms.isEmpty()) {
-				out.addAll(terms.values());
-				cued.add(p.name());
-			}
-		}
-		// A group word ("family") cues every predicate under the group, the ones the question also names by their
-		// own words included: "Alexander's children and Christian's family" asks parent_of twice, once each. The
-		// binding drops the group's copy where it would ask the same relation of the same subject twice. The group
-		// says nothing about the side, so the entity's type decides it.
-		for (Group g : groupCache.values()) {
-			String term = null;
-			for (String t : g.lexicon()) {
-				if (q.contains(" " + String.join(" ", Names.tokens(t)) + " ")
-						&& (term == null || t.length() > term.length())) {
-					term = t;
-				}
-			}
-			if (term == null) {
-				continue;
-			}
-			for (Predicate p : membersOf(g.name())) {
-				out.add(new Cue(p, null, term, "any", g.name()));
-			}
-		}
-		semanticCues(query, excluded, out, cued);
-		// Longest term first; at equal length a word in a predicate's own vocabulary outranks the same word known
-		// only as another predicate's inverse ("nephews" reaches nibling_of before aunt_uncle_of), both outrank a
-		// free qualifier in use, and a group word comes after them all. A question that uses two of a predicate's
-		// words ("Konrad's children and Mattias's parents") carries a cue for each; where they stand decides which
-		// is asked of whom.
-		out.sort((a, b) -> {
-			int byLength = Integer.compare(b.term().length(), a.term().length());
-			if (byLength != 0) {
-				return byLength;
-			}
-			int byGroup = Boolean.compare(a.viaGroup(), b.viaGroup());
-			if (byGroup != 0) {
-				return byGroup;
-			}
-			int byOwn = Boolean.compare(viaInverse.contains(a), viaInverse.contains(b));
-			return byOwn != 0 ? byOwn : Boolean.compare(freeCued.contains(a), freeCued.contains(b));
+				int byOwn = Boolean.compare(viaInverse.contains(a), viaInverse.contains(b));
+				return byOwn != 0 ? byOwn : Boolean.compare(freeCued.contains(a), freeCued.contains(b));
+			});
+			return out;
 		});
-		return out;
 	}
 
 	/**
@@ -1030,23 +1063,25 @@ public final class PredicateRegistry {
 	 * The predicate a free-text role belongs to (partner → partner_of, aunt → aunt_uncle_of): one with a vocabulary of
 	 * its own that names the role, the whole role before a word of it. Empty when none does.
 	 */
-	public synchronized Optional<Predicate> dedicatedFor(String role) {
-		if (role == null || role.isBlank()) {
+	public Optional<Predicate> dedicatedFor(String role) {
+		return db.withLock(() -> {
+			if (role == null || role.isBlank()) {
+				return Optional.empty();
+			}
+			String r = role.trim().toLowerCase(Locale.ROOT);
+			List<Predicate> dedicated = load().values().stream().filter(p -> !p.qualifiers().isEmpty()).toList();
+			for (Predicate p : dedicated) {
+				if (p.qualifiers().contains(r) || p.lexicon().contains(r)) {
+					return Optional.of(p);
+				}
+			}
+			for (Predicate p : dedicated) {
+				if (namesRole(p, r)) {
+					return Optional.of(p);
+				}
+			}
 			return Optional.empty();
-		}
-		String r = role.trim().toLowerCase(Locale.ROOT);
-		List<Predicate> dedicated = load().values().stream().filter(p -> !p.qualifiers().isEmpty()).toList();
-		for (Predicate p : dedicated) {
-			if (p.qualifiers().contains(r) || p.lexicon().contains(r)) {
-				return Optional.of(p);
-			}
-		}
-		for (Predicate p : dedicated) {
-			if (namesRole(p, r)) {
-				return Optional.of(p);
-			}
-		}
-		return Optional.empty();
+		});
 	}
 
 	/** The qualifiers stored on current facts, by predicate: the words a free-text qualifier gave a relation. */
@@ -1060,87 +1095,91 @@ public final class PredicateRegistry {
 	}
 
 	/** Predicates registered from use and not yet described, with the facts that use them (J6). */
-	public synchronized List<Map<String, Object>> inferred() {
-		var out = new ArrayList<Map<String, Object>>();
-		for (Predicate p : load().values()) {
-			if (!p.isInferred()) {
-				continue;
+	public List<Map<String, Object>> inferred() {
+		return db.withLock(() -> {
+			var out = new ArrayList<Map<String, Object>>();
+			for (Predicate p : load().values()) {
+				if (!p.isInferred()) {
+					continue;
+				}
+				List<Row> rows = db.read(tx -> tx.query(
+						"SELECT COUNT(*) AS n, GROUP_CONCAT(DISTINCT observation_id) AS obs FROM fact WHERE predicate = ?",
+						p.name()));
+				var m = new LinkedHashMap<String, Object>();
+				m.put("predicate", p.name());
+				m.put("uses", rows.getFirst().lng("n"));
+				String obs = rows.getFirst().str("obs");
+				m.put("observations",
+						obs == null ? List.of() : Arrays.stream(obs.split(",")).map(x -> "obs-" + x).toList());
+				out.add(m);
 			}
-			List<Row> rows = db.read(tx -> tx.query(
-					"SELECT COUNT(*) AS n, GROUP_CONCAT(DISTINCT observation_id) AS obs FROM fact WHERE predicate = ?",
-					p.name()));
-			var m = new LinkedHashMap<String, Object>();
-			m.put("predicate", p.name());
-			m.put("uses", rows.getFirst().lng("n"));
-			String obs = rows.getFirst().str("obs");
-			m.put("observations",
-					obs == null ? List.of() : Arrays.stream(obs.split(",")).map(x -> "obs-" + x).toList());
-			out.add(m);
-		}
-		out.sort((a, b) -> Long.compare((Long) b.get("uses"), (Long) a.get("uses")));
-		return out;
+			out.sort((a, b) -> Long.compare((Long) b.get("uses"), (Long) a.get("uses")));
+			return out;
+		});
 	}
 
 	// ── write ────────────────────────────────────────────────────────────
 
-	public synchronized Predicate register(PredicateDef def, Long observationId) {
-		if (def.name() == null || def.name().isBlank()) {
-			throw MnemicException.invalidArgument("A predicate definition needs a 'name'.");
-		}
-		String name = def.name().trim().toLowerCase(Locale.ROOT).replace(' ', '_');
-		Predicate existing = load().get(name);
-		if (existing != null) {
-			if (existing.isInferred() && !bare(def)) {
-				return define(existing, def);
+	public Predicate register(PredicateDef def, Long observationId) {
+		return db.withLock(() -> {
+			if (def.name() == null || def.name().isBlank()) {
+				throw MnemicException.invalidArgument("A predicate definition needs a 'name'.");
 			}
-			// A predicate already defined keeps its definition, but a proposal may add what the derivations rest
-			// on: rules and implications. Silence here once cost a caller a round of debugging.
-			var additions = new LinkedHashMap<String, Object>();
-			if (def.implies() != null) {
-				additions.put("implies", def.implies());
+			String name = def.name().trim().toLowerCase(Locale.ROOT).replace(' ', '_');
+			Predicate existing = load().get(name);
+			if (existing != null) {
+				if (existing.isInferred() && !bare(def)) {
+					return define(existing, def);
+				}
+				// A predicate already defined keeps its definition, but a proposal may add what the derivations rest
+				// on: rules and implications. Silence here once cost a caller a round of debugging.
+				var additions = new LinkedHashMap<String, Object>();
+				if (def.implies() != null) {
+					additions.put("implies", def.implies());
+				}
+				if (def.definedAs() != null) {
+					additions.put("defined_as", def.definedAs());
+				}
+				return additions.isEmpty() ? existing : update(name, additions,
+						observationId == null ? "defined again" : "defined in obs-" + observationId);
 			}
-			if (def.definedAs() != null) {
-				additions.put("defined_as", def.definedAs());
+			List<String> domain = types(def.domain());
+			List<String> range = types(def.range());
+			// The default template carries the optional qualifier slot: a qualifier is always allowed, and a template
+			// without a slot stored it unseen and warned at every use (a usage run's patient_of, 2026-09-23).
+			String render = def.render() != null && !def.render().isBlank() ? def.render()
+					: "{subject} " + name.replace('_', ' ') + " {object}[[ ({qualifier})]]";
+			// Without cue words the name supplies them: its words become the search terms.
+			List<String> lexicon = def.lexicon().isEmpty() ? Predicate.lexiconOf(name) : def.lexicon();
+			List<String> groups = def.groups() == null ? List.of() : groupNames(def.groups());
+			var p = new Predicate(name, def.description(), domain, range, Boolean.TRUE.equals(def.functional()),
+					def.functionalScope(), Boolean.TRUE.equals(def.symmetric()), def.inverse(),
+					def.volatility() == null ? "medium" : def.volatility(), lexicon, render, def.qualifiers(),
+					def.aliases(), def.inverseLexicon(), observationId, false, bare(def),
+					Boolean.TRUE.equals(def.containment()), groups,
+					def.lasting() != null ? def.lasting() : range.contains("literal"), def.lasting() != null);
+			List<Rule> parsed = def.definedAs() == null ? List.of() : Rule.parse(def.definedAs());
+			validateRules(name, parsed);
+			Map<String, Map<String, String>> implied = parseImplies(name, def.implies());
+			registerGroupsFromUse(groups);
+			// A domain or range naming a type the registry lacks is the statement that the type exists: registered from
+			// this use, so that the kinds the predicate offers in a mismatch question can be chosen.
+			for (String t : domain) {
+				registerTypeFromUse(t, observationId);
 			}
-			return additions.isEmpty() ? existing : update(name, additions,
-					observationId == null ? "defined again" : "defined in obs-" + observationId);
-		}
-		List<String> domain = types(def.domain());
-		List<String> range = types(def.range());
-		// The default template carries the optional qualifier slot: a qualifier is always allowed, and a template
-		// without a slot stored it unseen and warned at every use (a usage run's patient_of, 2026-09-23).
-		String render = def.render() != null && !def.render().isBlank() ? def.render()
-				: "{subject} " + name.replace('_', ' ') + " {object}[[ ({qualifier})]]";
-		// Without cue words the name supplies them: its words become the search terms.
-		List<String> lexicon = def.lexicon().isEmpty() ? Predicate.lexiconOf(name) : def.lexicon();
-		List<String> groups = def.groups() == null ? List.of() : groupNames(def.groups());
-		var p = new Predicate(name, def.description(), domain, range, Boolean.TRUE.equals(def.functional()),
-				def.functionalScope(), Boolean.TRUE.equals(def.symmetric()), def.inverse(),
-				def.volatility() == null ? "medium" : def.volatility(), lexicon, render, def.qualifiers(),
-				def.aliases(), def.inverseLexicon(), observationId, false, bare(def),
-				Boolean.TRUE.equals(def.containment()), groups,
-				def.lasting() != null ? def.lasting() : range.contains("literal"), def.lasting() != null);
-		List<Rule> parsed = def.definedAs() == null ? List.of() : Rule.parse(def.definedAs());
-		validateRules(name, parsed);
-		Map<String, Map<String, String>> implied = parseImplies(name, def.implies());
-		registerGroupsFromUse(groups);
-		// A domain or range naming a type the registry lacks is the statement that the type exists: registered from
-		// this use, so that the kinds the predicate offers in a mismatch question can be chosen.
-		for (String t : domain) {
-			registerTypeFromUse(t, observationId);
-		}
-		for (String t : range) {
-			registerTypeFromUse(t, observationId);
-		}
-		insert(p);
-		if (!parsed.isEmpty()) {
-			setRules(name, parsed);
-		}
-		if (!implied.isEmpty()) {
-			setImplies(name, implied);
-		}
-		putRenders(name, def.renders());
-		return get(name).orElseThrow();
+			for (String t : range) {
+				registerTypeFromUse(t, observationId);
+			}
+			insert(p);
+			if (!parsed.isEmpty()) {
+				setRules(name, parsed);
+			}
+			if (!implied.isEmpty()) {
+				setImplies(name, implied);
+			}
+			putRenders(name, def.renders());
+			return get(name).orElseThrow();
+		});
 	}
 
 	/**
@@ -1204,179 +1243,184 @@ public final class PredicateRegistry {
 	 * {@code symmetric}, {@code volatility}, {@code description}, {@code domain}, {@code range}. Every change is
 	 * logged; the caller re-renders the facts.
 	 */
-	public synchronized Predicate update(String name, Map<String, Object> replacement, String reason) {
-		Predicate p = get(name).orElseThrow(() -> MnemicException.notFound("No predicate " + name));
-		String render = p.render();
-		List<String> lexicon = p.lexicon();
-		List<String> qualifiers = p.qualifiers();
-		List<String> inverseLexicon = p.inverseLexicon();
-		boolean functional = p.functional();
-		boolean symmetric = p.symmetric();
-		String volatility = p.volatility();
-		String description = p.description();
-		List<String> domain = p.domain();
-		List<String> range = p.range();
-		String rule = null;
-		String newImplies = null;
-		boolean impliesChanged = false;
-		boolean containment = p.containment();
-		boolean lasting = p.lasting();
-		boolean lastingStated = p.lastingStated();
-		List<String> groups = p.groups();
-		List<String> newEnds = null;
-		var changes = new ArrayList<String[]>();
-		for (Map.Entry<String, Object> e : replacement.entrySet()) {
-			String old;
-			switch (e.getKey()) {
-			case "ends" -> {
-				old = json(endsOf(p.name()));
-				newEnds = new ArrayList<>();
-				for (String q : strings(e.getValue())) {
-					Predicate target = get(q).orElseThrow(() -> MnemicException
-							.invalidArgument("'ends' names " + "predicates; there is no predicate '" + q + "'."));
-					if (target.name().equals(p.name())) {
-						throw MnemicException.invalidArgument("A predicate does not end itself: a later value of the "
-								+ "same relation is what 'functional' decides.");
+	public Predicate update(String name, Map<String, Object> replacement, String reason) {
+		return db.withLock(() -> {
+			Predicate p = get(name).orElseThrow(() -> MnemicException.notFound("No predicate " + name));
+			String render = p.render();
+			List<String> lexicon = p.lexicon();
+			List<String> qualifiers = p.qualifiers();
+			List<String> inverseLexicon = p.inverseLexicon();
+			boolean functional = p.functional();
+			boolean symmetric = p.symmetric();
+			String volatility = p.volatility();
+			String description = p.description();
+			List<String> domain = p.domain();
+			List<String> range = p.range();
+			String rule = null;
+			String newImplies = null;
+			boolean impliesChanged = false;
+			boolean containment = p.containment();
+			boolean lasting = p.lasting();
+			boolean lastingStated = p.lastingStated();
+			List<String> groups = p.groups();
+			List<String> newEnds = null;
+			var changes = new ArrayList<String[]>();
+			for (Map.Entry<String, Object> e : replacement.entrySet()) {
+				String old;
+				switch (e.getKey()) {
+				case "ends" -> {
+					old = json(endsOf(p.name()));
+					newEnds = new ArrayList<>();
+					for (String q : strings(e.getValue())) {
+						Predicate target = get(q).orElseThrow(() -> MnemicException
+								.invalidArgument("'ends' names " + "predicates; there is no predicate '" + q + "'."));
+						if (target.name().equals(p.name())) {
+							throw MnemicException
+									.invalidArgument("A predicate does not end itself: a later value of the "
+											+ "same relation is what 'functional' decides.");
+						}
+						if (!newEnds.contains(target.name())) {
+							newEnds.add(target.name());
+						}
 					}
-					if (!newEnds.contains(target.name())) {
-						newEnds.add(target.name());
+				}
+				case "groups" -> {
+					old = json(groups);
+					groups = groupNames(strings(e.getValue()));
+					registerGroupsFromUse(groups);
+				}
+				case "defined_as" -> {
+					old = Rule.toJson(rulesOf(p.name()));
+					List<Rule> parsed = Rule.parse(e.getValue());
+					validateRules(p.name(), parsed);
+					rule = Rule.toJson(parsed);
+				}
+				case "implies" -> {
+					old = String.valueOf(impliesJson(impliesOf(p.name())));
+					newImplies = impliesJson(parseImplies(p.name(), e.getValue()));
+					impliesChanged = true;
+				}
+				case "containment" -> {
+					old = String.valueOf(containment);
+					containment = Boolean.parseBoolean(String.valueOf(e.getValue()));
+				}
+				case "lasting" -> {
+					old = String.valueOf(lasting);
+					lasting = Boolean.parseBoolean(String.valueOf(e.getValue()));
+					lastingStated = true;
+				}
+				case "render" -> {
+					old = render;
+					render = String.valueOf(e.getValue());
+				}
+				case "domain" -> {
+					old = json(domain);
+					domain = types(e.getValue() instanceof List<?> l ? String.join("|", strings(l))
+							: String.valueOf(e.getValue()));
+				}
+				case "range" -> {
+					old = json(range);
+					range = types(e.getValue() instanceof List<?> l ? String.join("|", strings(l))
+							: String.valueOf(e.getValue()));
+				}
+				case "symmetric" -> {
+					old = String.valueOf(symmetric);
+					symmetric = Boolean.parseBoolean(String.valueOf(e.getValue()));
+				}
+				case "lexicon" -> {
+					old = json(lexicon);
+					lexicon = strings(e.getValue());
+				}
+				case "qualifiers" -> {
+					old = json(qualifiers);
+					qualifiers = strings(e.getValue());
+				}
+				case "inverse_lexicon" -> {
+					old = json(inverseLexicon);
+					inverseLexicon = strings(e.getValue());
+				}
+				case "functional" -> {
+					old = String.valueOf(functional);
+					functional = Boolean.parseBoolean(String.valueOf(e.getValue()));
+				}
+				case "volatility" -> {
+					old = volatility;
+					volatility = String.valueOf(e.getValue());
+				}
+				case "description" -> {
+					old = description;
+					description = String.valueOf(e.getValue());
+				}
+				case "renders" -> {
+					if (!(e.getValue() instanceof Map<?, ?> byLanguage)) {
+						throw MnemicException.invalidArgument("'renders' takes an object keyed by language, e.g. "
+								+ "{\"de\": {\"render\": \"{subject} betreut {object}\"}}.");
 					}
+					for (Map.Entry<?, ?> r : byLanguage.entrySet()) {
+						String language = language(String.valueOf(r.getKey()));
+						String before = renderIn(p.name(), language);
+						putRender(p.name(), language, r.getValue());
+						changes.add(new String[] {"renders." + language, before, renderIn(p.name(), language)});
+					}
+					continue;
 				}
-			}
-			case "groups" -> {
-				old = json(groups);
-				groups = groupNames(strings(e.getValue()));
-				registerGroupsFromUse(groups);
-			}
-			case "defined_as" -> {
-				old = Rule.toJson(rulesOf(p.name()));
-				List<Rule> parsed = Rule.parse(e.getValue());
-				validateRules(p.name(), parsed);
-				rule = Rule.toJson(parsed);
-			}
-			case "implies" -> {
-				old = String.valueOf(impliesJson(impliesOf(p.name())));
-				newImplies = impliesJson(parseImplies(p.name(), e.getValue()));
-				impliesChanged = true;
-			}
-			case "containment" -> {
-				old = String.valueOf(containment);
-				containment = Boolean.parseBoolean(String.valueOf(e.getValue()));
-			}
-			case "lasting" -> {
-				old = String.valueOf(lasting);
-				lasting = Boolean.parseBoolean(String.valueOf(e.getValue()));
-				lastingStated = true;
-			}
-			case "render" -> {
-				old = render;
-				render = String.valueOf(e.getValue());
-			}
-			case "domain" -> {
-				old = json(domain);
-				domain = types(e.getValue() instanceof List<?> l ? String.join("|", strings(l))
-						: String.valueOf(e.getValue()));
-			}
-			case "range" -> {
-				old = json(range);
-				range = types(e.getValue() instanceof List<?> l ? String.join("|", strings(l))
-						: String.valueOf(e.getValue()));
-			}
-			case "symmetric" -> {
-				old = String.valueOf(symmetric);
-				symmetric = Boolean.parseBoolean(String.valueOf(e.getValue()));
-			}
-			case "lexicon" -> {
-				old = json(lexicon);
-				lexicon = strings(e.getValue());
-			}
-			case "qualifiers" -> {
-				old = json(qualifiers);
-				qualifiers = strings(e.getValue());
-			}
-			case "inverse_lexicon" -> {
-				old = json(inverseLexicon);
-				inverseLexicon = strings(e.getValue());
-			}
-			case "functional" -> {
-				old = String.valueOf(functional);
-				functional = Boolean.parseBoolean(String.valueOf(e.getValue()));
-			}
-			case "volatility" -> {
-				old = volatility;
-				volatility = String.valueOf(e.getValue());
-			}
-			case "description" -> {
-				old = description;
-				description = String.valueOf(e.getValue());
-			}
-			case "renders" -> {
-				if (!(e.getValue() instanceof Map<?, ?> byLanguage)) {
-					throw MnemicException.invalidArgument("'renders' takes an object keyed by language, e.g. "
-							+ "{\"de\": {\"render\": \"{subject} betreut {object}\"}}.");
+				default -> throw MnemicException.invalidArgument("Unknown predicate property '" + e.getKey()
+						+ "'; correctable: description, domain, range, render, renders, lexicon, inverse_lexicon, qualifiers, "
+						+ "functional, symmetric, volatility, defined_as, implies, containment, groups, lasting, ends.");
 				}
-				for (Map.Entry<?, ?> r : byLanguage.entrySet()) {
-					String language = language(String.valueOf(r.getKey()));
-					String before = renderIn(p.name(), language);
-					putRender(p.name(), language, r.getValue());
-					changes.add(new String[] {"renders." + language, before, renderIn(p.name(), language)});
+				changes.add(new String[] {e.getKey(), old,
+						"defined_as".equals(e.getKey()) ? rule
+								: "implies".equals(e.getKey()) ? String.valueOf(newImplies)
+										: e.getValue() instanceof List<?> ? json(strings(e.getValue()))
+												: String.valueOf(e.getValue())});
+			}
+			final String implied = newImplies;
+			final boolean setImplied = impliesChanged;
+			final boolean cont = containment;
+			final String newRule = rule;
+			final String r = render;
+			final List<String> l = lexicon;
+			final List<String> q = qualifiers;
+			final List<String> inv = inverseLexicon;
+			final boolean f = functional;
+			final boolean sym = symmetric;
+			final String v = volatility;
+			final String d = description;
+			final List<String> dom = domain;
+			final List<String> rng = range;
+			final List<String> grp = groups;
+			final boolean last = lasting;
+			final boolean said = lastingStated;
+			final List<String> endsNow = newEnds;
+			db.write(tx -> {
+				tx.update(
+						"""
+								UPDATE predicate SET render = ?, lexicon = ?, qualifiers = ?, functional = ?, symmetric = ?, volatility = ?,
+								description = ?, inverse_lexicon = ?, domain = ?, range = ?, containment = ?, groups = ?, lasting = ?,
+								lasting_stated = ?, inferred = 0 WHERE name = ?""",
+						r, json(l), json(q), f ? 1 : 0, sym ? 1 : 0, v, d, json(inv), json(dom), json(rng),
+						cont ? 1 : 0, json(grp), last ? 1 : 0, said ? 1 : 0, p.name());
+				if (newRule != null) {
+					tx.update("UPDATE predicate SET rule = ? WHERE name = ?", newRule, p.name());
 				}
-				continue;
-			}
-			default -> throw MnemicException.invalidArgument("Unknown predicate property '" + e.getKey()
-					+ "'; correctable: description, domain, range, render, renders, lexicon, inverse_lexicon, qualifiers, "
-					+ "functional, symmetric, volatility, defined_as, implies, containment, groups, lasting, ends.");
-			}
-			changes.add(new String[] {e.getKey(), old,
-					"defined_as".equals(e.getKey()) ? rule
-							: "implies".equals(e.getKey()) ? String.valueOf(newImplies)
-									: e.getValue() instanceof List<?> ? json(strings(e.getValue()))
-											: String.valueOf(e.getValue())});
-		}
-		final String implied = newImplies;
-		final boolean setImplied = impliesChanged;
-		final boolean cont = containment;
-		final String newRule = rule;
-		final String r = render;
-		final List<String> l = lexicon;
-		final List<String> q = qualifiers;
-		final List<String> inv = inverseLexicon;
-		final boolean f = functional;
-		final boolean sym = symmetric;
-		final String v = volatility;
-		final String d = description;
-		final List<String> dom = domain;
-		final List<String> rng = range;
-		final List<String> grp = groups;
-		final boolean last = lasting;
-		final boolean said = lastingStated;
-		final List<String> endsNow = newEnds;
-		db.write(tx -> {
-			tx.update(
-					"""
-							UPDATE predicate SET render = ?, lexicon = ?, qualifiers = ?, functional = ?, symmetric = ?, volatility = ?,
-							description = ?, inverse_lexicon = ?, domain = ?, range = ?, containment = ?, groups = ?, lasting = ?,
-							lasting_stated = ?, inferred = 0 WHERE name = ?""",
-					r, json(l), json(q), f ? 1 : 0, sym ? 1 : 0, v, d, json(inv), json(dom), json(rng), cont ? 1 : 0,
-					json(grp), last ? 1 : 0, said ? 1 : 0, p.name());
-			if (newRule != null) {
-				tx.update("UPDATE predicate SET rule = ? WHERE name = ?", newRule, p.name());
-			}
-			if (setImplied) {
-				tx.update("UPDATE predicate SET implies = ? WHERE name = ?", implied, p.name());
-			}
-			if (endsNow != null) {
-				tx.update("UPDATE predicate SET ends = ? WHERE name = ?", json(endsNow), p.name());
-			}
-			for (String[] c : changes) {
-				tx.insert("INSERT INTO predicate_change(predicate, field, old_value, new_value, reason, changed_at) "
-						+ "VALUES (?,?,?,?,?,?)", p.name(), c[0], c[1], c[2], reason, Instant.now().toString());
-			}
-			return null;
+				if (setImplied) {
+					tx.update("UPDATE predicate SET implies = ? WHERE name = ?", implied, p.name());
+				}
+				if (endsNow != null) {
+					tx.update("UPDATE predicate SET ends = ? WHERE name = ?", json(endsNow), p.name());
+				}
+				for (String[] c : changes) {
+					tx.insert(
+							"INSERT INTO predicate_change(predicate, field, old_value, new_value, reason, changed_at) "
+									+ "VALUES (?,?,?,?,?,?)",
+							p.name(), c[0], c[1], c[2], reason, Instant.now().toString());
+				}
+				return null;
+			});
+			vectors.remove(p.name());
+			cache = null;
+			return get(p.name()).orElseThrow();
 		});
-		vectors.remove(p.name());
-		cache = null;
-		return get(p.name()).orElseThrow();
 	}
 
 	/**
@@ -1385,27 +1429,30 @@ public final class PredicateRegistry {
 	 * fact with an entity as its object is changed, and the change is logged; anything else is returned as it stands
 	 * (2026-09-27, a ring's "Silver" had become an entity of type unknown).
 	 */
-	public synchronized Predicate literalFromUse(String name, String reason) {
-		Predicate p = get(name).orElseThrow(() -> MnemicException.notFound("No predicate " + name));
-		if (p.literalRange() || !p.isInferred()) {
-			return p;
-		}
-		long entityObjects = db.read(tx -> tx
-				.queryLong("SELECT COUNT(*) FROM fact WHERE predicate = ? AND object_id IS NOT NULL", p.name()));
-		if (entityObjects > 0) {
-			return p;
-		}
-		db.write(tx -> {
-			tx.update("UPDATE predicate SET range = ?, lasting = 1 WHERE name = ?", json(List.of("literal")), p.name());
-			tx.insert(
-					"INSERT INTO predicate_change(predicate, field, old_value, new_value, reason, changed_at) "
-							+ "VALUES (?,?,?,?,?,?)",
-					p.name(), "range", json(p.range()), json(List.of("literal")), reason, Instant.now().toString());
-			return null;
+	public Predicate literalFromUse(String name, String reason) {
+		return db.withLock(() -> {
+			Predicate p = get(name).orElseThrow(() -> MnemicException.notFound("No predicate " + name));
+			if (p.literalRange() || !p.isInferred()) {
+				return p;
+			}
+			long entityObjects = db.read(tx -> tx
+					.queryLong("SELECT COUNT(*) FROM fact WHERE predicate = ? AND object_id IS NOT NULL", p.name()));
+			if (entityObjects > 0) {
+				return p;
+			}
+			db.write(tx -> {
+				tx.update("UPDATE predicate SET range = ?, lasting = 1 WHERE name = ?", json(List.of("literal")),
+						p.name());
+				tx.insert(
+						"INSERT INTO predicate_change(predicate, field, old_value, new_value, reason, changed_at) "
+								+ "VALUES (?,?,?,?,?,?)",
+						p.name(), "range", json(p.range()), json(List.of("literal")), reason, Instant.now().toString());
+				return null;
+			});
+			vectors.remove(p.name());
+			cache = null;
+			return get(p.name()).orElseThrow();
 		});
-		vectors.remove(p.name());
-		cache = null;
-		return get(p.name()).orElseThrow();
 	}
 
 	public List<Map<String, Object>> changes(String name) {
@@ -1422,13 +1469,15 @@ public final class PredicateRegistry {
 	}
 
 	/** Records {@code alias} as another name for {@code p}: the caller confirmed a similar match (J2). */
-	public synchronized void addAlias(Predicate p, String alias) {
-		var aliases = new ArrayList<>(p.aliases());
-		if (!aliases.contains(alias)) {
-			aliases.add(alias);
-			db.write(tx -> tx.update("UPDATE predicate SET aliases = ? WHERE name = ?", json(aliases), p.name()));
-			cache = null;
-		}
+	public void addAlias(Predicate p, String alias) {
+		db.withLock(() -> {
+			var aliases = new ArrayList<>(p.aliases());
+			if (!aliases.contains(alias)) {
+				aliases.add(alias);
+				db.write(tx -> tx.update("UPDATE predicate SET aliases = ? WHERE name = ?", json(aliases), p.name()));
+				cache = null;
+			}
+		});
 	}
 
 	/** The best match by shared words, how many they share, and the next ones that share any. */
@@ -1543,52 +1592,60 @@ public final class PredicateRegistry {
 	// ── groups ───────────────────────────────────────────────────────────
 
 	/** Every group, seed first. */
-	public synchronized List<Group> groups() {
-		load();
-		return List.copyOf(groupCache.values());
+	public List<Group> groups() {
+		return db.withLock(() -> {
+			load();
+			return List.copyOf(groupCache.values());
+		});
 	}
 
-	public synchronized Optional<Group> group(String name) {
-		load();
-		return name == null ? Optional.empty() : Optional.ofNullable(groupCache.get(groupName(name)));
+	public Optional<Group> group(String name) {
+		return db.withLock(() -> {
+			load();
+			return name == null ? Optional.empty() : Optional.ofNullable(groupCache.get(groupName(name)));
+		});
 	}
 
 	/** The groups within a group, transitively, the group itself first; a cycle is never walked twice. */
-	public synchronized List<String> groupsUnder(String name) {
-		load();
-		var out = new ArrayList<String>();
-		var frontier = new ArrayDeque<String>();
-		frontier.add(groupName(name));
-		while (!frontier.isEmpty()) {
-			String g = frontier.poll();
-			if (out.contains(g)) {
-				continue;
-			}
-			out.add(g);
-			for (Group child : groupCache.values()) {
-				if (child.groups().contains(g)) {
-					frontier.add(child.name());
+	public List<String> groupsUnder(String name) {
+		return db.withLock(() -> {
+			load();
+			var out = new ArrayList<String>();
+			var frontier = new ArrayDeque<String>();
+			frontier.add(groupName(name));
+			while (!frontier.isEmpty()) {
+				String g = frontier.poll();
+				if (out.contains(g)) {
+					continue;
+				}
+				out.add(g);
+				for (Group child : groupCache.values()) {
+					if (child.groups().contains(g)) {
+						frontier.add(child.name());
+					}
 				}
 			}
-		}
-		return out;
+			return out;
+		});
 	}
 
 	/**
 	 * The predicates in a group, including those in the groups within it: the stated relations first, the derived ones
 	 * after them, each in registry order, so that a group's verdict leads with what somebody said.
 	 */
-	public synchronized List<Predicate> membersOf(String name) {
-		List<String> under = groupsUnder(name);
-		var out = new ArrayList<Predicate>();
-		for (boolean derived : new boolean[] {false, true}) {
-			for (Predicate p : load().values()) {
-				if (p.groups().stream().anyMatch(under::contains) && rulesOf(p.name()).isEmpty() != derived) {
-					out.add(p);
+	public List<Predicate> membersOf(String name) {
+		return db.withLock(() -> {
+			List<String> under = groupsUnder(name);
+			var out = new ArrayList<Predicate>();
+			for (boolean derived : new boolean[] {false, true}) {
+				for (Predicate p : load().values()) {
+					if (p.groups().stream().anyMatch(under::contains) && rulesOf(p.name()).isEmpty() != derived) {
+						out.add(p);
+					}
 				}
 			}
-		}
-		return out;
+			return out;
+		});
 	}
 
 	static String groupName(String name) {
@@ -1638,56 +1695,58 @@ public final class PredicateRegistry {
 	 * and {@code groups} (the groups it belongs to; a group that would contain itself is refused). Every change is
 	 * logged.
 	 */
-	public synchronized Group updateGroup(String name, Map<String, Object> replacement, String reason) {
-		Group g = group(name).orElseThrow(() -> MnemicException.notFound("No group " + name));
-		String description = g.description();
-		List<String> lexicon = baseLexicon(g.name());
-		List<String> parents = g.groups();
-		var changes = new ArrayList<String[]>();
-		for (Map.Entry<String, Object> e : replacement.entrySet()) {
-			String old;
-			switch (e.getKey()) {
-			case "description" -> {
-				old = description;
-				description = String.valueOf(e.getValue());
-			}
-			case "lexicon" -> {
-				old = json(lexicon);
-				lexicon = lower(strings(e.getValue()));
-			}
-			case "groups" -> {
-				old = json(parents);
-				parents = groupNames(strings(e.getValue()));
-				for (String parent : parents) {
-					if (parent.equals(g.name()) || groupsUnder(g.name()).contains(parent)) {
-						throw MnemicException.invalidArgument(
-								"group '" + g.name() + "' cannot belong to '" + parent + "': it would contain itself.");
-					}
+	public Group updateGroup(String name, Map<String, Object> replacement, String reason) {
+		return db.withLock(() -> {
+			Group g = group(name).orElseThrow(() -> MnemicException.notFound("No group " + name));
+			String description = g.description();
+			List<String> lexicon = baseLexicon(g.name());
+			List<String> parents = g.groups();
+			var changes = new ArrayList<String[]>();
+			for (Map.Entry<String, Object> e : replacement.entrySet()) {
+				String old;
+				switch (e.getKey()) {
+				case "description" -> {
+					old = description;
+					description = String.valueOf(e.getValue());
 				}
-				registerGroupsFromUse(parents);
+				case "lexicon" -> {
+					old = json(lexicon);
+					lexicon = lower(strings(e.getValue()));
+				}
+				case "groups" -> {
+					old = json(parents);
+					parents = groupNames(strings(e.getValue()));
+					for (String parent : parents) {
+						if (parent.equals(g.name()) || groupsUnder(g.name()).contains(parent)) {
+							throw MnemicException.invalidArgument("group '" + g.name() + "' cannot belong to '" + parent
+									+ "': it would contain itself.");
+						}
+					}
+					registerGroupsFromUse(parents);
+				}
+				default -> throw MnemicException.invalidArgument(
+						"Unknown group property '" + e.getKey() + "'; correctable: description, lexicon, groups.");
+				}
+				changes.add(new String[] {e.getKey(), old,
+						e.getValue() instanceof List<?> ? json(strings(e.getValue())) : String.valueOf(e.getValue())});
 			}
-			default -> throw MnemicException.invalidArgument(
-					"Unknown group property '" + e.getKey() + "'; correctable: description, lexicon, groups.");
-			}
-			changes.add(new String[] {e.getKey(), old,
-					e.getValue() instanceof List<?> ? json(strings(e.getValue())) : String.valueOf(e.getValue())});
-		}
-		final String d = description;
-		final List<String> l = lexicon;
-		final List<String> p = parents;
-		db.write(tx -> {
-			tx.update("UPDATE predicate_group SET description = ?, lexicon = ?, groups = ? WHERE name = ?", d, json(l),
-					json(p), g.name());
-			for (String[] c : changes) {
-				tx.insert(
-						"INSERT INTO predicate_group_change(group_name, field, old_value, new_value, reason, changed_at) "
-								+ "VALUES (?,?,?,?,?,?)",
-						g.name(), c[0], c[1], c[2], reason, Instant.now().toString());
-			}
-			return null;
+			final String d = description;
+			final List<String> l = lexicon;
+			final List<String> p = parents;
+			db.write(tx -> {
+				tx.update("UPDATE predicate_group SET description = ?, lexicon = ?, groups = ? WHERE name = ?", d,
+						json(l), json(p), g.name());
+				for (String[] c : changes) {
+					tx.insert(
+							"INSERT INTO predicate_group_change(group_name, field, old_value, new_value, reason, changed_at) "
+									+ "VALUES (?,?,?,?,?,?)",
+							g.name(), c[0], c[1], c[2], reason, Instant.now().toString());
+				}
+				return null;
+			});
+			cache = null;
+			return group(g.name()).orElseThrow();
 		});
-		cache = null;
-		return group(g.name()).orElseThrow();
 	}
 
 	public List<Map<String, Object>> groupChanges(String name) {
@@ -1789,8 +1848,8 @@ public final class PredicateRegistry {
 	/** Seed predicates that took over a same-named predicate registered from use at this start. */
 	private final List<String> adopted = new ArrayList<>();
 
-	public synchronized List<String> adoptedAtStart() {
-		return List.copyOf(adopted);
+	public List<String> adoptedAtStart() {
+		return db.withLock(() -> List.copyOf(adopted));
 	}
 
 	private void seedIfMissing() {
@@ -2177,7 +2236,8 @@ public final class PredicateRegistry {
 	// ── persistence ──────────────────────────────────────────────────────
 
 	private Map<String, Predicate> load() {
-		if (cache == null) {
+		long dv = db.dataVersion();
+		if (cache == null || dv != dataVersion) {
 			var map = new LinkedHashMap<String, Predicate>();
 			var ruleMap = new HashMap<String, List<Rule>>();
 			var impliesMap = new HashMap<String, Map<String, Map<String, String>>>();
@@ -2231,6 +2291,8 @@ public final class PredicateRegistry {
 			}
 			cache = map;
 			groupCache = loadGroups();
+			vectors.clear();
+			dataVersion = dv;
 		}
 		return cache;
 	}

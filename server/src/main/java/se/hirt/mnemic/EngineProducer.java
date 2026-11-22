@@ -44,6 +44,9 @@ import org.jboss.logging.Logger;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 
 /** CDI wiring: one {@link Engine} per process, opened on the configured data home. */
 @ApplicationScoped
@@ -51,14 +54,14 @@ public class EngineProducer {
 
 	private static final Logger LOG = Logger.getLogger(EngineProducer.class);
 
+	private final CompletableFuture<Engine> engineReady = new CompletableFuture<>();
 	private volatile EmbedderHolder holder;
-	private volatile Engine engine;
 
 	@Produces
 	@Singleton
 	Engine engine(MnemicConfig config, @ConfigProperty(name = "quarkus.application.version", defaultValue = "unknown")
 	String version) {
-		Path home = Path.of(config.home());
+		Path home = expandedPath(config.home());
 		LOG.infof("Opening Mnemic data home at %s", home.toAbsolutePath());
 		ModelProposer proposer = null;
 		if (config.proposer().model().isPresent()) {
@@ -76,10 +79,25 @@ public class EngineProducer {
 		holder = embedderHolder(config);
 		Engine.Options options = Engine.Options.of(home, version).withSoftLimit(config.observation().softLimitChars())
 				.withOwner(config.owner().orElse(null), config.ownerIdentity())
-				.withProposer(proposer, config.proposer().batch()).withVecLibrary(config.vecLibrary().orElse(null))
-				.withEmbedder(holder).withLang(Lang.of(config.language().orElse("en")));
-		engine = new Engine(options);
-		return engine;
+				.withProposer(proposer, config.proposer().batch())
+				.withVecLibrary(config.vecLibrary().map(MnemicMain::expandHome).orElse(null)).withEmbedder(holder)
+				.withLang(Lang.of(config.language().orElse("en")));
+		try {
+			Engine created = new Engine(options);
+			engineReady.complete(created);
+			return created;
+		} catch (Throwable t) {
+			engineReady.completeExceptionally(t);
+			if (holder != null) {
+				holder.close();
+			}
+			throw t;
+		}
+	}
+
+	/** Expands a leading {@code ~} before turning a configured path string into a {@link Path}. */
+	static Path expandedPath(String configured) {
+		return Path.of(MnemicMain.expandHome(configured));
 	}
 
 	/**
@@ -93,11 +111,11 @@ public class EngineProducer {
 			LOG.info("Semantic recall is off (mnemic.embed=off)");
 			return EmbedderHolder.off("mnemic.embed=off");
 		}
-		Path modelsDir = config.modelsDir().map(Path::of).orElse(ModelFetcher.defaultModelsDir());
+		Path modelsDir = config.modelsDir().map(EngineProducer::expandedPath).orElse(ModelFetcher.defaultModelsDir());
 		try {
 			if (config.ortLibrary().isPresent() && config.embedModel().isPresent()) {
-				Path dir = Path.of(config.embedModel().get());
-				Path library = Path.of(config.ortLibrary().get());
+				Path dir = expandedPath(config.embedModel().get());
+				Path library = expandedPath(config.ortLibrary().get());
 				return new EmbedderHolder(modelsDir, List.of(), () -> library, dir, dir.getFileName().toString(),
 						this::backfill);
 			}
@@ -110,7 +128,7 @@ public class EngineProducer {
 						ModelFetcher.totalBytes(plan) >> 20, modelsDir);
 			}
 			EmbedderHolder.LibrarySource library = config.ortLibrary().isPresent()
-					? () -> Path.of(config.ortLibrary().get()) : () -> OrtLibrary.install(modelsDir);
+					? () -> expandedPath(config.ortLibrary().get()) : () -> OrtLibrary.install(modelsDir);
 			return new EmbedderHolder(modelsDir, plan, library, modelDir, ModelFetcher.MODEL_ID, this::backfill);
 		} catch (RuntimeException e) {
 			LOG.errorf("Semantic recall unavailable: %s", e.getMessage());
@@ -118,9 +136,17 @@ public class EngineProducer {
 		}
 	}
 
-	/** Once the embedder is there, what was stored before it gets its vectors, a batch at a time. */
-	private void backfill(Embedder embedder) {
-		Engine e = engine;
+	/**
+	 * Once the embedder is there, what was stored before it gets its vectors, a batch at a time. Waits for the engine
+	 * to finish starting if the model loaded faster than startup migrations.
+	 */
+	void backfill(Embedder embedder) {
+		Engine e;
+		try {
+			e = engineReady.join();
+		} catch (CancellationException | CompletionException ex) {
+			return;
+		}
 		if (e == null) {
 			return;
 		}
@@ -143,11 +169,17 @@ public class EngineProducer {
 		}
 	}
 
+	/** Package-private hook for tests verifying that backfill waits for the engine rather than skipping. */
+	void completeEngine(Engine created) {
+		engineReady.complete(created);
+	}
+
 	void close(@Disposes
 	Engine engine) {
-		engine.close();
+		engineReady.cancel(false);
 		if (holder != null) {
 			holder.close();
 		}
+		engine.close();
 	}
 }

@@ -39,11 +39,13 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * The in-process embedder: a sentence-embedding model run through ONNX Runtime, the tokenizer read from the model's own
- * {@code tokenizer.json}. One instance per store, one session, used from one thread at a time (the engine serialises
- * its work). {@link #id()} names the model so vectors are keyed by what made them.
+ * {@code tokenizer.json}. One instance per store, one session; inference and {@link #close()} are serialised by an
+ * internal lock so background backfill, concurrent MCP calls, and shutdown never collide in native code. {@link #id()}
+ * names the model so vectors are keyed by what made them.
  * <p>
  * Pooling, prefixes, and normalisation follow the model card through a {@link Spec}: the granite embedders take the
  * first token (CLS) of the last hidden state, the e5 and MiniLM families the mean over the tokens, e5 wants
@@ -76,6 +78,7 @@ public final class Embedder implements Embedding, AutoCloseable {
 		}
 	}
 
+	private final ReentrantLock sessionLock = new ReentrantLock();
 	private final OrtRuntime runtime;
 	private final Tokenizer tokenizer;
 	private final MemorySegment env;
@@ -86,6 +89,7 @@ public final class Embedder implements Embedding, AutoCloseable {
 	private final Spec spec;
 	private final String id;
 	private final int dims;
+	private boolean closed;
 
 	/**
 	 * @param library
@@ -109,25 +113,52 @@ public final class Embedder implements Embedding, AutoCloseable {
 		this.spec = spec;
 		this.tokenizer = Tokenizer.load(tok);
 		this.runtime = new OrtRuntime(library);
-		this.env = runtime.createEnv("mnemic");
-		this.session = runtime.createSession(env, model,
-				Math.max(1, Math.min(4, Runtime.getRuntime().availableProcessors() / 2)));
-		this.inputNames = runtime.inputNames(session);
-		String[] outputs = runtime.outputNames(session);
-		// A sentence-transformers export pools for us; a plain export gives the token rows.
-		String pooled = null, tokens = null;
-		for (String o : outputs) {
-			if ("sentence_embedding".equals(o)) {
-				pooled = o;
-			} else if ("last_hidden_state".equals(o) || "token_embeddings".equals(o)) {
-				tokens = o;
+		MemorySegment createdEnv = null;
+		MemorySegment createdSession = null;
+		try {
+			createdEnv = runtime.createEnv("mnemic");
+			createdSession = runtime.createSession(createdEnv, model,
+					Math.max(1, Math.min(4, Runtime.getRuntime().availableProcessors() / 2)));
+			this.inputNames = runtime.inputNames(createdSession);
+			String[] outputs = runtime.outputNames(createdSession);
+			// A sentence-transformers export pools for us; a plain export gives the token rows.
+			String pooled = null, tokens = null;
+			for (String o : outputs) {
+				if ("sentence_embedding".equals(o)) {
+					pooled = o;
+				} else if ("last_hidden_state".equals(o) || "token_embeddings".equals(o)) {
+					tokens = o;
+				}
 			}
+			this.pooledOutput = pooled != null;
+			this.outputName = pooled != null ? pooled
+					: tokens != null ? tokens : outputs.length > 0 ? outputs[0] : "last_hidden_state";
+			this.env = createdEnv;
+			this.session = createdSession;
+			this.id = modelId;
+			this.dims = embed("dimension probe").length;
+		} catch (Throwable t) {
+			if (createdSession != null) {
+				try {
+					runtime.releaseSession(createdSession);
+				} catch (Throwable suppressed) {
+					t.addSuppressed(suppressed);
+				}
+			}
+			if (createdEnv != null) {
+				try {
+					runtime.releaseEnv(createdEnv);
+				} catch (Throwable suppressed) {
+					t.addSuppressed(suppressed);
+				}
+			}
+			try {
+				runtime.close();
+			} catch (Throwable suppressed) {
+				t.addSuppressed(suppressed);
+			}
+			throw t;
 		}
-		this.pooledOutput = pooled != null;
-		this.outputName = pooled != null ? pooled
-				: tokens != null ? tokens : outputs.length > 0 ? outputs[0] : "last_hidden_state";
-		this.id = modelId;
-		this.dims = embed("dimension probe").length;
 	}
 
 	public String id() {
@@ -172,7 +203,16 @@ public final class Embedder implements Embedding, AutoCloseable {
 			default -> new long[tokens.length]; // token_type_ids: zeros
 			};
 		}
-		OrtRuntime.Result r = runtime.run(session, inputNames, inputs, outputName);
+		OrtRuntime.Result r;
+		sessionLock.lock();
+		try {
+			if (closed) {
+				throw new IllegalStateException("Embedder is closed");
+			}
+			r = runtime.run(session, inputNames, inputs, outputName);
+		} finally {
+			sessionLock.unlock();
+		}
 		int hidden = (int) r.shape()[r.shape().length - 1];
 		float[] v;
 		if (pooledOutput || r.shape().length < 3 || "cls".equals(spec.pooling())) {
@@ -268,7 +308,23 @@ public final class Embedder implements Embedding, AutoCloseable {
 
 	@Override
 	public void close() {
-		runtime.releaseSession(session);
-		runtime.releaseEnv(env);
+		sessionLock.lock();
+		try {
+			if (closed) {
+				return;
+			}
+			closed = true;
+			try {
+				runtime.releaseSession(session);
+			} finally {
+				try {
+					runtime.releaseEnv(env);
+				} finally {
+					runtime.close();
+				}
+			}
+		} finally {
+			sessionLock.unlock();
+		}
 	}
 }

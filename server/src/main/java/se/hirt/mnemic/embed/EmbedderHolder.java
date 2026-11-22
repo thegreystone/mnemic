@@ -68,12 +68,21 @@ public final class EmbedderHolder implements AutoCloseable {
 	private final AtomicReference<Embedder> embedder = new AtomicReference<>();
 	private volatile State state = State.off("not configured");
 	private volatile Path library;
+	private volatile boolean closed;
+	private final Path modelsDir;
 	private final List<ModelFetcher.Item> plan;
+	private final LibrarySource librarySource;
+	private final Path modelDir;
+	private final String modelId;
 	private final Consumer<Embedder> onReady;
 	private Thread worker;
 
 	/** A holder around an embedder the caller built and owns, or around nothing. */
 	public EmbedderHolder(Embedder fixed) {
+		this.modelsDir = null;
+		this.librarySource = null;
+		this.modelDir = null;
+		this.modelId = null;
 		this.onReady = e -> {
 		};
 		this.plan = List.of();
@@ -97,33 +106,81 @@ public final class EmbedderHolder implements AutoCloseable {
 	 */
 	public EmbedderHolder(Path modelsDir, List<ModelFetcher.Item> plan, LibrarySource library, Path modelDir,
 			String modelId, Consumer<Embedder> onReady) {
-		this.onReady = onReady;
+		this.modelsDir = modelsDir;
 		this.plan = plan;
+		this.librarySource = library;
+		this.modelDir = modelDir;
+		this.modelId = modelId;
+		this.onReady = onReady;
+		startWorker();
+	}
+
+	private synchronized void startWorker() {
+		if (closed) {
+			return;
+		}
 		state = new State(ModelFetcher.complete(plan) ? "loading" : "downloading", 0, modelId);
-		worker = new Thread(() -> run(modelsDir, plan, library, modelDir, modelId), "mnemic-embedder");
+		worker = new Thread(this::run, "mnemic-embedder");
 		worker.setDaemon(true);
 		worker.start();
 	}
 
-	private void run(
-		Path modelsDir, List<ModelFetcher.Item> plan, LibrarySource library, Path modelDir, String modelId) {
+	/**
+	 * Retries fetching and loading in the background if the previous attempt failed (e.g. the machine started offline).
+	 * Returns true when a new attempt was started.
+	 */
+	public synchronized boolean retryIfFailed() {
+		if (closed || librarySource == null || !"failed".equals(state.state())) {
+			return false;
+		}
+		startWorker();
+		return true;
+	}
+
+	private void run() {
 		try {
-			this.library = library.resolve();
+			if (closed) {
+				return;
+			}
+			this.library = librarySource.resolve();
+			if (closed) {
+				return;
+			}
 			if (!ModelFetcher.complete(plan)) {
 				long total = Math.max(1, ModelFetcher.totalBytes(plan));
 				String detail = "fetching " + (total >> 20) + " MB into " + modelsDir;
 				state = new State("downloading", 0, detail, 0, total);
-				ModelFetcher.fetch(modelsDir, plan, received -> state = new State("downloading",
-						(int) Math.min(99, received * 100 / total), detail, received, total));
+				ModelFetcher.fetch(modelsDir, plan, received -> {
+					if (!closed) {
+						state = new State("downloading", (int) Math.min(99, received * 100 / total), detail, received,
+								total);
+					}
+				});
+			}
+			if (closed) {
+				return;
 			}
 			state = new State("loading", 100, modelId);
 			Embedder e = new Embedder(this.library, modelDir, modelId);
-			embedder.set(e);
-			state = new State("ready", 100,
-					modelId + ", " + e.dims() + " dimensions, ONNX Runtime " + e.runtimeVersion());
-			onReady.accept(e);
+			synchronized (this) {
+				if (closed) {
+					e.close();
+					return;
+				}
+				embedder.set(e);
+				state = new State("ready", 100,
+						modelId + ", " + e.dims() + " dimensions, ONNX Runtime " + e.runtimeVersion());
+			}
+			if (!closed) {
+				onReady.accept(e);
+			}
 		} catch (Throwable t) {
-			state = new State("failed", 0, t.getMessage() == null ? t.getClass().getSimpleName() : t.getMessage());
+			synchronized (this) {
+				if (!closed) {
+					state = new State("failed", 0,
+							t.getMessage() == null ? t.getClass().getSimpleName() : t.getMessage());
+				}
+			}
 		}
 	}
 
@@ -153,15 +210,28 @@ public final class EmbedderHolder implements AutoCloseable {
 
 	/** Waits up to {@code millis} for the background load; returns whether the embedder is ready. */
 	public boolean await(long millis) throws InterruptedException {
-		if (worker != null) {
-			worker.join(millis);
+		Thread w;
+		synchronized (this) {
+			w = worker;
+		}
+		if (w != null) {
+			w.join(millis);
 		}
 		return embedder.get() != null;
 	}
 
 	@Override
 	public void close() {
-		Embedder e = embedder.getAndSet(null);
+		Embedder e;
+		Thread w;
+		synchronized (this) {
+			closed = true;
+			e = embedder.getAndSet(null);
+			w = worker;
+		}
+		if (w != null) {
+			w.interrupt();
+		}
 		if (e != null) {
 			e.close();
 		}

@@ -36,8 +36,15 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -114,5 +121,26 @@ class EmbedderTest {
 			}
 			System.out.println("embed ms per sentence: " + (System.nanoTime() - t0) / 20 / 1_000_000.0);
 		}
+	}
+
+	@Test
+	void concurrentEmbedCallsAndCloseAreThreadSafe() throws Exception {
+		Embedder e = open();
+		try (ExecutorService pool = Executors.newFixedThreadPool(4)) {
+			float[] expected = e.embed("Mattias Sandell works at Hooli");
+			var tasks = new ArrayList<Callable<float[]>>();
+			for (int i = 0; i < 16; i++) {
+				tasks.add(() -> e.embed("Mattias Sandell works at Hooli"));
+			}
+			List<Future<float[]>> futures = pool.invokeAll(tasks);
+			for (Future<float[]> f : futures) {
+				assertEquals(1.0f, Embedder.dot(expected, f.get()), 1e-4);
+			}
+		} finally {
+			e.close();
+		}
+		// Idempotent close and safe rejection after close instead of touching a freed native handle.
+		e.close();
+		assertThrows(IllegalStateException.class, () -> e.embed("after close"));
 	}
 }
