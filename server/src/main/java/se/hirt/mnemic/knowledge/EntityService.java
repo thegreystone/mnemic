@@ -72,6 +72,26 @@ public final class EntityService {
 	private final Clock clock;
 	private volatile Entity owner;
 	private long ownerDataVersion;
+	/** Cached mention index for {@link #mentions}, guarded by {@link Database#withLock}. */
+	private MentionIndex mentionIndex;
+	private long mentionDataVersion = -1;
+	private long mentionLocalVersion = -1;
+	private long mentionIndexLoads;
+	/**
+	 * Pure-function feature cache for fuzzy alias matching, keyed by {@code (alias, entityType)} and cleared whenever
+	 * {@link EntityTypeRegistry} changes. Safe across uncommitted write transactions and rollbacks because features
+	 * depend only on the alias text, entity type, and type registry definitions.
+	 */
+	private static final int ALIAS_FEATURES_MAX = 16_384;
+	private final Map<AliasKey, AliasFeatures> aliasFeaturesCache = new HashMap<>();
+	private long aliasFeaturesTypesVersion = -1;
+
+	private record AliasKey(String alias, String type) {
+	}
+
+	private record AliasFeatures(String norm, List<String> identityTokens, List<String> possessors,
+			Set<String> trigrams) {
+	}
 
 	/** {@code ownerIdentity}: configured aliases, e-mail addresses, and handles, seeded as aliases of the owner. */
 	private final Set<String> ownerIdentityNorms;
@@ -478,36 +498,74 @@ public final class EntityService {
 	 */
 	private List<Candidate> fuzzy(
 		Tx tx, String name, String norm, String type, Set<Long> distinctFrom, Set<String> expected) {
-		List<String> tokens = types.identityTokens(name, type).stream().filter(t -> identity(t, name)).toList();
+		long tv = types.refreshAndVersion();
+		if (tv != aliasFeaturesTypesVersion) {
+			aliasFeaturesCache.clear();
+			aliasFeaturesTypesVersion = tv;
+		}
+		List<String> tokens = types.identityTokensFresh(name, type).stream().filter(t -> identity(t, name)).toList();
 		if (tokens.isEmpty()) {
 			return List.of(); // nothing that identifies: "it", "AL" written lowercase, a stopword
 		}
-		List<String> words = Names.contentTokens(name);
 		Set<String> grams = trigrams(norm);
 		// "Marcus's iPad" is not Marcus: the possessor names whose the thing is, not what it is. Against a name with
 		// no possessive the possessor does not count as shared; against one with another possessor the things differ.
 		List<String> possessors = Names.possessors(name);
-		var out = new ArrayList<Candidate>();
-		for (Row r : tx.query("SELECT * FROM entity WHERE merged_into IS NULL AND id <> ?", owner.id())) {
-			Entity e = Entity.from(r);
-			if (distinctFrom.contains(e.id())) {
-				continue; // declared distinct by the same proposal
+		// Stream live entities without Row boxing and filter incompatible types before decoding any alias strings.
+		var compatible = new LinkedHashMap<Long, Entity>();
+		tx.queryEach("""
+				SELECT id, name, type, created_from, merged_into FROM entity
+				WHERE merged_into IS NULL AND id <> ?
+				ORDER BY id""", rs -> {
+			long id = rs.getLong(1);
+			if (distinctFrom.contains(id)) {
+				return; // declared distinct by the same proposal
 			}
-			if (!types.compatible(e.type(), type)) {
-				continue;
+			String eType = rs.getString(3);
+			if (!types.compatibleFresh(eType, type)) {
+				return;
 			}
 			// The facts say what kind of thing this is (the object of lives_in is a place): a candidate of a
 			// placed kind that is none of them is not offered.
-			if (!expected.isEmpty() && !EntityTypeRegistry.UNKNOWN.equals(e.type()) && !types.unplaced(e.type())
-					&& expected.stream().noneMatch(k -> types.isA(e.type(), k))) {
+			if (!expected.isEmpty() && !EntityTypeRegistry.UNKNOWN.equals(eType) && !types.unplacedFresh(eType)
+					&& expected.stream().noneMatch(k -> types.isAFresh(eType, k))) {
+				return;
+			}
+			long cfVal = rs.getLong(4);
+			Long createdFrom = rs.wasNull() ? null : cfVal;
+			long miVal = rs.getLong(5);
+			Long mergedInto = rs.wasNull() ? null : miVal;
+			compatible.put(id, new Entity(id, rs.getString(2), eType, createdFrom, mergedInto));
+		}, owner.id());
+		if (compatible.isEmpty()) {
+			return List.of();
+		}
+		var aliasesByEntity = new HashMap<Long, LinkedHashSet<String>>(compatible.size());
+		tx.queryEach("SELECT entity_id, alias FROM entity_alias ORDER BY id", rs -> {
+			long eid = rs.getLong(1);
+			if (!compatible.containsKey(eid)) {
+				return;
+			}
+			String alias = rs.getString(2);
+			if (alias != null) {
+				aliasesByEntity.computeIfAbsent(eid, k -> new LinkedHashSet<>()).add(alias);
+			}
+		});
+		var out = new ArrayList<Candidate>();
+		List<String> words = null;
+		Set<String> queryNumbers = null;
+		Boolean queryCanContain = null;
+		for (Entity e : compatible.values()) {
+			Collection<String> entityAliases = aliasesByEntity.get(e.id());
+			if (entityAliases == null) {
 				continue;
 			}
 			double best = 0;
-			for (String alias : aliasesOf(tx, e.id())) {
-				String an = Names.norm(alias);
-				List<String> at = types.identityTokens(alias, e.type()).stream().filter(t -> identity(t, alias))
-						.toList();
-				List<String> aliasPossessors = Names.possessors(alias);
+			for (String alias : entityAliases) {
+				AliasFeatures feat = aliasFeatures(alias, e.type());
+				String an = feat.norm();
+				List<String> at = feat.identityTokens();
+				List<String> aliasPossessors = feat.possessors();
 				List<String> mine = tokens;
 				List<String> theirs = at;
 				if (!possessors.isEmpty() && aliasPossessors.isEmpty()) {
@@ -515,7 +573,12 @@ public final class EntityService {
 				} else if (possessors.isEmpty() && !aliasPossessors.isEmpty()) {
 					theirs = at.stream().filter(t -> !aliasPossessors.contains(t)).toList(); // "Marcus" is not the iPad
 				}
-				long shared = mine.stream().filter(theirs::contains).count();
+				long shared = 0;
+				for (String tok : mine) {
+					if (theirs.contains(tok)) {
+						shared++;
+					}
+				}
 				double tokenScore = shared == 0 ? 0 : (double) shared / Math.max(tokens.size(), at.size());
 				// Malin's iPad is not Marcus's iPad, and a name that shares only its possessor's letters with
 				// another is not that other: neither may reach a question on letters alone.
@@ -530,7 +593,7 @@ public final class EntityService {
 				if (leadingDiffers) {
 					tokenScore = Math.min(tokenScore, AMBIGUOUS - 0.1);
 				}
-				double gramScore = an.length() >= 4 ? jaccard(grams, trigrams(an)) : 0;
+				double gramScore = an.length() >= 4 ? jaccard(grams, feat.trigrams()) : 0;
 				// "Lo Berg" against "Bo Berg": the letters agree because the family name is most of them, but a
 				// two-letter name has no room for a typo, so a different one is a different person. Three letters
 				// and up keep the typo question ("Ewa Berg" against "Eva Berg").
@@ -548,13 +611,27 @@ public final class EntityService {
 				}
 				// One name says more than the other: a version ("Raspberry Pi 5" against "Raspberry Pi"), or a place
 				// word that names another level ("Luzern" against "Kanton Luzern"). Asked, never merged.
-				boolean oneSaysMore = (!tokens.equals(at) && (tokens.containsAll(at) || at.containsAll(tokens)))
-						|| !numbers(name).equals(numbers(alias));
-				boolean placeWordDiffers = tokens.equals(at) && !words.equals(Names.contentTokens(alias))
-						&& (predicates.canContain(types.lineage(type))
-								|| predicates.canContain(types.lineage(e.type())));
-				if (oneSaysMore || placeWordDiffers) {
-					score = Math.min(score, MERGE - 0.01);
+				if (score > MERGE - 0.01) {
+					if (queryNumbers == null) {
+						queryNumbers = numbers(name);
+					}
+					boolean oneSaysMore = (!tokens.equals(at) && (tokens.containsAll(at) || at.containsAll(tokens)))
+							|| !queryNumbers.equals(numbers(alias));
+					boolean placeWordDiffers = false;
+					if (!oneSaysMore && tokens.equals(at)) {
+						if (words == null) {
+							words = Names.contentTokens(name);
+						}
+						if (!words.equals(Names.contentTokens(alias))) {
+							if (queryCanContain == null) {
+								queryCanContain = predicates.canContain(types.lineageFresh(type));
+							}
+							placeWordDiffers = queryCanContain || predicates.canContain(types.lineageFresh(e.type()));
+						}
+					}
+					if (oneSaysMore || placeWordDiffers) {
+						score = Math.min(score, MERGE - 0.01);
+					}
 				}
 				best = Math.max(best, score);
 			}
@@ -564,6 +641,25 @@ public final class EntityService {
 		}
 		out.sort((a, b) -> Double.compare(b.score(), a.score()));
 		return out;
+	}
+
+	private AliasFeatures aliasFeatures(String alias, String entityType) {
+		var key = new AliasKey(alias, entityType);
+		AliasFeatures cached = aliasFeaturesCache.get(key);
+		if (cached != null) {
+			return cached;
+		}
+		if (aliasFeaturesCache.size() >= ALIAS_FEATURES_MAX) {
+			aliasFeaturesCache.clear();
+		}
+		String an = Names.norm(alias);
+		List<String> at = types.identityTokensFresh(alias, entityType).stream().filter(t -> identity(t, alias))
+				.toList();
+		List<String> aliasPossessors = Names.possessors(alias);
+		Set<String> aliasGrams = an.length() >= 4 ? trigrams(an) : Set.of();
+		AliasFeatures feat = new AliasFeatures(an, at, aliasPossessors, aliasGrams);
+		aliasFeaturesCache.put(key, feat);
+		return feat;
 	}
 
 	/** The numbers in a name, which content tokens drop: the "5" that makes a Raspberry Pi 5 another thing. */
@@ -593,7 +689,14 @@ public final class EntityService {
 		if (a.isEmpty() || b.isEmpty()) {
 			return 0;
 		}
-		long inter = a.stream().filter(b::contains).count();
+		Set<String> small = a.size() <= b.size() ? a : b;
+		Set<String> large = small == a ? b : a;
+		long inter = 0;
+		for (String g : small) {
+			if (large.contains(g)) {
+				inter++;
+			}
+		}
 		return (double) inter / (a.size() + b.size() - inter);
 	}
 
@@ -845,58 +948,157 @@ public final class EntityService {
 	}
 
 	/**
+	 * Snapshot of all live entities and aliases for fast in-memory {@link #mentions(String)} spotting without
+	 * per-n-gram database round-trips. Refreshed automatically on any local or external commit.
+	 */
+	private record MentionIndex(int maxNgram, Map<String, List<Entity>> byAlias,
+			Map<String, Entity> uniquePersonFirstName, Map<String, List<Entity>> byFamily) {
+	}
+
+	/**
 	 * The mentions behind {@link #spot}: each entity with where its name stands in the query's tokens, longest names
 	 * first, so a question's structure ("Anna's siblings") can be read off the positions.
 	 */
 	public List<Mention> mentions(String query) {
 		List<String> tokens = Names.tokens(query);
-		var found = new ArrayList<Mention>();
-		boolean[] used = new boolean[tokens.size()];
-		// A fixed word limit could expose a shorter name inside a longer one: "Zurich" in
-		// "Zurich Insurance Company of Switzerland". Bound the search by the names actually on record.
-		int maxNgram = db.read(tx -> tx.queryOne("""
-				SELECT COALESCE(MAX(length(a.alias_norm) - length(replace(a.alias_norm, ' ', '')) + 1), 1) AS words
-				FROM entity_alias a JOIN entity e ON e.id = a.entity_id WHERE e.merged_into IS NULL""").orElseThrow()
-				.intOrNull("words"));
-		for (int n = Math.min(maxNgram, tokens.size()); n >= 1; n--) {
-			for (int i = 0; i + n <= tokens.size(); i++) {
-				if (anyUsed(used, i, n)) {
-					continue;
-				}
-				String gram = String.join(" ", tokens.subList(i, i + n));
-				if (SELF.contains(gram)) {
-					found.add(new Mention(owner(), i, i + n));
-					mark(used, i, n);
-					continue;
-				}
-				if (Names.STOPWORDS.contains(gram)) {
-					continue;
-				}
-				List<Entity> hits = db.read(tx -> tx.query("""
-						SELECT DISTINCT e.* FROM entity_alias a JOIN entity e ON e.id = a.entity_id
-						WHERE a.alias_norm = ? AND e.merged_into IS NULL ORDER BY e.id""", gram).stream()
-						.map(Entity::from).toList());
-				boolean nameLike = gram.length() >= 3 || Names.looksLikeName(gram, query);
-				if (hits.isEmpty() && n == 1 && nameLike) {
-					hits = db.read(tx -> tx.query("""
-							SELECT e.* FROM entity e WHERE e.type = 'person' AND e.merged_into IS NULL
-							AND (lower(e.name) LIKE ? || ' %')""", gram).stream().map(Entity::from).toList());
-					if (hits.size() > 1) {
-						hits = List.of(); // ambiguous first name: no guess
+		if (tokens.isEmpty()) {
+			return List.of();
+		}
+		return db.withLock(() -> {
+			MentionIndex idx = mentionIndex();
+			Entity self = owner();
+			var found = new ArrayList<Mention>();
+			boolean[] used = new boolean[tokens.size()];
+			// A fixed word limit could expose a shorter name inside a longer one: "Zurich" in
+			// "Zurich Insurance Company of Switzerland". Bound the search by the names actually on record.
+			for (int n = Math.min(idx.maxNgram(), tokens.size()); n >= 1; n--) {
+				for (int i = 0; i + n <= tokens.size(); i++) {
+					if (anyUsed(used, i, n)) {
+						continue;
 					}
-				}
-				if (hits.isEmpty() && nameLike) {
-					hits = family(gram, tokens.subList(i, i + n));
-				}
-				if (!hits.isEmpty()) {
-					for (Entity e : hits) {
-						found.add(new Mention(e, i, i + n));
+					String gram = String.join(" ", tokens.subList(i, i + n));
+					if (SELF.contains(gram)) {
+						found.add(new Mention(self, i, i + n));
+						mark(used, i, n);
+						continue;
 					}
-					mark(used, i, n);
+					if (Names.STOPWORDS.contains(gram)) {
+						continue;
+					}
+					List<Entity> hits = idx.byAlias().getOrDefault(gram, List.of());
+					boolean nameLike = gram.length() >= 3 || Names.looksLikeName(gram, query);
+					if (hits.isEmpty() && n == 1 && nameLike) {
+						Entity person = idx.uniquePersonFirstName().get(gram);
+						if (person != null) {
+							hits = List.of(person);
+						}
+					}
+					if (hits.isEmpty() && nameLike) {
+						List<String> words = tokens.subList(i, i + n);
+						if (!words.stream()
+								.allMatch(w -> Names.STOPWORDS.contains(w) || MODEL_NUMBER.matcher(w).matches())) {
+							hits = idx.byFamily().getOrDefault(gram, List.of());
+						}
+					}
+					if (!hits.isEmpty()) {
+						for (Entity e : hits) {
+							found.add(new Mention(e, i, i + n));
+						}
+						mark(used, i, n);
+					}
 				}
 			}
+			return found;
+		});
+	}
+
+	private MentionIndex mentionIndex() {
+		if (db.inWriteTransaction()) {
+			return loadMentionIndex();
 		}
-		return found;
+		long dv = db.dataVersion();
+		long lv = db.localVersion();
+		if (mentionIndex == null || mentionDataVersion != dv || mentionLocalVersion != lv) {
+			mentionIndex = loadMentionIndex();
+			mentionDataVersion = dv;
+			mentionLocalVersion = lv;
+			mentionIndexLoads++;
+		}
+		return mentionIndex;
+	}
+
+	private MentionIndex loadMentionIndex() {
+		return db.read(tx -> {
+			int[] maxNgram = {1};
+			var byAlias = new HashMap<String, List<Entity>>();
+			var uniquePersonFirstName = new HashMap<String, Entity>();
+			var ambiguousFirstNames = new HashSet<String>();
+			var byFamily = new HashMap<String, List<Entity>>();
+			long[] lastEntityId = {-1};
+			Entity[] current = {null};
+			tx.queryEach("""
+					SELECT e.id, e.name, e.type, e.created_from, e.merged_into, a.alias_norm
+					FROM entity e
+					LEFT JOIN entity_alias a ON a.entity_id = e.id
+					WHERE e.merged_into IS NULL
+					ORDER BY e.id, a.id""", rs -> {
+				long id = rs.getLong(1);
+				if (id != lastEntityId[0]) {
+					long cfVal = rs.getLong(4);
+					Long createdFrom = rs.wasNull() ? null : cfVal;
+					long miVal = rs.getLong(5);
+					Long mergedInto = rs.wasNull() ? null : miVal;
+					current[0] = new Entity(id, rs.getString(2), rs.getString(3), createdFrom, mergedInto);
+					lastEntityId[0] = id;
+					if ("person".equals(current[0].type()) && current[0].name() != null) {
+						String lower = current[0].name().toLowerCase(Locale.ROOT);
+						int sp = lower.indexOf(' ');
+						if (sp > 0) {
+							String first = lower.substring(0, sp);
+							if (!ambiguousFirstNames.contains(first)) {
+								if (uniquePersonFirstName.containsKey(first)) {
+									uniquePersonFirstName.remove(first);
+									ambiguousFirstNames.add(first);
+								} else {
+									uniquePersonFirstName.put(first, current[0]);
+								}
+							}
+						}
+					}
+				}
+				String aliasNorm = rs.getString(6);
+				if (aliasNorm != null) {
+					int spaces = 0;
+					for (int k = 0; k < aliasNorm.length(); k++) {
+						if (aliasNorm.charAt(k) == ' ') {
+							spaces++;
+						}
+					}
+					if (spaces + 1 > maxNgram[0]) {
+						maxNgram[0] = spaces + 1;
+					}
+					addUniqueEntity(byAlias, aliasNorm, current[0]);
+					List<String> aliasTokens = Names.tokens(aliasNorm);
+					List<String> stripped = aliasTokens.stream().filter(w -> !MODEL_NUMBER.matcher(w).matches())
+							.toList();
+					if (!stripped.isEmpty() && stripped.size() < aliasTokens.size()) {
+						addUniqueEntity(byFamily, String.join(" ", stripped), current[0]);
+					}
+				}
+			});
+			return new MentionIndex(maxNgram[0], byAlias, uniquePersonFirstName, byFamily);
+		});
+	}
+
+	private static void addUniqueEntity(Map<String, List<Entity>> map, String key, Entity entity) {
+		List<Entity> list = map.computeIfAbsent(key, ignored -> new ArrayList<>(1));
+		if (list.isEmpty() || list.getLast().id() != entity.id()) {
+			list.add(entity);
+		}
+	}
+
+	long mentionIndexLoads() {
+		return db.withLock(() -> mentionIndexLoads);
 	}
 
 	/** A version or model number: "5", "4b", "v2", "mk3". */
@@ -941,31 +1143,6 @@ public final class EntityService {
 			}
 		}
 		return false;
-	}
-
-	/**
-	 * The family a shorter name refers to: every entity whose alias, with its model numbers removed, is the words
-	 * given. "raspberry pi" spots Raspberry Pi 4 and Raspberry Pi 5 alike, and the reader sorts them out; "raspberry pi
-	 * 5" is exact and spots one. Nothing is spotted for a name that is itself a plain word.
-	 */
-	private List<Entity> family(String gram, List<String> words) {
-		if (words.stream().allMatch(w -> Names.STOPWORDS.contains(w) || MODEL_NUMBER.matcher(w).matches())) {
-			return List.of();
-		}
-		String first = words.getFirst().replace("%", "").replace("_", "");
-		var out = new LinkedHashMap<Long, Entity>();
-		for (Row r : db.read(tx -> tx.query("""
-				SELECT e.*, a.alias_norm AS alias_norm FROM entity_alias a JOIN entity e ON e.id = a.entity_id
-				WHERE a.alias_norm LIKE '%' || ? || '%' AND a.alias_norm <> ? AND e.merged_into IS NULL
-				ORDER BY e.id""", first, gram))) {
-			List<String> at = Names.tokens(r.str("alias_norm")).stream().filter(w -> !MODEL_NUMBER.matcher(w).matches())
-					.toList();
-			if (at.equals(words) && !at.equals(Names.tokens(r.str("alias_norm")))) {
-				Entity e = Entity.from(r);
-				out.putIfAbsent(e.id(), e);
-			}
-		}
-		return new ArrayList<>(out.values());
 	}
 
 	private static boolean anyUsed(boolean[] used, int i, int n) {

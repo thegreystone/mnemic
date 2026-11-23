@@ -33,13 +33,17 @@ package se.hirt.mnemic.embed;
 
 import org.junit.jupiter.api.Test;
 import se.hirt.mnemic.Engine;
+import se.hirt.mnemic.persistence.Database;
 
+import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static se.hirt.mnemic.TestHomes.engine;
+import static se.hirt.mnemic.TestHomes.fresh;
 import static se.hirt.mnemic.TestHomes.remember;
 
 /** The vector table and its scan, with synthetic vectors: no model needed. */
@@ -124,6 +128,119 @@ class VectorStoreTest {
 			assertTrue(v.missingFacts("m", 10).isEmpty());
 			assertTrue(e.forget(obs), "forgetting removes the vectors with the rows");
 			assertEquals(0, v.count("m"));
+		}
+	}
+
+	@Test
+	void searchServesFromCacheAndUpdatesIncrementallyOnPut() {
+		try (Engine e = engine("vec-cache-hit")) {
+			VectorStore v = e.vectors();
+			float[] vec1 = new float[] {1, 0, 0};
+			v.put(VectorStore.OBSERVATION, 1, "m", vec1);
+			v.put(VectorStore.OBSERVATION, 2, "m", new float[] {0, 1, 0});
+			assertEquals(0, v.cacheLoads());
+
+			// First search loads from SQLite; repeated searches hit the in-memory cache.
+			assertEquals(1, v.search("m", new float[] {1, 0, 0}, 1).getFirst().id());
+			assertEquals(1, v.cacheLoads());
+			assertEquals(2, v.search("m", new float[] {0, 1, 0}, 1).getFirst().id());
+			assertEquals(1, v.cacheLoads(), "repeated searches on the same model must reuse cached vectors");
+
+			// Top-level put updates the cache in place and copies the caller array defensively.
+			float[] vec3 = new float[] {0, 0, 1};
+			v.put(VectorStore.FACT, 3, "m", vec3);
+			vec3[2] = -1; // mutating caller array must not affect cached vector
+			List<VectorStore.Hit> hits = v.search("m", new float[] {0, 0, 1}, 1);
+			assertEquals(3, hits.getFirst().id());
+			assertEquals(1.0f, hits.getFirst().score(), 1e-6f);
+			assertEquals(1, v.cacheLoads(), "incremental put must not trigger full reload");
+
+			// Empty chunk replacement drops the item from cache without reload.
+			v.putChunks(VectorStore.FACT, 3, "m", List.of());
+			assertEquals(2, v.search("m", new float[] {0, 0, 1}, 5).size());
+			assertEquals(1, v.cacheLoads());
+
+			// Switching models reloads for the requested model; k <= 0 returns empty cleanly.
+			v.put(VectorStore.FACT, 9, "other", new float[] {1, 0, 0});
+			assertEquals(9, v.search("other", new float[] {1, 0, 0}, 1).getFirst().id());
+			assertEquals(2, v.cacheLoads());
+			assertTrue(v.search("other", new float[] {1, 0, 0}, 0).isEmpty());
+		}
+	}
+
+	@Test
+	void cacheInvalidatesOnDropKindDropOtherModelsAndForget() {
+		try (Engine e = engine("vec-cache-drop")) {
+			VectorStore v = e.vectors();
+			v.put(VectorStore.OBSERVATION, 1, "m", new float[] {1, 0, 0});
+			v.put(VectorStore.FACT, 2, "m", new float[] {0, 1, 0});
+			v.put(VectorStore.OBSERVATION, 3, "old", new float[] {1, 0, 0});
+
+			assertEquals(2, v.search("m", new float[] {1, 0, 0}, 5).size());
+			assertEquals(1, v.cacheLoads());
+
+			// dropKind removes matching items from the active cache cleanly.
+			v.dropKind(VectorStore.FACT);
+			List<VectorStore.Hit> afterDropKind = v.search("m", new float[] {1, 0, 0}, 5);
+			assertEquals(1, afterDropKind.size());
+			assertEquals(VectorStore.OBSERVATION, afterDropKind.getFirst().kind());
+
+			// dropOtherModels keeping "m" leaves "m" intact; dropping "m" invalidates the cache.
+			assertEquals(1, v.dropOtherModels("m"));
+			assertEquals(1, v.search("m", new float[] {1, 0, 0}, 5).size());
+			assertEquals(1, v.dropOtherModels("new-model"));
+			assertTrue(v.search("m", new float[] {1, 0, 0}, 5).isEmpty());
+		}
+	}
+
+	@Test
+	void cacheIsRollbackSafeInsideFailedTransaction() {
+		try (Engine e = engine("vec-cache-rollback")) {
+			VectorStore v = e.vectors();
+			v.put(VectorStore.OBSERVATION, 1, "m", new float[] {1, 0, 0});
+			assertEquals(1, v.search("m", new float[] {1, 0, 0}, 5).size());
+			assertEquals(1, v.cacheLoads());
+
+			assertThrows(IllegalStateException.class, () -> e.database().write(tx -> {
+				v.put(VectorStore.OBSERVATION, 2, "m", new float[] {0, 1, 0});
+				// Inside the open write transaction, search sees the uncommitted row without polluting the cache.
+				assertEquals(2, v.search("m", new float[] {0, 1, 0}, 5).size());
+				throw new IllegalStateException("abort tx");
+			}));
+
+			// After rollback, only the committed vector is returned.
+			List<VectorStore.Hit> after = v.search("m", new float[] {0, 1, 0}, 5);
+			assertEquals(1, after.size(), "rolled-back vector must never linger in cache");
+			assertEquals(1, after.getFirst().id());
+		}
+	}
+
+	@Test
+	void cacheDetectsExternalProcessWritesViaDataVersion() {
+		Path home = fresh("vec-multiprocess");
+		try (Database db1 = new Database(home.resolve("mnemic.db"));
+				Database db2 = new Database(home.resolve("mnemic.db"))) {
+			VectorStore v1 = new VectorStore(db1);
+			VectorStore v2 = new VectorStore(db2);
+
+			v1.put(VectorStore.OBSERVATION, 1, "m", new float[] {1, 0, 0});
+			assertEquals(1, v1.search("m", new float[] {1, 0, 0}, 5).size());
+			assertEquals(1, v1.cacheLoads());
+
+			// External connection writes vector 2; v1 detects PRAGMA data_version change on next search.
+			v2.put(VectorStore.OBSERVATION, 2, "m", new float[] {0, 1, 0});
+			List<VectorStore.Hit> seen = v1.search("m", new float[] {0, 1, 0}, 5);
+			assertEquals(2, seen.size());
+			assertEquals(2, seen.getFirst().id());
+			assertEquals(2, v1.cacheLoads());
+
+			// Interleaved write race: v2 commits vector 3, then v1 commits vector 4 before searching.
+			v2.put(VectorStore.OBSERVATION, 3, "m", new float[] {0, 0, 1});
+			v1.put(VectorStore.OBSERVATION, 4, "m", new float[] {0.5f, 0.5f, 0});
+			List<VectorStore.Hit> all = v1.search("m", new float[] {0, 0, 1}, 10);
+			assertEquals(4, all.size(), "v1 must not miss external write when interleaved with local put");
+			assertEquals(3, all.getFirst().id());
+			assertEquals(3, v1.cacheLoads());
 		}
 	}
 }

@@ -47,6 +47,7 @@ import se.hirt.mnemic.knowledge.FactQueries.History;
 import se.hirt.mnemic.knowledge.FactService;
 import se.hirt.mnemic.knowledge.FactService.Applied;
 import se.hirt.mnemic.knowledge.FactService.Corrected;
+import se.hirt.mnemic.knowledge.FactService.EventOut;
 import se.hirt.mnemic.knowledge.Question;
 import se.hirt.mnemic.knowledge.FactService.Removed;
 import se.hirt.mnemic.knowledge.FactService.FactOut;
@@ -282,7 +283,8 @@ public final class Engine implements AutoCloseable {
 						+ "accepted: " + String.join(" ", applied.warnings()));
 			}
 			embed(obs, applied);
-			return new RememberOutcome(r, applied, resolved, "assistant", derive());
+			Deriver.Outcome derived = needsDerivation(proposal, applied, resolved) ? derive() : Deriver.Outcome.NOTHING;
+			return new RememberOutcome(r, applied, resolved, "assistant", derived);
 		}
 		embed(obs, Applied.NOTHING);
 		ModelProposer proposer = options.proposer();
@@ -295,7 +297,9 @@ public final class Engine implements AutoCloseable {
 		}
 		Applied applied = applyServerProposal(obs, made.proposal());
 		embed(obs, applied);
-		return new RememberOutcome(r, applied, resolved, "server:" + proposer.id(), derive());
+		Deriver.Outcome derived = needsDerivation(made.proposal(), applied, resolved) ? derive()
+				: Deriver.Outcome.NOTHING;
+		return new RememberOutcome(r, applied, resolved, "server:" + proposer.id(), derived);
 	}
 
 	/** A reading given to an observation: what it produced, and what the reading it replaced had produced. */
@@ -331,7 +335,9 @@ public final class Engine implements AutoCloseable {
 			observations.attachProposal(obs.id(), Json.write(proposal), Proposal.CURRENT_SPEC_VERSION, null);
 			Observation stored = observations.get(obs.id()).orElseThrow();
 			Applied applied = knowledge.factService().apply(stored, proposal);
-			derive();
+			if (needsDerivation(removed) || needsDerivation(proposal, applied, List.of())) {
+				derive();
+			}
 			return new RereadResult(stored, applied, removed);
 		});
 		embed(result.stored(), result.applied());
@@ -503,7 +509,7 @@ public final class Engine implements AutoCloseable {
 	private boolean forgetOne(long observationId, boolean keepEntities) {
 		// A correction restates the fact it corrects: forgetting the fact for privacy forgets its corrections too.
 		List<Long> records = knowledge.factService().correctionRecordsOf(observationId);
-		knowledge.factService().forgetDerived(observationId, keepEntities);
+		Removed removed = knowledge.factService().forgetDerived(observationId, keepEntities);
 		vectors.forget(observationId); // after: a re-homed fact keeps its vector, a deleted one loses it
 		boolean forgotten = observations.forget(observationId);
 		for (long record : records) {
@@ -513,7 +519,9 @@ public final class Engine implements AutoCloseable {
 			// An entity created by an earlier forgotten observation may have lost its last reference just now.
 			knowledge.entities().removeOrphansOfForgotten();
 		}
-		derive();
+		if (needsDerivation(removed)) {
+			derive();
+		}
 		return forgotten;
 	}
 
@@ -585,7 +593,9 @@ public final class Engine implements AutoCloseable {
 	public List<Map<String, Object>> answer(List<Resolve> resolves) {
 		List<Map<String, Object>> resolved = knowledge.resolver().resolve(resolves, options.clock().instant());
 		embedMissing(50);
-		derive();
+		if (!resolved.isEmpty()) {
+			derive();
+		}
 		return resolved;
 	}
 
@@ -617,14 +627,18 @@ public final class Engine implements AutoCloseable {
 			result = runCorrection(() -> {
 				Observation record = correctionRecord("Retirement of " + about + why, factId);
 				Corrected retired = knowledge.factService().retire(factId, reason, record);
-				derive();
+				if (needsDerivation(retired)) {
+					derive();
+				}
 				return retired;
 			});
 		} else if (replacement != null && Boolean.TRUE.equals(replacement.get("wrong"))) {
 			result = runCorrection(() -> {
 				Observation record = correctionRecord("Retraction of " + about + why, factId);
 				Corrected retracted = knowledge.factService().retract(factId, reason, record);
-				derive();
+				if (needsDerivation(retracted)) {
+					derive();
+				}
 				return retracted;
 			});
 		} else {
@@ -636,7 +650,9 @@ public final class Engine implements AutoCloseable {
 				Observation record = correctionRecord("Correction of " + about + why + " → " + Json.write(replacement),
 						factId);
 				Corrected corrected = knowledge.factService().correct(factId, replacement, reason, record);
-				derive();
+				if (needsDerivation(corrected)) {
+					derive();
+				}
 				return corrected;
 			});
 		}
@@ -741,7 +757,10 @@ public final class Engine implements AutoCloseable {
 					new Source("correction", ev.ref(), null, null, null), now, Json.write(reading), null, null);
 			Observation record = observations.get(r.observationId()).orElseThrow();
 			EventService.Redated moved = knowledge.factService().redate(eventId, b, record);
-			derive();
+			Set<String> relevant = knowledge.deriver().relevantPredicates();
+			if (!moved.opened().isEmpty() || !moved.closed().isEmpty() || eventAffectsDerivation(ev.type(), relevant)) {
+				derive();
+			}
 			var out = new LinkedHashMap<String, Object>();
 			out.put("event", ev.ref());
 			out.put("before",
@@ -819,7 +838,10 @@ public final class Engine implements AutoCloseable {
 			Observation record = observations.get(r.observationId()).orElseThrow();
 			Map<String, Object> changed = knowledge.factService().retype(ev.id(), type, newDetail, changedRoles,
 					record);
-			derive();
+			Set<String> relevant = knowledge.deriver().relevantPredicates();
+			if (eventAffectsDerivation(ev.type(), relevant) || eventAffectsDerivation(type, relevant)) {
+				derive();
+			}
 			var out = new LinkedHashMap<String, Object>();
 			out.put("event", ev.ref());
 			out.putAll(changed);
@@ -1347,6 +1369,78 @@ public final class Engine implements AutoCloseable {
 	/** Brings the derived facts in line with the current facts and rules (family K). */
 	public Deriver.Outcome derive() {
 		return knowledge.deriver().derive();
+	}
+
+	private boolean needsDerivation(Proposal proposal, Applied applied, List<Map<String, Object>> resolved) {
+		if (resolved != null && !resolved.isEmpty()) {
+			return true;
+		}
+		if (proposal != null && (!proposal.predicates().isEmpty() || !proposal.closures().isEmpty())) {
+			return true;
+		}
+		Set<String> relevant = knowledge.deriver().relevantPredicates();
+		if (relevant.isEmpty() || applied == null) {
+			return false;
+		}
+		for (FactOut f : applied.facts()) {
+			if (relevant.contains(f.predicate())) {
+				return true;
+			}
+		}
+		for (EventOut ev : applied.events()) {
+			if (eventAffectsDerivation(ev.type(), relevant)) {
+				return true;
+			}
+		}
+		for (Map<String, Object> s : applied.superseded()) {
+			Object pred = s.get("predicate");
+			if (pred == null || relevant.contains(String.valueOf(pred))) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private boolean needsDerivation(Removed removed) {
+		if (removed == null) {
+			return false;
+		}
+		if (removed.reopened() > 0 || removed.eventsUpdated() || !removed.events().isEmpty()) {
+			return true;
+		}
+		if (removed.predicates().isEmpty()) {
+			return false;
+		}
+		Set<String> relevant = knowledge.deriver().relevantPredicates();
+		for (String p : removed.predicates()) {
+			if (relevant.contains(p)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private boolean needsDerivation(Corrected corrected) {
+		if (corrected == null) {
+			return false;
+		}
+		Set<String> relevant = knowledge.deriver().relevantPredicates();
+		if (relevant.isEmpty()) {
+			return false;
+		}
+		return (corrected.original() != null && relevant.contains(corrected.original().predicate()))
+				|| (corrected.replacement() != null && relevant.contains(corrected.replacement().predicate()));
+	}
+
+	private boolean eventAffectsDerivation(String type, Set<String> relevant) {
+		if (relevant.isEmpty()) {
+			return false;
+		}
+		return knowledge.eventTypes().get(type)
+				.map(et -> et.endsEntity() || et.opens().stream().anyMatch(relevant::contains)
+						|| et.closes().stream().anyMatch(relevant::contains)
+						|| et.supersedes().stream().anyMatch(relevant::contains))
+				.orElse(false);
 	}
 
 	public Deriver deriver() {

@@ -84,7 +84,10 @@ public final class EntityTypeRegistry {
 	private final Set<String> typeWords = new HashSet<>();
 	/** Seed rows read with no kinds column value at all: filled from the seed once, at this start. */
 	private final Set<String> kindsUnset = new HashSet<>();
+	/** Cached type-word drop sets per canonical type, cleared whenever the registry changes. */
+	private final Map<String, Set<String>> dropWordsByType = new HashMap<>();
 	private long dataVersion = -1;
+	private long stateVersion;
 
 	public EntityTypeRegistry(Database db) {
 		this.db = db;
@@ -134,8 +137,10 @@ public final class EntityTypeRegistry {
 			byName.clear();
 			bySynonym.clear();
 			typeWords.clear();
+			dropWordsByType.clear();
 			load();
 			dataVersion = dv;
+			stateVersion++;
 		}
 	}
 
@@ -145,8 +150,18 @@ public final class EntityTypeRegistry {
 			byName.clear();
 			bySynonym.clear();
 			typeWords.clear();
+			dropWordsByType.clear();
 			load();
 			dataVersion = db.dataVersion();
+			stateVersion++;
+		});
+	}
+
+	/** Refreshes once under the database lock and returns a version that changes on any local or external update. */
+	long refreshAndVersion() {
+		return db.withLock(() -> {
+			refreshIfStale();
+			return stateVersion;
 		});
 	}
 
@@ -168,12 +183,16 @@ public final class EntityTypeRegistry {
 	public String canonical(String type) {
 		return db.withLock(() -> {
 			refreshIfStale();
-			if (type == null || type.isBlank()) {
-				return UNKNOWN;
-			}
-			String t = key(type);
-			return byName.containsKey(t) ? t : bySynonym.getOrDefault(t, t);
+			return canonicalLocked(type);
 		});
+	}
+
+	private String canonicalLocked(String type) {
+		if (type == null || type.isBlank()) {
+			return UNKNOWN;
+		}
+		String t = key(type);
+		return byName.containsKey(t) ? t : bySynonym.getOrDefault(t, t);
 	}
 
 	/** Registered names are lowercase with underscores: "Sports club" and "sports_club" are one type. */
@@ -193,25 +212,42 @@ public final class EntityTypeRegistry {
 	public List<String> lineage(String type) {
 		return db.withLock(() -> {
 			refreshIfStale();
-			var out = new ArrayList<String>();
-			String at = type == null ? UNKNOWN : canonical(type);
-			while (at != null && !out.contains(at)) {
-				out.add(at);
-				EntityType e = byName.get(at);
-				at = e == null ? null : e.parent();
-			}
-			return out;
+			return lineageLocked(type);
 		});
+	}
+
+	private List<String> lineageLocked(String type) {
+		var out = new ArrayList<String>();
+		String at = type == null ? UNKNOWN : canonicalLocked(type);
+		while (at != null && !out.contains(at)) {
+			out.add(at);
+			EntityType e = byName.get(at);
+			at = e == null ? null : e.parent();
+		}
+		return out;
 	}
 
 	/** Whether {@code type} is {@code kind} or nests within it: a country is a place. */
 	public boolean isA(String type, String kind) {
-		return lineage(type).contains(kind);
+		return db.withLock(() -> {
+			refreshIfStale();
+			return lineageLocked(type).contains(kind);
+		});
 	}
 
 	/** The same kind of thing: equal types, or the same root (a town and a country resolve against each other). */
 	public boolean sameKind(String a, String b) {
-		return a.equals(b) || lineage(a).getLast().equals(lineage(b).getLast());
+		if (a.equals(b)) {
+			return true;
+		}
+		return db.withLock(() -> {
+			refreshIfStale();
+			return sameKindLocked(a, b);
+		});
+	}
+
+	private boolean sameKindLocked(String a, String b) {
+		return a.equals(b) || lineageLocked(a).getLast().equals(lineageLocked(b).getLast());
 	}
 
 	/**
@@ -221,12 +257,16 @@ public final class EntityTypeRegistry {
 	public boolean unplaced(String type) {
 		return db.withLock(() -> {
 			refreshIfStale();
-			if (type == null || type.isBlank() || UNKNOWN.equals(type)) {
-				return false;
-			}
-			EntityType e = byName.get(canonical(type));
-			return e == null || (e.inferred() && e.parent() == null);
+			return unplacedLocked(type);
 		});
+	}
+
+	private boolean unplacedLocked(String type) {
+		if (type == null || type.isBlank() || UNKNOWN.equals(type)) {
+			return false;
+		}
+		EntityType e = byName.get(canonicalLocked(type));
+		return e == null || (e.inferred() && e.parent() == null);
 	}
 
 	/**
@@ -235,7 +275,17 @@ public final class EntityTypeRegistry {
 	 * either is one car).
 	 */
 	public boolean compatible(String a, String b) {
-		return UNKNOWN.equals(a) || UNKNOWN.equals(b) || sameKind(a, b) || unplaced(a) || unplaced(b);
+		if (UNKNOWN.equals(a) || UNKNOWN.equals(b) || a.equals(b)) {
+			return true;
+		}
+		return db.withLock(() -> {
+			refreshIfStale();
+			return compatibleLocked(a, b);
+		});
+	}
+
+	private boolean compatibleLocked(String a, String b) {
+		return UNKNOWN.equals(a) || UNKNOWN.equals(b) || sameKindLocked(a, b) || unplacedLocked(a) || unplacedLocked(b);
 	}
 
 	/**
@@ -275,16 +325,49 @@ public final class EntityTypeRegistry {
 	public List<String> identityTokens(String name, String type) {
 		return db.withLock(() -> {
 			refreshIfStale();
-			var drop = new HashSet<String>();
-			for (String kind : lineage(canonical(type))) {
+			return identityTokensLocked(name, type);
+		});
+	}
+
+	private List<String> identityTokensLocked(String name, String type) {
+		String canon = canonicalLocked(type);
+		Set<String> drop = dropWordsByType.computeIfAbsent(canon, k -> {
+			var words = new HashSet<String>();
+			for (String kind : lineageLocked(k)) {
 				EntityType e = byName.get(kind);
 				if (e != null) {
-					drop.addAll(e.typeWords());
+					words.addAll(e.typeWords());
 				}
 			}
-			List<String> kept = Names.contentTokens(name).stream().filter(t -> !drop.contains(t)).toList();
-			return kept.isEmpty() ? Names.contentTokens(name) : kept; // "Kanton" alone stays "kanton"
+			return words.isEmpty() ? Set.of() : Set.copyOf(words);
 		});
+		List<String> content = Names.contentTokens(name);
+		if (drop.isEmpty()) {
+			return content;
+		}
+		List<String> kept = content.stream().filter(t -> !drop.contains(t)).toList();
+		return kept.isEmpty() ? content : kept; // "Kanton" alone stays "kanton"
+	}
+
+	/** Caller holds {@link Database#withLock} and already called {@link #refreshAndVersion()} in the same operation. */
+	boolean compatibleFresh(String a, String b) {
+		return compatibleLocked(a, b);
+	}
+
+	boolean unplacedFresh(String type) {
+		return unplacedLocked(type);
+	}
+
+	boolean isAFresh(String type, String kind) {
+		return lineageLocked(type).contains(kind);
+	}
+
+	List<String> lineageFresh(String type) {
+		return lineageLocked(type);
+	}
+
+	List<String> identityTokensFresh(String name, String type) {
+		return identityTokensLocked(name, type);
 	}
 
 	/**
@@ -696,7 +779,7 @@ public final class EntityTypeRegistry {
 	public boolean isDisjoint(String type) {
 		return db.withLock(() -> {
 			refreshIfStale();
-			for (String t : lineage(canonical(type))) {
+			for (String t : lineageLocked(canonicalLocked(type))) {
 				EntityType e = byName.get(t);
 				if (e != null && e.disjoint()) {
 					return true;
@@ -740,5 +823,7 @@ public final class EntityTypeRegistry {
 		e.synonyms().forEach(s -> bySynonym.putIfAbsent(s, e.name()));
 		typeWords.clear();
 		byName.values().forEach(t -> typeWords.addAll(t.typeWords()));
+		dropWordsByType.clear();
+		stateVersion++;
 	}
 }

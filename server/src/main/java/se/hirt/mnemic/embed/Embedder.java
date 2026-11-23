@@ -89,7 +89,9 @@ public final class Embedder implements Embedding, AutoCloseable {
 	private final Spec spec;
 	private final String id;
 	private final int dims;
+	private final double probeMs;
 	private boolean closed;
+	private long inferences;
 
 	/**
 	 * @param library
@@ -136,7 +138,9 @@ public final class Embedder implements Embedding, AutoCloseable {
 			this.env = createdEnv;
 			this.session = createdSession;
 			this.id = modelId;
+			long t0 = System.nanoTime();
 			this.dims = embed("dimension probe").length;
+			this.probeMs = Math.round((System.nanoTime() - t0) / 1_000_00) / 10.0;
 		} catch (Throwable t) {
 			if (createdSession != null) {
 				try {
@@ -167,6 +171,21 @@ public final class Embedder implements Embedding, AutoCloseable {
 
 	public int dims() {
 		return dims;
+	}
+
+	/** Duration in milliseconds of the one-time dimension probe run when this embedder was loaded. */
+	public double probeMs() {
+		return probeMs;
+	}
+
+	/** Total number of ONNX Runtime inference calls executed by this embedder. */
+	public long inferences() {
+		sessionLock.lock();
+		try {
+			return inferences;
+		} finally {
+			sessionLock.unlock();
+		}
 	}
 
 	public Spec spec() {
@@ -210,6 +229,7 @@ public final class Embedder implements Embedding, AutoCloseable {
 				throw new IllegalStateException("Embedder is closed");
 			}
 			r = runtime.run(session, inputNames, inputs, outputName);
+			inferences++;
 		} finally {
 			sessionLock.unlock();
 		}

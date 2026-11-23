@@ -106,8 +106,9 @@ public final class FactService {
 	}
 
 	/** What taking an observation's reading back removed: its own facts and events, and the closures it had caused. */
-	public record Removed(List<Map<String, Object>> facts, List<Map<String, Object>> events, int reopened) {
-		public static final Removed NONE = new Removed(List.of(), List.of(), 0);
+	public record Removed(List<Map<String, Object>> facts, List<Map<String, Object>> events, int reopened,
+			Set<String> predicates, boolean eventsUpdated) {
+		public static final Removed NONE = new Removed(List.of(), List.of(), 0, Set.of(), false);
 	}
 
 	/** The resolved parts of one fact to store. */
@@ -2062,6 +2063,7 @@ public final class FactService {
 			}
 			var facts = new ArrayList<Map<String, Object>>();
 			var goneFacts = new ArrayList<Long>();
+			var removedPredicates = new LinkedHashSet<String>();
 			for (Row r : tx.query("SELECT * FROM fact WHERE observation_id = ?", observationId)) {
 				Fact f = Fact.from(r);
 				List<Long> others = FactLedger.observationsOf(tx, f.id()).stream().filter(o -> o != observationId)
@@ -2073,6 +2075,7 @@ public final class FactService {
 							others.getFirst(), f.id());
 				} else {
 					goneFacts.add(f.id());
+					removedPredicates.add(f.predicate());
 					facts.add(Map.of("id", f.ref(), "rendering", f.rendering(), "standing",
 							"current".equals(f.status()) ? f.state(Instant.now()) : f.status()));
 				}
@@ -2138,7 +2141,7 @@ public final class FactService {
 			tx.update("DELETE FROM fact WHERE observation_id = ?", observationId);
 			tx.update("DELETE FROM event_source WHERE observation_id = ?", observationId);
 			tx.update("DELETE FROM event WHERE observation_id = ?", observationId);
-			return new Removed(facts, events, reopened);
+			return new Removed(facts, events, reopened, Set.copyOf(removedPredicates), !undated.isEmpty());
 		});
 		// An event that lost its date still ends what an undated one ends (T18), just without a day.
 		for (long evId : undated) {

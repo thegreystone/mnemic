@@ -33,6 +33,7 @@ import se.hirt.mnemic.protocol.MnemicException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Properties;
@@ -49,9 +50,12 @@ public final class Database implements AutoCloseable {
 
 	private final Path file;
 	private final Connection conn;
+	private final PreparedStatement dataVersionStmt;
 	private final ReentrantLock lock = new ReentrantLock();
 	private int txDepth;
 	private boolean txWritable;
+	/** Monotonically incremented after each committed top-level write transaction on this connection. */
+	private long localVersion;
 	/** How many migrations this open applied; the engine re-renders every fact after any. */
 	private final int migrated;
 	/** The loaded sqlite-vec version, or null when no library was configured. */
@@ -97,6 +101,7 @@ public final class Database implements AutoCloseable {
 			int before = versionOrZero(conn);
 			Migrations.apply(conn);
 			this.migrated = versionOrZero(conn) - before;
+			this.dataVersionStmt = conn.prepareStatement("PRAGMA data_version");
 		} catch (MnemicException e) {
 			throw e;
 		} catch (Exception e) {
@@ -182,6 +187,7 @@ public final class Database implements AutoCloseable {
 			try {
 				T result = work.apply(new Tx(conn, true));
 				execute("COMMIT");
+				localVersion++;
 				return result;
 			} catch (Throwable t) {
 				try {
@@ -240,10 +246,34 @@ public final class Database implements AutoCloseable {
 	 */
 	public long dataVersion() {
 		lock.lock();
-		try (Statement st = conn.createStatement(); var rs = st.executeQuery("PRAGMA data_version")) {
+		try (var rs = dataVersionStmt.executeQuery()) {
 			return rs.next() ? rs.getLong(1) : 0L;
 		} catch (SQLException e) {
 			throw MnemicException.internal("Cannot read database data_version", e);
+		} finally {
+			lock.unlock();
+		}
+	}
+
+	/**
+	 * Monotonic counter incremented after each committed top-level write on this connection. Combined with
+	 * {@link #dataVersion()} (which tracks commits by other connections), in-memory caches can detect every local and
+	 * external commit while remaining unaffected by rolled-back transactions.
+	 */
+	public long localVersion() {
+		lock.lock();
+		try {
+			return localVersion;
+		} finally {
+			lock.unlock();
+		}
+	}
+
+	/** True when the current thread is inside an open write transaction on this connection. */
+	public boolean inWriteTransaction() {
+		lock.lock();
+		try {
+			return txDepth > 0 && txWritable;
 		} finally {
 			lock.unlock();
 		}
@@ -315,6 +345,11 @@ public final class Database implements AutoCloseable {
 	public void close() {
 		lock.lock();
 		try {
+			try {
+				dataVersionStmt.close();
+			} catch (SQLException ignored) {
+				// best effort
+			}
 			try (Statement st = conn.createStatement()) {
 				st.execute("PRAGMA wal_checkpoint(TRUNCATE)");
 			} catch (SQLException ignored) {

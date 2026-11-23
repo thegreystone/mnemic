@@ -161,6 +161,10 @@ public final class PredicateRegistry {
 	private Map<String, Map<String, Map<String, String>>> implies = Map.of();
 	/** What each predicate ends: the predicates whose open facts a new fact of it closes (decided ends considering). */
 	private Map<String, List<String>> ends = Map.of();
+	/** Cached distinct qualifiers on current facts, invalidated on local or external commits. */
+	private Map<String, List<String>> qualifiersInUseCache;
+	private long qualifiersDataVersion = -1;
+	private long qualifiersLocalVersion = -1;
 	/**
 	 * The seed's endings: a decision about a thing, or owning it, ends considering it. A purchase opens owns, so it
 	 * ends a consideration through owns, with nothing said about purchases (2026-09-29).
@@ -1086,11 +1090,31 @@ public final class PredicateRegistry {
 
 	/** The qualifiers stored on current facts, by predicate: the words a free-text qualifier gave a relation. */
 	private Map<String, List<String>> qualifiersInUse() {
-		var out = new HashMap<String, List<String>>();
-		for (Row r : db.read(tx -> tx.query(
-				"SELECT DISTINCT predicate, qualifier FROM fact WHERE qualifier IS NOT NULL AND status = 'current'"))) {
-			out.computeIfAbsent(r.str("predicate"), k -> new ArrayList<>()).add(r.str("qualifier"));
+		if (db.inWriteTransaction()) {
+			return loadQualifiersInUse();
 		}
+		long dv = db.dataVersion();
+		long lv = db.localVersion();
+		if (qualifiersInUseCache == null || qualifiersDataVersion != dv || qualifiersLocalVersion != lv) {
+			qualifiersInUseCache = loadQualifiersInUse();
+			qualifiersDataVersion = dv;
+			qualifiersLocalVersion = lv;
+		}
+		return qualifiersInUseCache;
+	}
+
+	private Map<String, List<String>> loadQualifiersInUse() {
+		var out = new HashMap<String, List<String>>();
+		db.read(tx -> {
+			tx.queryEach(
+					"SELECT DISTINCT predicate, qualifier FROM fact WHERE qualifier IS NOT NULL AND status = 'current'",
+					rs -> {
+						String pred = rs.getString(1);
+						String qual = rs.getString(2);
+						out.computeIfAbsent(pred, k -> new ArrayList<>()).add(qual);
+					});
+			return null;
+		});
 		return out;
 	}
 

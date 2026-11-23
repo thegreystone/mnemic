@@ -38,7 +38,9 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -54,6 +56,12 @@ public final class ObservationService {
 	public record Remembered(long observationId, boolean replayed, boolean duplicateText, List<String> warnings,
 			long pendingProposals) {
 	}
+
+	/** Aggregate observation counts computed in a single table scan for {@code status}. */
+	public record Counts(long total, long retired, long pendingProposals) {
+	}
+
+	private static final int RETIRED_BATCH_SIZE = 500;
 
 	private final Database db;
 	private final int softLimitChars;
@@ -158,13 +166,43 @@ public final class ObservationService {
 				.queryLong("SELECT COUNT(*) FROM observation WHERE forgotten_at IS NULL AND retired_at IS NOT NULL"));
 	}
 
+	/** Computes total, retired, and pending-proposal counts in a single scan over {@code observation}. */
+	public Counts counts() {
+		return db.read(tx -> {
+			long[] res = new long[3];
+			tx.queryEach("""
+					SELECT COUNT(*),
+					       COALESCE(SUM(CASE WHEN retired_at IS NOT NULL THEN 1 ELSE 0 END), 0),
+					       COALESCE(SUM(CASE WHEN proposal_json IS NULL THEN 1 ELSE 0 END), 0)
+					FROM observation WHERE forgotten_at IS NULL""", rs -> {
+				res[0] = rs.getLong(1);
+				res[1] = rs.getLong(2);
+				res[2] = rs.getLong(3);
+			});
+			return new Counts(res[0], res[1], res[2]);
+		});
+	}
+
 	/** The ids of the retired observations among the given ones. */
 	public Set<Long> retiredAmong(Collection<Long> ids) {
-		var out = new HashSet<Long>();
-		for (long id : ids) {
-			get(id).filter(Observation::retired).ifPresent(o -> out.add(id));
+		if (ids == null || ids.isEmpty()) {
+			return Set.of();
 		}
-		return out;
+		var unique = new ArrayList<Long>(new LinkedHashSet<>(ids));
+		unique.removeIf(id -> id == null);
+		if (unique.isEmpty()) {
+			return Set.of();
+		}
+		return db.read(tx -> {
+			var out = new HashSet<Long>();
+			for (int from = 0; from < unique.size(); from += RETIRED_BATCH_SIZE) {
+				List<Long> chunk = unique.subList(from, Math.min(unique.size(), from + RETIRED_BATCH_SIZE));
+				String placeholders = String.join(",", Collections.nCopies(chunk.size(), "?"));
+				tx.queryEach("SELECT id FROM observation WHERE retired_at IS NOT NULL AND id IN (" + placeholders + ")",
+						rs -> out.add(rs.getLong(1)), chunk.toArray());
+			}
+			return out;
+		});
 	}
 
 	/**

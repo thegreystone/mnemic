@@ -40,6 +40,15 @@ public final class Row {
 		this.columns = new LinkedHashMap<>(columns);
 	}
 
+	private Row(LinkedHashMap<String, Object> ownedColumns, boolean ignored) {
+		this.columns = ownedColumns;
+	}
+
+	/** Wraps a freshly built column map owned exclusively by this {@link Row} without copying it a second time. */
+	static Row wrap(LinkedHashMap<String, Object> ownedColumns) {
+		return new Row(ownedColumns, true);
+	}
+
 	public Object get(String column) {
 		return columns.get(column);
 	}

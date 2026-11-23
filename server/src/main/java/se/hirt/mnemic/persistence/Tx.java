@@ -47,6 +47,26 @@ public final class Tx {
 		this.writable = writable;
 	}
 
+	/** Callback for {@link #queryEach} to read rows directly from the JDBC {@link ResultSet} without Row boxing. */
+	@FunctionalInterface
+	public interface RowConsumer {
+		void accept(ResultSet rs) throws SQLException;
+	}
+
+	/** Streams every row to {@code consumer} without allocating intermediate {@link Row} maps. */
+	public void queryEach(String sql, RowConsumer consumer, Object ... args) {
+		try (PreparedStatement ps = conn.prepareStatement(sql)) {
+			bind(ps, args);
+			try (ResultSet rs = ps.executeQuery()) {
+				while (rs.next()) {
+					consumer.accept(rs);
+				}
+			}
+		} catch (SQLException e) {
+			throw MnemicException.internal("Query failed: " + e.getMessage(), e);
+		}
+	}
+
 	public List<Row> query(String sql, Object ... args) {
 		try (PreparedStatement ps = conn.prepareStatement(sql)) {
 			bind(ps, args);
@@ -64,8 +84,21 @@ public final class Tx {
 	}
 
 	public long queryLong(String sql, Object ... args) {
-		return queryOne(sql, args).map(r -> ((Number) r.asMap().values().iterator().next()).longValue())
-				.orElseThrow(() -> MnemicException.internal("Scalar query returned no row", null));
+		try (PreparedStatement ps = conn.prepareStatement(sql)) {
+			bind(ps, args);
+			try (ResultSet rs = ps.executeQuery()) {
+				if (rs.next()) {
+					Object v = rs.getObject(1);
+					if (v instanceof Number n) {
+						return n.longValue();
+					}
+					return rs.getLong(1);
+				}
+				throw MnemicException.internal("Scalar query returned no row", null);
+			}
+		} catch (SQLException e) {
+			throw MnemicException.internal("Query failed: " + e.getMessage(), e);
+		}
 	}
 
 	public int update(String sql, Object ... args) {
@@ -119,13 +152,17 @@ public final class Tx {
 	private static List<Row> rows(ResultSet rs) throws SQLException {
 		ResultSetMetaData md = rs.getMetaData();
 		int n = md.getColumnCount();
+		String[] labels = new String[n];
+		for (int i = 0; i < n; i++) {
+			labels[i] = md.getColumnLabel(i + 1);
+		}
 		var out = new ArrayList<Row>();
 		while (rs.next()) {
-			var cols = new LinkedHashMap<String, Object>();
-			for (int i = 1; i <= n; i++) {
-				cols.put(md.getColumnLabel(i), rs.getObject(i));
+			LinkedHashMap<String, Object> cols = LinkedHashMap.newLinkedHashMap(n);
+			for (int i = 0; i < n; i++) {
+				cols.put(labels[i], rs.getObject(i + 1));
 			}
-			out.add(new Row(cols));
+			out.add(Row.wrap(cols));
 		}
 		return out;
 	}

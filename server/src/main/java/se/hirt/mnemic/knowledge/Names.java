@@ -55,14 +55,61 @@ public final class Names {
 		if (s == null) {
 			return "";
 		}
+		int len = s.length();
+		if (len == 0) {
+			return "";
+		}
+		// Fast path for plain printable ASCII + standard ASCII whitespace (no NFD/regex/map overhead).
+		boolean ascii = true;
+		for (int i = 0; i < len; i++) {
+			char c = s.charAt(i);
+			if (c >= 0x7F || (c < 0x20 && c != '\t' && c != '\n' && c != '\r' && c != '\f' && c != 0x0B)) {
+				ascii = false;
+				break;
+			}
+		}
+		if (ascii) {
+			return normAscii(s, len);
+		}
 		String d = Normalizer.normalize(s, Normalizer.Form.NFD);
 		d = MARKS.matcher(d).replaceAll("");
-		var sb = new StringBuilder(d.length());
-		for (char c : d.toLowerCase(Locale.ROOT).toCharArray()) {
+		String lower = d.toLowerCase(Locale.ROOT);
+		var sb = new StringBuilder(lower.length());
+		for (int i = 0; i < lower.length(); i++) {
+			char c = lower.charAt(i);
 			String f = FOLD.get(c);
-			sb.append(f == null ? String.valueOf(c) : f);
+			if (f == null) {
+				sb.append(c);
+			} else {
+				sb.append(f);
+			}
 		}
 		return WS.matcher(sb.toString()).replaceAll(" ").trim();
+	}
+
+	private static String normAscii(String s, int len) {
+		var sb = new StringBuilder(len);
+		boolean prevSpace = true; // suppresses leading whitespace
+		for (int i = 0; i < len; i++) {
+			char c = s.charAt(i);
+			if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == 0x0B) {
+				if (!prevSpace) {
+					sb.append(' ');
+					prevSpace = true;
+				}
+			} else {
+				if (c >= 'A' && c <= 'Z') {
+					c = (char) (c + ('a' - 'A'));
+				}
+				sb.append(c);
+				prevSpace = false;
+			}
+		}
+		int outLen = sb.length();
+		if (outLen > 0 && sb.charAt(outLen - 1) == ' ') {
+			sb.setLength(outLen - 1);
+		}
+		return sb.toString();
 	}
 
 	/** Normalised word tokens, possessive {@code 's} removed. */
@@ -101,7 +148,20 @@ public final class Names {
 
 	/** The text as {@link #tokens} reads it: normalised, possessives removed, punctuation still in place. */
 	public static String tokenised(String s) {
-		return norm(s).replace("'s ", " ").replace("’s ", " ").replaceAll("['’]s$", "");
+		String n = norm(s);
+		if (n.indexOf('\'') >= 0) {
+			n = n.replace("'s ", " ");
+			if (n.endsWith("'s")) {
+				n = n.substring(0, n.length() - 2);
+			}
+		}
+		if (n.indexOf('’') >= 0) {
+			n = n.replace("’s ", " ");
+			if (n.endsWith("’s")) {
+				n = n.substring(0, n.length() - 2);
+			}
+		}
+		return n;
 	}
 
 	/** Content tokens: {@link #tokens} minus stopwords and single letters. */
@@ -117,10 +177,10 @@ public final class Names {
 	 * possessive with nothing after it ("McDonald's", "Kellogg's") names the thing itself and has no possessor.
 	 */
 	public static List<String> possessors(String s) {
-		var out = new ArrayList<String>();
-		if (s == null) {
-			return out;
+		if (s == null || (s.indexOf('\'') < 0 && s.indexOf('’') < 0)) {
+			return List.of();
 		}
+		var out = new ArrayList<String>();
 		var m = POSSESSOR.matcher(norm(s));
 		while (m.find()) {
 			out.add(m.group(1));
