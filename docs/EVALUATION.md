@@ -2296,7 +2296,65 @@ ambiguous; nothing unrelated is flagged.
 
 ### R3. An unknown language is refused
 
-Expect: `fr` is refused at start (not a known language); unset means `en`.
+Expect: `ja` is refused at start (not a known language); unset means `en`; `de`, `sv`, `fr`, and `es` are accepted.
+
+### R7. German capitalised nouns do not cause false misses in recall
+
+```text
+remember(text: "Ich hatte am 15. März einen Zahnarzttermin bei Dr. Weber.",
+  proposal: { entities: [ e1 "Dr. Weber" (person) ], events: [ zahnarzttermin(self, e1) 2026-03-15 ] })
+recall(query: "Wann war mein letzter Zahnarzttermin?")
+```
+
+Expect: in both `en` and `de` stores, the German query is recognised as German,
+`mein` resolves to the owner, and the capitalised common noun `Zahnarzttermin`
+is not treated as an unknown proper noun: the structured verdict is `events`,
+never a false `miss` / `"not on record"` note.
+
+### R8. German polar, past, forward, and kind questions work end to end
+
+Expect: in a German store, verb-first polar questions (`"Besitzt Mattias ein
+Boot?"`) hit `known_false` against a negated fact; Perfekt past questions
+(`"Hat Mattias bei Initrode gearbeitet?"`) probe ended facts; forward cues
+(`"Welches Fahrzeug hole ich bald ab?"`) surface future-dated facts via the
+upcoming channel; and kind-narrowed questions (`"Welche Autos besitzt
+Mattias?"`) narrow to the matching entity type.
+
+### R9. A Swedish store renders facts and answers Swedish questions
+
+Expect: with `MNEMIC_LANGUAGE=sv`, seed predicates and family qualifiers render
+in Swedish (`"Mattias Sandell arbetar på Hooli (sedan 2018)"`, `"Marit Nyberg
+är mor till Oskar Nyberg"`, `"Mattias Sandell bor i Lund"`). Ambiguous `"Var
+bor Mattias?"` is treated as a where-question rather than polar/past; Swedish
+family group cues (`"familj"`) and `till` possessor-after binding reach kinship
+predicates; V1 polar negation (`"Äger Mattias en båt?"`) returns `known_false`;
+preterite and perfekt past questions (`"Jobbade ..."`, `"Har ... jobbat"`)
+probe ended facts; and kind-narrowed questions (`"Vilka bilar äger Mattias?"`)
+narrow to `car`.
+
+### R10. A French store renders facts and answers French questions
+
+Expect: with `MNEMIC_LANGUAGE=fr`, seed predicates and family qualifiers render
+in French (`"Mattias Sandell travaille chez Hooli (depuis 2018)"`, `"Marit Nyberg
+est mère de Oskar Nyberg"`, `"Mattias Sandell habite à Lyon"`). French family
+group cues (`"famille"`) and elided `d'` possessor-after binding reach kinship
+predicates; polar negation (`"Est-ce que Mattias possède un bateau ?"`) returns
+`known_false`; passé composé past questions (`"Est-ce que Mattias a travaillé
+chez Initrode ?"`) probe ended facts; forward cues (`"bientôt"`) surface
+future-dated facts; and kind-narrowed questions (`"Quelles voitures possède
+Mattias ?"`) narrow to `car`.
+
+### R11. A Spanish store renders facts and answers Spanish questions
+
+Expect: with `MNEMIC_LANGUAGE=es`, seed predicates and family qualifiers render
+in Spanish (`"Mattias Sandell trabaja en Hooli (desde 2018)"`, `"Marit Nyberg
+es madre de Oskar Nyberg"`, `"Mattias Sandell vive en Madrid"`). Spanish family
+group cues (`"familia"`) and `de` possessor-after binding reach kinship
+predicates; inverted-`¿` polar negation (`"¿Tiene Mattias un barco?"`) returns
+`known_false`; preterite and pretérito perfecto past questions (`"¿Trabajó ..."`,
+`"¿Ha trabajado ..."`) probe ended facts; forward cues (`"pronto"`) surface
+future-dated facts; and kind-narrowed questions (`"¿Qué coches tiene Mattias?"`)
+narrow to `car`.
 
 ## S. Vocabularies
 

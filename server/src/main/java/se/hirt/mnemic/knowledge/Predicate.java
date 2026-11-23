@@ -323,12 +323,9 @@ public record Predicate(String name, String description, List<String> domain, Li
 	 * object gives it up to the restriction's: "lives in {object}" reads "lives only within Switzerland".
 	 */
 	public String renderOnly(Lang lang, String subject, String bound, String scope, String qualifier) {
-		String template = OBJECT_PREPOSITION.matcher(render).replaceFirst(" $1{object}");
+		String template = LanguagePack.allObjectPrepositionsPattern().matcher(render).replaceFirst(" $1{object}");
 		return render(template, subject, lang.onlyWithin(bound), scope, qualifier);
 	}
-
-	private static final java.util.regex.Pattern OBJECT_PREPOSITION = java.util.regex.Pattern.compile(
-			"\\s+(?:in|at|to|of|for|with|on|from|by|into|within|bei|an|auf|für|mit|von|zu|aus|nach)\\s+(\\[\\[\\s*)?\\{object}");
 
 	/** A completeness marker: "what {subject} owns among places is completely recorded". */
 	public String renderClosure(Lang lang, String subject, String type) {

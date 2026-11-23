@@ -35,6 +35,7 @@ import se.hirt.mnemic.knowledge.Lang;
 
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -57,10 +58,11 @@ public final class OwnerAlias {
 
 	// ── question side ──
 
-	private static final Pattern PERSON = Pattern.compile("\\b(?:I|me|myself|ich|mich|mir|jag|mig)\\b",
+	private static final Pattern PERSON = Pattern.compile(
+			"\\b(?:I|me|myself|ich|mich|mir|jag|mig|je|moi|yo|mí|conmigo)\\b",
 			Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CHARACTER_CLASS);
 	private static final Pattern POSSESSIVE = Pattern.compile(
-			"\\b(?:my|mine|mein|meine|meinem|meinen|meiner|meines|min|mitt|mina)\\b",
+			"\\b(?:my|mine|mein|meine|meinem|meinen|meiner|meines|min|mitt|mina|mon|ma|mes|mi|mis)\\b",
 			Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CHARACTER_CLASS);
 	private static final Pattern CONTRACTION = Pattern.compile("\\bI'(m|ve|d|ll)\\b");
 
@@ -106,6 +108,20 @@ public final class OwnerAlias {
 	private static final Map<String, String> VERB_EN = Map.of("is", "am", "has", "have", "does", "do", "was", "was");
 	private static final Map<String, String> VERB_DE = Map.of("ist", "bin", "hat", "habe", "war", "war", "kann", "kann",
 			"mag", "mag", "wird", "werde", "muss", "muss", "will", "will");
+	private static final Map<String, String> VERB_FR = Map.ofEntries(Map.entry("est", "suis"),
+			Map.entry("n'est", "ne suis"), Map.entry("a", "ai"), Map.entry("n'a", "n'ai"), Map.entry("va", "vais"),
+			Map.entry("peut", "peux"), Map.entry("veut", "veux"), Map.entry("doit", "dois"),
+			Map.entry("connaît", "connais"), Map.entry("connait", "connais"), Map.entry("vit", "vis"),
+			Map.entry("fait", "fais"), Map.entry("détient", "détiens"), Map.entry("était", "étais"),
+			Map.entry("avait", "avais"), Map.entry("appartient", "appartiens"));
+	private static final Map<String, String> VERB_ES = Map.ofEntries(Map.entry("es", "soy"), Map.entry("está", "estoy"),
+			Map.entry("tiene", "tengo"), Map.entry("ha", "he"), Map.entry("conoce", "conozco"),
+			Map.entry("prefiere", "prefiero"), Map.entry("dirige", "dirijo"), Map.entry("nació", "nací"),
+			Map.entry("decidió", "decidí"), Map.entry("fue", "fui"), Map.entry("puede", "puedo"),
+			Map.entry("quiere", "quiero"), Map.entry("hace", "hago"), Map.entry("va", "voy"),
+			Map.entry("pertenece", "pertenezco"));
+	private static final Set<String> ES_NON_VERBS = Set.of("nunca", "siempre", "ahora", "todavía", "antes", "solo",
+			"solamente", "únicamente", "para", "sobre", "entre", "desde", "hasta", "que", "una");
 
 	/**
 	 * A fact rendering as the owner would say it: the owner's name as subject becomes "I" with the verb to match, as
@@ -117,38 +133,75 @@ public final class OwnerAlias {
 		}
 		String name = owner.strip();
 		String q = Pattern.quote(name);
-		boolean de = lang == Lang.DE;
+		Lang effective = lang == null ? Lang.EN : lang;
+		String subj = switch (effective) {
+		case DE -> "ich ";
+		case SV -> "jag ";
+		case FR -> "je ";
+		case ES -> "yo ";
+		case EN -> "I ";
+		};
+		String poss = switch (effective) {
+		case DE -> "mein";
+		case SV -> "min";
+		case FR -> "mon";
+		case ES -> "mi";
+		case EN -> "my";
+		};
+		String obj = switch (effective) {
+		case DE -> "mich";
+		case SV -> "mig";
+		case FR -> "moi";
+		case ES -> "mí";
+		case EN -> "me";
+		};
 		String out = rendering;
 		if (out.startsWith(name + "'s ") || out.startsWith(name + "' ")) {
-			out = (de ? "mein " : "my ") + out.substring(out.indexOf(' ') + 1);
-		} else if (de && out.startsWith(name + "s ")) {
-			out = "mein " + out.substring(name.length() + 2);
+			out = poss + " " + out.substring(out.indexOf(' ') + 1);
+		} else if ((effective == Lang.DE || effective == Lang.SV) && out.startsWith(name + "s ")) {
+			out = poss + " " + out.substring(name.length() + 2);
 		} else if (out.startsWith(name + " ")) {
-			String rest = out.substring(name.length() + 1);
-			out = (de ? "ich " : "I ") + conjugate(rest, de);
+			String rest = conjugate(out.substring(name.length() + 1), effective);
+			out = (effective == Lang.FR && startsWithFrenchVowelOrH(rest) ? "j'" : subj) + rest;
 		}
-		out = out.replaceAll("(?<=\\s)" + q + "'s?(?=\\s)", de ? "mein" : "my")
-				.replaceAll("(?<=\\s)" + q + "s(?=\\s)", de ? "mein" : "my")
-				.replaceAll("(?<=\\s)" + q + "(?=[\\s,.;:)]|$)", de ? "mich" : "me");
+		if (effective == Lang.FR) {
+			out = out.replaceAll("(?<=\\s)d'" + q + "(?=[\\s,.;:)]|$)", "de " + obj);
+		}
+		out = out.replaceAll("(?<=\\s)" + q + "'s?(?=\\s)", poss).replaceAll("(?<=\\s)" + q + "s(?=\\s)", poss)
+				.replaceAll("(?<=\\s)" + q + "(?=[\\s,.;:)]|$)", obj);
 		return out.equals(rendering) ? null : Character.toUpperCase(out.charAt(0)) + out.substring(1);
 	}
 
 	/** The first verb-looking word of the rest of the sentence into the first person; the rest untouched. */
-	private static String conjugate(String rest, boolean de) {
+	private static String conjugate(String rest, Lang lang) {
+		if (lang == Lang.SV) {
+			return rest; // Swedish verbs do not conjugate by person
+		}
 		String[] words = rest.split(" ", 3);
 		for (int i = 0; i < Math.min(2, words.length); i++) {
 			String w = words[i];
 			String lower = w.toLowerCase(Locale.ROOT);
-			String v = de ? VERB_DE.get(lower) : VERB_EN.get(lower);
-			if (v == null) {
-				v = de ? firstPersonDe(lower) : firstPersonEn(lower);
-			}
+			String v = switch (lang) {
+			case DE -> VERB_DE.getOrDefault(lower, firstPersonDe(lower));
+			case FR -> VERB_FR.get(lower); // regular -er 3sg (travaille, habite, possède, utilise) is already 1sg
+			case ES -> VERB_ES.getOrDefault(lower, firstPersonEs(lower));
+			case EN -> VERB_EN.getOrDefault(lower, firstPersonEn(lower));
+			case SV -> null;
+			};
 			if (v != null) {
 				words[i] = v;
 				return String.join(" ", words);
 			}
 		}
 		return rest;
+	}
+
+	private static boolean startsWithFrenchVowelOrH(String text) {
+		if (text.isEmpty()) {
+			return false;
+		}
+		char c = Character.toLowerCase(text.charAt(0));
+		return "aeiouyhàâäéèêëîïôöùûüœæ".indexOf(c) >= 0;
 	}
 
 	/** works→work, lives→live, uses→use, goes→go, tries→try; a word without a third-person ending is not a verb. */
@@ -172,5 +225,13 @@ public final class OwnerAlias {
 			return null;
 		}
 		return w.endsWith("et") ? w.substring(0, w.length() - 2) + "e" : w.substring(0, w.length() - 1) + "e";
+	}
+
+	/** trabaja→trabajo, vive→vivo, posee→poseo, usa→uso, detesta→detesto; regular present 3sg ends in -a or -e. */
+	private static String firstPersonEs(String w) {
+		if (w.length() < 3 || ES_NON_VERBS.contains(w) || (!w.endsWith("a") && !w.endsWith("e"))) {
+			return null;
+		}
+		return w.substring(0, w.length() - 1) + "o";
 	}
 }
