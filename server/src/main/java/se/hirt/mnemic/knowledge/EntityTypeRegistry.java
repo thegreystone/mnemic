@@ -293,9 +293,17 @@ public final class EntityTypeRegistry {
 	 * word, singular or plural.
 	 */
 	public Optional<String> kindNamedBy(String word) {
+		return kindNamedBy(word, Lang.EN);
+	}
+
+	/**
+	 * The registered type a word of a question in {@code lang} names ("vehicles", "companies", "Orte", "bilar"): by
+	 * name, synonym, type word, or localized seed-type alias, singular or plural.
+	 */
+	public Optional<String> kindNamedBy(String word, Lang lang) {
 		return db.withLock(() -> {
 			refreshIfStale();
-			for (String w : Lang.singulars(word)) {
+			for (String w : Lang.singulars(word, lang)) {
 				String k = key(w);
 				if (byName.containsKey(k)) {
 					return Optional.of(k);
@@ -307,6 +315,10 @@ public final class EntityTypeRegistry {
 					if (t.typeWords().contains(k)) {
 						return Optional.of(t.name());
 					}
+				}
+				Optional<String> alias = LanguagePack.typeAlias(k, lang);
+				if (alias.isPresent() && byName.containsKey(alias.get())) {
+					return alias;
 				}
 			}
 			return Optional.empty();

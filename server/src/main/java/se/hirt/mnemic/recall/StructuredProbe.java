@@ -36,6 +36,7 @@ import se.hirt.mnemic.knowledge.EntityTypeRegistry;
 import se.hirt.mnemic.knowledge.Fact;
 import se.hirt.mnemic.knowledge.FactQueries;
 import se.hirt.mnemic.knowledge.PredicateRegistry;
+import se.hirt.mnemic.knowledge.Lang;
 import se.hirt.mnemic.knowledge.Names;
 import se.hirt.mnemic.knowledge.Predicate;
 import se.hirt.mnemic.knowledge.PredicateRegistry.Cue;
@@ -167,7 +168,7 @@ final class StructuredProbe {
 		long ownerId = entities.owner().id();
 		List<Entity> xs = bound.others().stream().filter(e -> e.id() != ownerId && !readAs.contains(e.id())).toList();
 		if (!xs.isEmpty() || !q.residual().isEmpty()) {
-			bounds.removeIf(x -> !covers(x, xs, q.residual()));
+			bounds.removeIf(x -> !covers(x, xs, q.residual(), q.language()));
 		}
 		Fact decidedBy = null;
 		String basis = null;
@@ -206,7 +207,7 @@ final class StructuredProbe {
 			}
 			if (!q.past() && matched.isEmpty() && future.isEmpty() && (!xs.isEmpty() || !q.residual().isEmpty())) {
 				for (Fact b : bounds) {
-					basis = decides(b, xs, q.residual(), notes);
+					basis = decides(b, xs, q.residual(), q.language(), notes);
 					if (basis != null) {
 						decidedBy = b;
 						break;
@@ -273,7 +274,7 @@ final class StructuredProbe {
 			var asked = new ArrayList<String>();
 			var unknown = new ArrayList<String>();
 			for (String k : q.kinds()) {
-				types.kindNamedBy(k).ifPresentOrElse(t -> {
+				types.kindNamedBy(k, q.language()).ifPresentOrElse(t -> {
 					if (!asked.contains(t)) {
 						asked.add(t);
 					}
@@ -572,10 +573,10 @@ final class StructuredProbe {
 	}
 
 	/** The basis on which a bound decides the question false, or null when it does not. */
-	private String decides(Fact b, List<Entity> xs, List<String> residual, List<String> notes) {
+	private String decides(Fact b, List<Entity> xs, List<String> residual, Lang language, List<String> notes) {
 		switch (b.mode()) {
 		case "negated" -> {
-			return negationCovers(b, xs, residual) ? "negation" : null;
+			return negationCovers(b, xs, residual, language) ? "negation" : null;
 		}
 		case "closure" -> {
 			for (Entity x : xs) {
@@ -608,16 +609,16 @@ final class StructuredProbe {
 	}
 
 	/** Whether a bound could cover what the question names: its object, its class, or its kind of thing. */
-	private boolean covers(Fact b, List<Entity> xs, List<String> residual) {
+	private boolean covers(Fact b, List<Entity> xs, List<String> residual, Lang language) {
 		switch (b.mode()) {
 		case "negated" -> {
-			if (negationCovers(b, xs, residual)) {
+			if (negationCovers(b, xs, residual, language)) {
 				return true;
 			}
 			if (b.objectText() != null) {
 				// A class negation ("anything in Sweden") covers a question that shares a word with it beyond the filler.
 				Set<String> words = new HashSet<>(Names.contentTokens(b.objectText()));
-				words.removeAll(Query.POLAR_FILLER);
+				words.removeAll(Query.polarFillerFor(b.objectText(), language));
 				if (residual.stream().anyMatch(words::contains)) {
 					return true;
 				}
@@ -682,7 +683,7 @@ final class StructuredProbe {
 	 * A negation covers the question when its object is the named entity, or its literal class names the entity
 	 * ("anything in Sweden" for Sweden), or, with no entity named, the class's own words are all in the question.
 	 */
-	private boolean negationCovers(Fact b, List<Entity> xs, List<String> residual) {
+	private boolean negationCovers(Fact b, List<Entity> xs, List<String> residual, Lang language) {
 		for (Entity x : xs) {
 			if (b.objectId() != null && b.objectId() == x.id()) {
 				return true;
@@ -695,8 +696,8 @@ final class StructuredProbe {
 			}
 		}
 		if (xs.isEmpty() && b.objectText() != null) {
-			List<String> words = Names.contentTokens(b.objectText()).stream()
-					.filter(t -> !Query.POLAR_FILLER.contains(t)).toList();
+			Set<String> filler = Query.polarFillerFor(b.objectText(), language);
+			List<String> words = Names.contentTokens(b.objectText()).stream().filter(t -> !filler.contains(t)).toList();
 			return !words.isEmpty() && residual.containsAll(words);
 		}
 		return false;

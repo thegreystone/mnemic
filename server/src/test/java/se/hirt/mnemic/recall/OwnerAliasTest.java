@@ -37,7 +37,7 @@ import se.hirt.mnemic.knowledge.Lang;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
-/** The owner alias for the vector channel: the first person and the owner's name, both ways, three languages. */
+/** The owner alias for the vector channel: the first person and the owner's name, both ways, five languages. */
 class OwnerAliasTest {
 
 	@Test
@@ -83,6 +83,33 @@ class OwnerAliasTest {
 				OwnerAlias.firstPerson("Mattias wohnt in Rüschlikon", "Mattias", Lang.DE));
 		assertEquals("Anna ist mein Schwester",
 				OwnerAlias.firstPerson("Anna ist Mattias' Schwester", "Mattias", Lang.DE));
+		assertEquals("Jag arbetar på Hooli (sedan 2018)",
+				OwnerAlias.firstPerson("Mattias arbetar på Hooli (sedan 2018)", "Mattias", Lang.SV));
+		assertEquals("Jag bor i Lund", OwnerAlias.firstPerson("Mattias bor i Lund", "Mattias", Lang.SV));
+		assertEquals("Anna är min syster", OwnerAlias.firstPerson("Anna är Mattias' syster", "Mattias", Lang.SV));
+		assertEquals("Sofia är gift med mig", OwnerAlias.firstPerson("Sofia är gift med Mattias", "Mattias", Lang.SV));
+
+		// French: regular -er, irregular est/a, vowel/h elision (j'), and object form (moi).
+		assertEquals("Je travaille chez Hooli (depuis 2018)",
+				OwnerAlias.firstPerson("Mattias travaille chez Hooli (depuis 2018)", "Mattias", Lang.FR));
+		assertEquals("J'habite à Lyon", OwnerAlias.firstPerson("Mattias habite à Lyon", "Mattias", Lang.FR));
+		assertEquals("J'ai décidé : prendre un congé",
+				OwnerAlias.firstPerson("Mattias a décidé : prendre un congé", "Mattias", Lang.FR));
+		assertEquals("Je suis né à Lund", OwnerAlias.firstPerson("Mattias est né à Lund", "Mattias", Lang.FR));
+		assertEquals("Je ne suis pas né à Lund",
+				OwnerAlias.firstPerson("Mattias n'est pas né à Lund", "Mattias", Lang.FR));
+		assertEquals("Anna est sœur de moi", OwnerAlias.firstPerson("Anna est sœur d'Oskar", "Oskar", Lang.FR));
+
+		// Spanish: regular -a/-e -> -o, irregular verbs, negation skip, and object form (mí).
+		assertEquals("Yo trabajo en Hooli (desde 2018)",
+				OwnerAlias.firstPerson("Mattias trabaja en Hooli (desde 2018)", "Mattias", Lang.ES));
+		assertEquals("Yo vivo en Madrid", OwnerAlias.firstPerson("Mattias vive en Madrid", "Mattias", Lang.ES));
+		assertEquals("Yo no poseo barco", OwnerAlias.firstPerson("Mattias no posee barco", "Mattias", Lang.ES));
+		assertEquals("Yo nací en Lund", OwnerAlias.firstPerson("Mattias nació en Lund", "Mattias", Lang.ES));
+		assertEquals("Yo soy miembro de Club",
+				OwnerAlias.firstPerson("Mattias es miembro de Club", "Mattias", Lang.ES));
+		assertEquals("Anna es hermana de mí", OwnerAlias.firstPerson("Anna es hermana de Mattias", "Mattias", Lang.ES));
+
 		assertNull(OwnerAlias.firstPerson("Anna lives in Gothenburg", "Mattias", Lang.EN));
 		assertNull(OwnerAlias.firstPerson("Mattias works at Hooli", null, Lang.EN));
 	}

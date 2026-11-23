@@ -936,8 +936,13 @@ public final class EntityService {
 	 * single token that is the unique first name of a person. First-person references resolve to the owner.
 	 */
 	public List<Entity> spot(String query) {
+		return spot(query, null);
+	}
+
+	/** Like {@link #spot(String)}, using {@code queryLang}'s first-person pronouns when non-null. */
+	public List<Entity> spot(String query, Lang queryLang) {
 		var found = new LinkedHashMap<Long, Entity>();
-		for (Mention m : mentions(query)) {
+		for (Mention m : mentions(query, queryLang)) {
 			found.putIfAbsent(m.entity().id(), m.entity());
 		}
 		return new ArrayList<>(found.values());
@@ -960,10 +965,24 @@ public final class EntityService {
 	 * first, so a question's structure ("Anna's siblings") can be read off the positions.
 	 */
 	public List<Mention> mentions(String query) {
+		return mentions(query, null);
+	}
+
+	/**
+	 * Like {@link #mentions(String)}, using {@code queryLang}'s first-person pronouns when non-null so German
+	 * ({@code mein}/{@code ich}) and Swedish ({@code jag}/{@code min}) spot the owner without Swedish preposition
+	 * {@code i} ("in") colliding with English {@code I}.
+	 */
+	public List<Mention> mentions(String query, Lang queryLang) {
 		List<String> tokens = Names.tokens(query);
 		if (tokens.isEmpty()) {
 			return List.of();
 		}
+		Set<String> selfWords = queryLang == null ? SELF : LanguagePack.of(queryLang).query().selfPronouns();
+		if (selfWords.isEmpty()) {
+			selfWords = SELF;
+		}
+		Set<String> effectiveSelf = selfWords;
 		return db.withLock(() -> {
 			MentionIndex idx = mentionIndex();
 			Entity self = owner();
@@ -977,7 +996,7 @@ public final class EntityService {
 						continue;
 					}
 					String gram = String.join(" ", tokens.subList(i, i + n));
-					if (SELF.contains(gram)) {
+					if (effectiveSelf.contains(gram)) {
 						found.add(new Mention(self, i, i + n));
 						mark(used, i, n);
 						continue;
