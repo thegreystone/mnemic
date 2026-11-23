@@ -51,11 +51,7 @@ public interface ModelProvider {
 
 	/** Every provider name available in this process, in discovery order; empty when nothing is registered. */
 	static List<String> available() {
-		var names = new ArrayList<String>();
-		for (ModelProvider p : ServiceLoader.load(ModelProvider.class)) {
-			names.addAll(p.names());
-		}
-		return names;
+		return AvailableCache.names();
 	}
 
 	static ChatModel resolve(ModelSpec spec) {
@@ -69,5 +65,26 @@ public interface ModelProvider {
 
 	static ChatModel resolve(String specText, String apiKeyEnvOverride) {
 		return resolve(ModelSpec.parse(specText, apiKeyEnvOverride));
+	}
+
+	/** Lazily caches classpath provider names once per process so status calls do not rescan JARs via ServiceLoader. */
+	final class AvailableCache {
+		private static volatile List<String> cached;
+
+		private AvailableCache() {
+		}
+
+		static List<String> names() {
+			List<String> names = cached;
+			if (names == null) {
+				var discovered = new ArrayList<String>();
+				for (ModelProvider p : ServiceLoader.load(ModelProvider.class)) {
+					discovered.addAll(p.names());
+				}
+				names = List.copyOf(discovered);
+				cached = names;
+			}
+			return names;
+		}
 	}
 }

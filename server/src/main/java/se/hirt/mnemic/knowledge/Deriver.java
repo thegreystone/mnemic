@@ -35,6 +35,7 @@ import se.hirt.mnemic.persistence.Tx;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -59,6 +60,8 @@ public final class Deriver {
 
 	/** What a derivation pass did. */
 	public record Outcome(int derived, int invalidated, int updated, int corroborated) {
+		public static final Outcome NOTHING = new Outcome(0, 0, 0, 0);
+
 		public boolean nothing() {
 			return derived == 0 && invalidated == 0 && updated == 0 && corroborated == 0;
 		}
@@ -76,6 +79,7 @@ public final class Deriver {
 	private final Database db;
 	private final PredicateRegistry predicates;
 	private final FactRenderer renderer;
+	private long passes;
 
 	Deriver(Database db, PredicateRegistry predicates, FactRenderer renderer) {
 		this.db = db;
@@ -83,15 +87,54 @@ public final class Deriver {
 		this.renderer = renderer;
 	}
 
+	/** Number of full derivation passes executed on this instance. */
+	public long passes() {
+		return db.withLock(() -> passes);
+	}
+
+	/**
+	 * Every predicate whose facts can influence derivation output: predicates walked or excluded by any rule, derived
+	 * predicates themselves (for corroboration and layering), attribute predicates, and predicates that declare
+	 * {@code implies} mappings.
+	 */
+	public Set<String> relevantPredicates() {
+		return db.withLock(() -> {
+			List<Predicate> derived = ordered();
+			Set<String> attrs = attributePredicates();
+			if (derived.isEmpty() && attrs.isEmpty()) {
+				return Set.of();
+			}
+			var out = new HashSet<String>();
+			for (Predicate p : derived) {
+				out.add(p.name());
+			}
+			out.addAll(edgePredicates(derived));
+			out.addAll(statedPredicates(derived, attrs));
+			return out;
+		});
+	}
+
+	/** True when changes to facts of {@code predicate} can affect derived facts or implied attributes. */
+	public boolean isRelevant(String predicate) {
+		if (predicate == null) {
+			return false;
+		}
+		return relevantPredicates().contains(predicate);
+	}
+
 	/** Brings the derived rows in line with the current facts and rules. */
 	public Outcome derive() {
 		return db.withLock(() -> {
 			List<Predicate> derived = ordered();
-			if (derived.isEmpty() && attributePredicates().isEmpty()) {
-				return new Outcome(0, 0, 0, 0);
+			Set<String> attrs = attributePredicates();
+			if (derived.isEmpty() && attrs.isEmpty()) {
+				return Outcome.NOTHING;
 			}
+			Set<String> edgePreds = edgePredicates(derived);
+			Set<String> statedPreds = statedPredicates(derived, attrs);
+			passes++;
 			return db.write(tx -> {
-				Graph g = Graph.load(tx, predicates);
+				Graph g = Graph.loadForDerivation(tx, predicates, edgePreds, statedPreds);
 				int made = 0;
 				int gone = 0;
 				int changed = 0;
@@ -99,7 +142,7 @@ public final class Deriver {
 				// What the record implies about attributes stands as facts too: "Britt is female" from her being a
 				// mother, resting on the facts that say so, so it can be asked about and seen, and steps aside for a
 				// statement.
-				for (String attribute : attributePredicates()) {
+				for (String attribute : attrs) {
 					int[] n = materialiseImplied(tx, g, attribute);
 					made += n[0];
 					changed += n[1];
@@ -450,6 +493,40 @@ public final class Deriver {
 		return out;
 	}
 
+	/** Predicates walked by any rule path or checked in any rule {@code not} clause. */
+	private Set<String> edgePredicates(List<Predicate> derived) {
+		var out = new HashSet<String>();
+		for (Predicate p : derived) {
+			for (Rule r : predicates.rulesOf(p.name())) {
+				for (Hop h : r.path()) {
+					out.add(h.predicate());
+				}
+				for (String n : r.not()) {
+					out.add(n.startsWith("^") ? n.substring(1) : n);
+				}
+			}
+		}
+		return out;
+	}
+
+	/** Predicates whose stated facts supply attributes or {@code implies} values during derivation. */
+	private Set<String> statedPredicates(List<Predicate> derived, Set<String> attrs) {
+		var out = new HashSet<String>(attrs);
+		for (Predicate p : derived) {
+			for (Rule r : predicates.rulesOf(p.name())) {
+				if (r.attribute() != null) {
+					out.add(r.attribute());
+				}
+			}
+		}
+		for (Predicate p : predicates.all()) {
+			if (!predicates.impliesOf(p.name()).isEmpty()) {
+				out.add(p.name());
+			}
+		}
+		return out;
+	}
+
 	/**
 	 * Derived rows under an attribute predicate for the entities whose other facts imply a value and none is stated:
 	 * made, rewritten, or invalidated to match. Returns {made, rewritten, invalidated}.
@@ -715,6 +792,28 @@ public final class Deriver {
 			return g;
 		}
 
+		/** Loads only the edges and stated facts whose predicates participate in derivation rules or implications. */
+		static Graph loadForDerivation(
+			Tx tx, PredicateRegistry predicates, Set<String> edgePredicates, Set<String> statedPredicates) {
+			var g = new Graph();
+			if (!edgePredicates.isEmpty()) {
+				Map<Long, List<String[]>> deaths = deaths(tx);
+				String placeholders = String.join(",", Collections.nCopies(edgePredicates.size(), "?"));
+				for (Row r : tx.query("SELECT fact.*, " + BY_DEATH + " FROM fact WHERE status = 'current' AND "
+						+ "object_id IS NOT NULL AND mode = 'asserted' AND derivation_kind <> 'derived' AND "
+						+ "predicate IN (" + placeholders + ")", edgePredicates.toArray())) {
+					Fact f = Fact.from(r);
+					g.add(f, predicates.get(f.predicate()).map(Predicate::symmetric).orElse(false),
+							byDeath(f, r.lng("by_death") == 1, deaths));
+				}
+			}
+			g.predicates = predicates;
+			if (!statedPredicates.isEmpty()) {
+				g.loadStated(tx, statedPredicates);
+			}
+			return g;
+		}
+
 		/** A stated current fact as an attribute source: who, under what, with which role, saying what. */
 		private record Stated(long id, long subject, String predicate, String qualifier, String literal) {
 		}
@@ -753,11 +852,24 @@ public final class Deriver {
 		}
 
 		private void loadStated(Tx tx) {
+			loadStated(tx, null);
+		}
+
+		private void loadStated(Tx tx, Set<String> predicateFilter) {
 			// The object as a word: the literal, or the name of the entity a value was resolved to before the
 			// attribute predicate was known to take literals.
-			for (Row r : tx.query("SELECT id, subject_id, predicate, qualifier, COALESCE(object_text, (SELECT name "
+			String base = "SELECT id, subject_id, predicate, qualifier, COALESCE(object_text, (SELECT name "
 					+ "FROM entity WHERE id = fact.object_id)) AS literal FROM fact WHERE status = 'current' AND "
-					+ "mode = 'asserted' AND derivation_kind <> 'derived' ORDER BY id")) {
+					+ "mode = 'asserted' AND derivation_kind <> 'derived'";
+			List<Row> rows;
+			if (predicateFilter == null) {
+				rows = tx.query(base + " ORDER BY id");
+			} else {
+				String placeholders = String.join(",", Collections.nCopies(predicateFilter.size(), "?"));
+				rows = tx.query(base + " AND predicate IN (" + placeholders + ") ORDER BY id",
+						predicateFilter.toArray());
+			}
+			for (Row r : rows) {
 				stated.add(new Stated(r.lng("id"), r.lng("subject_id"), r.str("predicate"), r.str("qualifier"),
 						r.str("literal")));
 			}

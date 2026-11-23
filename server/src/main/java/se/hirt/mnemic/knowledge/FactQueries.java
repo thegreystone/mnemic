@@ -60,6 +60,10 @@ public final class FactQueries {
 	public record Tombstone(long observationId, String forgottenAt) {
 	}
 
+	/** Aggregate current fact counts computed in a single scan for {@code status}. */
+	public record Counts(long stated, long derived) {
+	}
+
 	private final Database db;
 	private final PredicateRegistry predicates;
 	private final Clock clock;
@@ -280,6 +284,21 @@ public final class FactQueries {
 	public long derivedCount() {
 		return db.read(tx -> tx
 				.queryLong("SELECT COUNT(*) FROM fact WHERE status = 'current' AND derivation_kind = 'derived'"));
+	}
+
+	/** Computes stated and derived current fact counts in a single scan over {@code fact}. */
+	public Counts counts() {
+		return db.read(tx -> {
+			long[] res = new long[2];
+			tx.queryEach("""
+					SELECT COALESCE(SUM(CASE WHEN derivation_kind <> 'derived' THEN 1 ELSE 0 END), 0),
+					       COALESCE(SUM(CASE WHEN derivation_kind = 'derived' THEN 1 ELSE 0 END), 0)
+					FROM fact WHERE status = 'current'""", rs -> {
+				res[0] = rs.getLong(1);
+				res[1] = rs.getLong(2);
+			});
+			return new Counts(res[0], res[1]);
+		});
 	}
 
 	/** The kind of source the fact's home observation came from. */

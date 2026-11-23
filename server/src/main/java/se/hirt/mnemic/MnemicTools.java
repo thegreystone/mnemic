@@ -533,26 +533,45 @@ public class MnemicTools {
 			memo.put("last_read", lastRead.get(session));
 			out.put("repeat_memo", memo);
 			out.put("home", engine.home().toAbsolutePath().toString());
-			out.put("schema_version", engine.database().schemaVersion());
-			out.put("owner", engine.entities().owner().name());
+			Embedder emb = engine.embedder();
+			// Share one read transaction across all status queries to avoid ~12 BEGIN/ROLLBACK round-trips.
+			var statusCounts = engine.database().read(tx -> {
+				long schemaVersion = engine.database().schemaVersion();
+				var owner = engine.entities().owner();
+				List<String> ownerAliases = engine.entities().aliases(owner.id()).stream()
+						.filter(a -> !SELF_ALIASES.contains(a)).distinct().toList();
+				var obsCounts = engine.observations().counts();
+				var factCounts = engine.facts().counts();
+				int predicateCount = engine.predicates().all().size();
+				List<String> pendingIds = obsCounts.pendingProposals() > 0
+						? engine.observations().pendingProposalIds(25).stream().map(id -> "obs-" + id).toList()
+						: List.of();
+				long openQuestions = engine.questions().openCount();
+				long vectors = emb != null ? engine.vectors().count(emb.id()) : 0;
+				long missingObs = emb != null ? engine.vectors().missingObservationCount(emb.id()) : 0;
+				long missingFacts = emb != null ? engine.vectors().missingFactCount(emb.id()) : 0;
+				return new StatusSnapshot(schemaVersion, owner.name(), ownerAliases, obsCounts.total(),
+						obsCounts.retired(), factCounts.stated(), factCounts.derived(), predicateCount,
+						obsCounts.pendingProposals(), pendingIds, openQuestions, vectors, missingObs, missingFacts);
+			});
+			out.put("schema_version", statusCounts.schemaVersion());
+			out.put("owner", statusCounts.ownerName());
 			out.put("language", engine.lang().code());
-			out.put("owner_aliases", engine.entities().aliases(engine.entities().owner().id()).stream()
-					.filter(a -> !SELF_ALIASES.contains(a)).distinct().toList());
-			out.put("observations", engine.observations().count());
-			out.put("observations_retired", engine.observations().retiredCount());
-			out.put("facts", engine.facts().count());
-			out.put("derived_facts", engine.facts().derivedCount());
-			out.put("predicates", engine.predicates().all().size());
-			long pending = engine.observations().pendingProposals();
+			out.put("owner_aliases", statusCounts.ownerAliases());
+			out.put("observations", statusCounts.observations());
+			out.put("observations_retired", statusCounts.observationsRetired());
+			out.put("facts", statusCounts.facts());
+			out.put("derived_facts", statusCounts.derivedFacts());
+			out.put("predicates", statusCounts.predicates());
+			long pending = statusCounts.pendingProposals();
 			out.put("pending_proposals", pending);
-			out.put("pending_proposal_ids",
-					engine.observations().pendingProposalIds(25).stream().map(id -> "obs-" + id).toList());
+			out.put("pending_proposal_ids", statusCounts.pendingProposalIds());
 			if (pending > 0) {
 				out.put("pending_proposals_note", ToolDescriptions.PENDING_PROPOSALS_NOTE);
 			}
 			out.put("proposer", engine.proposer() == null ? "assistant" : engine.proposer().id());
 			out.put("proposer_mode", engine.proposer() == null ? null : engine.proposer().mode().name().toLowerCase());
-			out.put("open_questions", engine.questions().openCount());
+			out.put("open_questions", statusCounts.openQuestions());
 			out.put("model_providers", ModelProvider.available());
 			String vec = engine.database().vecVersion();
 			out.put("vec",
@@ -561,7 +580,6 @@ public class MnemicTools {
 							: "sqlite-vec " + vec);
 			EmbedderHolder holder = engine.embedderHolder();
 			EmbedderHolder.State st = holder.state();
-			Embedder emb = engine.embedder();
 			if (config.ortLibrary().isPresent()) {
 				out.put("ort",
 						OrtProbe.describe(config.ortLibrary().get()) + (emb != null ? ", in use by the embedder" : ""));
@@ -600,22 +618,26 @@ public class MnemicTools {
 				m.put("library", holder.library().toString());
 			}
 			if (emb != null) {
-				long t0 = System.nanoTime();
-				int dims = emb.embed("status probe").length;
 				m.put("model", emb.id());
-				m.put("dims", dims);
+				m.put("dims", emb.dims());
 				m.put("runtime", emb.runtimeVersion());
-				m.put("ms", Math.round((System.nanoTime() - t0) / 1_000_00) / 10.0);
-				m.put("vectors", engine.vectors().count(emb.id()));
+				m.put("ms", emb.probeMs());
+				m.put("vectors", statusCounts.vectors());
 				// Rows still without a vector: non-zero while the backfill runs, or after a consolidate was skipped.
 				var backlog = new LinkedHashMap<String, Object>();
-				backlog.put("observations", engine.vectors().missingObservationCount(emb.id()));
-				backlog.put("facts", engine.vectors().missingFactCount(emb.id()));
+				backlog.put("observations", statusCounts.missingObservations());
+				backlog.put("facts", statusCounts.missingFacts());
 				m.put("backlog", backlog);
 			}
 			out.put("embedder", m);
 			return out;
 		});
+	}
+
+	private record StatusSnapshot(long schemaVersion, String ownerName, List<String> ownerAliases, long observations,
+			long observationsRetired, long facts, long derivedFacts, int predicates, long pendingProposals,
+			List<String> pendingProposalIds, long openQuestions, long vectors, long missingObservations,
+			long missingFacts) {
 	}
 
 	/**
