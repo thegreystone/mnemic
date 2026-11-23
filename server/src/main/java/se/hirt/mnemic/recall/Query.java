@@ -23,8 +23,8 @@
  * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
  * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
  * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 package se.hirt.mnemic.recall;
 
@@ -33,19 +33,24 @@ import se.hirt.mnemic.knowledge.EntityService;
 import se.hirt.mnemic.knowledge.EntityService.Mention;
 import se.hirt.mnemic.knowledge.EntityTypeRegistry;
 import se.hirt.mnemic.knowledge.Lang;
+import se.hirt.mnemic.knowledge.LanguagePack;
+import se.hirt.mnemic.knowledge.LanguagePack.QueryCues;
 import se.hirt.mnemic.knowledge.Names;
 import se.hirt.mnemic.knowledge.PredicateRegistry;
 import se.hirt.mnemic.knowledge.PredicateRegistry.Cue;
 
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * A question taken apart once for every channel: the entities it names, the predicate cues, its content terms with the
@@ -67,11 +72,13 @@ import java.util.regex.Pattern;
  * @param kinds
  *            the kind of thing a question asks for, between its question word and its verb ("what motorcycles does
  *            Mattias own"): words that are no entity, cue, or filler
+ * @param language
+ *            the detected language of the question, falling back to the store's language on a tie
  */
 public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<String> ownerTokens, List<String> terms,
 		Set<String> entityTokens, List<String> beyondEntities, boolean polar, boolean past, boolean forward,
 		Set<String> cueTokens, List<String> residual, List<String> named, String fts, List<String> kinds,
-		List<Bound> bound) {
+		List<Bound> bound, Lang language) {
 
 	/**
 	 * A cue the probe runs, read off the question's structure: {@code subjects} are the entities whose name stands
@@ -87,6 +94,9 @@ public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<Strin
 			return !subjects.isEmpty();
 		}
 	}
+
+	/** Unicode-aware word tokenisation preserving diacritics (ä, ö, ü, ß, å) and inner apostrophes. */
+	private static final Pattern WORD = Pattern.compile("[\\p{L}']+");
 
 	/**
 	 * Whether a comma stands between token {@code index - 1} and token {@code index} of the text: "parents, siblings"
@@ -105,35 +115,15 @@ public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<Strin
 		return false;
 	}
 
-	/** Words that put the possessor after the cue word: "the father of Anna", "Vater von Anna". */
-	private static final Set<String> OF = Set.of("of", "von", "der", "des", "de", "du", "di");
-	/** Words that join two relations of one subject: "Anna's parents and siblings", "Eltern und Geschwister". */
-	private static final Set<String> AND = Set.of("and", "or", "und", "oder", "och", "eller");
-
-	private static final Set<String> POLAR = Set.of("does", "do", "did", "is", "are", "was", "were", "has", "have",
-			"had", "can", "could", "will", "would", "should");
-	private static final Set<String> PAST = Set.of("did", "was", "were", "had");
-	private static final Pattern FORWARD = Pattern.compile(
-			"\\b(?:about to|upcoming|next|soon|going to|will|plan(?:s|ned|ning)?|scheduled|due|coming up|pick(?:ing)? up)\\b",
-			Pattern.CASE_INSENSITIVE);
-	/** Words that narrow nothing in a yes/no question. */
-	static final Set<String> POLAR_FILLER = Set.of("any", "anything", "anyone", "anywhere", "still", "yet", "ever",
-			"really", "actually", "currently", "now", "already", "also", "some", "something", "someone", "there",
-			"here", "just", "even", "own",
-			// "does Marcus have a sister": having is the relation, not a word the fact must carry (2026-09-25)
-			"have", "has", "had", "got");
-	/** "what kind of car", "what else", "which other things": words about the asking, not the kind. */
-	static final Set<String> KIND_FILLER = Set.of("kind", "kinds", "sort", "sorts", "type", "types", "else", "other",
-			"others", "more", "many", "much", "exactly", "precisely", "all", "different", "various", "new", "old",
-			"current", "former", "previous", "past", "recent", "latest", "main", "specific", "particular");
-	/** "what motorcycles does Mattias own": the kind asked for lies between the question word and the verb. */
-	private static final Pattern KIND_PHRASE = Pattern.compile(
-			"^\\s*(?:what|which)\\s+(.+?)\\s+(?:does|do|did|is|are|was|were|has|have|had|will|would|can|could)\\b",
-			Pattern.CASE_INSENSITIVE);
-
 	public static Query analyse(
 		String text, EntityService entities, PredicateRegistry predicates, EntityTypeRegistry types) {
-		List<Entity> spotted = entities.spot(text);
+		Lang language = detectLanguage(text, predicates.lang());
+		List<EntityService.Mention> mentions = entities.mentions(text, language);
+		var spottedById = new LinkedHashMap<Long, Entity>();
+		for (EntityService.Mention m : mentions) {
+			spottedById.putIfAbsent(m.entity().id(), m.entity());
+		}
+		List<Entity> spotted = new ArrayList<>(spottedById.values());
 		var ownerTokens = new HashSet<String>();
 		for (String a : entities.aliases(entities.owner().id())) {
 			ownerTokens.addAll(Names.tokens(a));
@@ -149,22 +139,102 @@ public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<Strin
 		List<String> terms = Names.contentTokens(text).stream().filter(t -> !ownerTokens.contains(t)).distinct()
 				.toList();
 		List<String> beyondEntities = terms.stream().filter(t -> !entityTokens.contains(t)).toList();
-		boolean polar = isPolar(text);
-		List<Bound> bound = bind(text, cues, entities.mentions(text), spotted);
+		boolean polar = isPolar(text, language);
+		List<Bound> bound = bind(text, cues, mentions, spotted);
 		var cueTokens = new HashSet<String>();
 		for (Bound b : bound) {
 			cueTokens.addAll(Names.tokens(b.cue().term()));
 		}
+		Set<String> polarFiller = LanguagePack.of(language).query().polarFiller();
 		List<String> residual = polar
-				? beyondEntities.stream().filter(t -> !cueTokens.contains(t) && !POLAR_FILLER.contains(t)).toList()
+				? beyondEntities.stream().filter(t -> !cueTokens.contains(t) && !polarFiller.contains(t)).toList()
 				: List.of();
 		// A relation word names no thing, however it is written: "Familie" in "Mattias' Familie" is the cue, not a
 		// name the facts must mention.
-		List<String> named = namedThings(text, entityTokens, types).stream().filter(t -> !cueTokens.contains(t))
-				.toList();
-		return new Query(text, spotted, cues, ownerTokens, terms, entityTokens, beyondEntities, polar, isPast(text),
-				isForward(text), cueTokens, residual, named, ftsQuery(text, ownerTokens),
-				kindsAskedFor(text, entityTokens, cueTokens, cues), bound);
+		List<String> named = namedThings(text, entityTokens, types, language).stream()
+				.filter(t -> !cueTokens.contains(t)).toList();
+		return new Query(text, spotted, cues, ownerTokens, terms, entityTokens, beyondEntities, polar,
+				isPast(text, language), isForward(text, language), cueTokens, residual, named,
+				ftsQuery(text, ownerTokens), kindsAskedFor(text, entityTokens, cueTokens, cues, language), bound,
+				language);
+	}
+
+	/**
+	 * Detects the language of a question from its function words and opening cue words, preserving diacritics so
+	 * cross-language homographs ("was", "hat", "für"/"fur", "var") stay separated. Falls back to {@code fallback} when
+	 * no language leads.
+	 */
+	static Lang detectLanguage(String text, Lang fallback) {
+		Lang def = fallback == null ? Lang.EN : fallback;
+		List<String> rawWords = unicodeWordsRaw(text);
+		if (rawWords.isEmpty()) {
+			return def;
+		}
+		boolean hasLowercase = false;
+		for (String raw : rawWords) {
+			if (raw.chars().anyMatch(Character::isLowerCase)) {
+				hasLowercase = true;
+				break;
+			}
+		}
+		Map<Lang, Integer> scores = new EnumMap<>(Lang.class);
+		for (Lang l : Lang.values()) {
+			scores.put(l, 0);
+		}
+		for (String raw : rawWords) {
+			// Skip all-uppercase acronyms (MIT, CEO, AI) in mixed-case text so they do not match lowercase markers.
+			if (hasLowercase && raw.length() >= 2 && raw.chars().allMatch(Character::isUpperCase)) {
+				continue;
+			}
+			String w = raw.toLowerCase(Locale.ROOT);
+			for (LanguagePack pack : LanguagePack.all()) {
+				if (pack.query().markers().contains(w)) {
+					scores.merge(pack.lang(), 2, Integer::sum);
+				}
+			}
+		}
+		// A position-0 word unique to one language's polar/question openers resolves short questions ("Hat Mattias
+		// Kinder?", "Var Mattias hemma?").
+		String first = rawWords.getFirst().toLowerCase(Locale.ROOT);
+		Lang uniqueOpener = null;
+		int openerHits = 0;
+		for (LanguagePack pack : LanguagePack.all()) {
+			QueryCues q = pack.query();
+			if (q.polar().contains(first) || q.questionWords().contains(first)) {
+				uniqueOpener = pack.lang();
+				openerHits++;
+			}
+		}
+		if (openerHits == 1 && uniqueOpener != null) {
+			scores.merge(uniqueOpener, 1, Integer::sum);
+		}
+		if (rawWords.size() > 1) {
+			String second = rawWords.get(1).toLowerCase(Locale.ROOT);
+			for (LanguagePack pack : LanguagePack.all()) {
+				if (pack.query().isAmbiguousWhereWas(first, second)) {
+					scores.merge(pack.lang(), 2, Integer::sum);
+				}
+			}
+		}
+		Lang best = def;
+		int bestScore = 0;
+		boolean tied = false;
+		for (Map.Entry<Lang, Integer> e : scores.entrySet()) {
+			int s = e.getValue();
+			if (s > bestScore) {
+				best = e.getKey();
+				bestScore = s;
+				tied = false;
+			} else if (s > 0 && s == bestScore) {
+				tied = true;
+			}
+		}
+		return bestScore == 0 || tied ? def : best;
+	}
+
+	/** The polar-filler words for the language of {@code text}, falling back to {@code fallback}. */
+	static Set<String> polarFillerFor(String text, Lang fallback) {
+		return LanguagePack.of(detectLanguage(text, fallback)).query().polarFiller();
 	}
 
 	/**
@@ -174,6 +244,8 @@ public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<Strin
 	 * the other entities of its stretch of the question.
 	 */
 	static List<Bound> bind(String text, List<Cue> cues, List<Mention> mentions, List<Entity> spotted) {
+		Set<String> ofWords = LanguagePack.allOfWords();
+		Set<String> andWords = LanguagePack.allAndWords();
 		List<String> tokens = Names.tokens(text);
 		String[] takenBy = new String[tokens.size()]; // the group that took a token, "" for a predicate's own word
 		var placed = new ArrayList<Object[]>(); // cue, start, end
@@ -234,7 +306,7 @@ public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<Strin
 					before.add(m.entity());
 					beforeStart = m.start();
 				}
-				if (end < tokens.size() && OF.contains(tokens.get(end)) && m.start() == end + 1) {
+				if (end < tokens.size() && ofWords.contains(tokens.get(end)) && m.start() == end + 1) {
 					after.add(m.entity());
 				}
 			}
@@ -254,7 +326,8 @@ public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<Strin
 			if (!subjects.get(p).isEmpty() || start < 1) {
 				continue;
 			}
-			int previousEnd = AND.contains(tokens.get(start - 1)) ? start - 1 : commaBefore(text, start) ? start : -1;
+			int previousEnd = andWords.contains(tokens.get(start - 1)) ? start - 1
+					: commaBefore(text, start) ? start : -1;
 			if (previousEnd < 0) {
 				continue;
 			}
@@ -337,12 +410,17 @@ public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<Strin
 	}
 
 	/**
-	 * The kind of thing a question asks for: the words between "what" or "which" and the verb that are no entity, no
-	 * word of the cue predicate's vocabulary, and no filler. "What motorcycles does Mattias own" asks for motorcycles;
-	 * "what does Mattias own" asks for nothing in particular.
+	 * The kind of thing a question asks for: the words between the question word ("what"/"which", "welche"/"was für",
+	 * "vilken"/"vilka") and the verb that are no entity, no word of the cue predicate's vocabulary, and no filler.
 	 */
 	static List<String> kindsAskedFor(String query, Set<String> entityTokens, Set<String> cueTokens, List<Cue> cues) {
-		Matcher m = KIND_PHRASE.matcher(query == null ? "" : query);
+		return kindsAskedFor(query, entityTokens, cueTokens, cues, detectLanguage(query, Lang.EN));
+	}
+
+	static List<String> kindsAskedFor(
+		String query, Set<String> entityTokens, Set<String> cueTokens, List<Cue> cues, Lang language) {
+		QueryCues qc = LanguagePack.of(language).query();
+		Matcher m = qc.kindPhrasePattern().matcher(query == null ? "" : query);
 		if (!m.find()) {
 			return List.of();
 		}
@@ -358,8 +436,8 @@ public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<Strin
 		var out = new ArrayList<String>();
 		for (String t : Names.tokens(m.group(1))) {
 			if (t.length() < 2 || entityTokens.contains(t) || cueTokens.contains(t) || Names.STOPWORDS.contains(t)
-					|| POLAR_FILLER.contains(t) || KIND_FILLER.contains(t) || out.contains(t)
-					|| Lang.singulars(t).stream().anyMatch(vocabulary::contains)) {
+					|| qc.polarFiller().contains(t) || qc.kindFiller().contains(t) || out.contains(t)
+					|| Lang.singulars(t, language).stream().anyMatch(vocabulary::contains)) {
 				continue;
 			}
 			out.add(t);
@@ -372,29 +450,82 @@ public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<Strin
 		return spotted.stream().filter(e -> e.id() != ownerId).toList();
 	}
 
-	/** A yes/no question: "does Mattias own property in Sweden", "has the car been registered". */
+	/**
+	 * A yes/no question: "does Mattias own property in Sweden", "Besitzt Mattias ein Boot?", "Äger Mattias en båt?".
+	 */
 	static boolean isPolar(String query) {
-		String[] words = query.trim().toLowerCase(Locale.ROOT).split("[^a-z']+");
-		return words.length > 0 && POLAR.contains(words[0]);
+		return isPolar(query, detectLanguage(query, Lang.EN));
+	}
+
+	static boolean isPolar(String query, Lang language) {
+		List<String> words = unicodeWordsLower(query);
+		if (words.isEmpty()) {
+			return false;
+		}
+		QueryCues qc = LanguagePack.of(language).query();
+		String first = words.getFirst();
+		if (qc.isAmbiguousWhereWas(first, words.size() > 1 ? words.get(1) : null)) {
+			return false;
+		}
+		return qc.polar().contains(first);
 	}
 
 	/** "Did Mattias work at Initrode": ended facts are the answer, and nothing is decided false from the present. */
 	static boolean isPast(String query) {
-		String[] words = query.trim().toLowerCase(Locale.ROOT).split("[^a-z']+");
-		return words.length > 0 && PAST.contains(words[0]);
+		return isPast(query, detectLanguage(query, Lang.EN));
+	}
+
+	static boolean isPast(String query, Lang language) {
+		List<String> words = unicodeWordsLower(query);
+		if (words.isEmpty()) {
+			return false;
+		}
+		QueryCues qc = LanguagePack.of(language).query();
+		String first = words.getFirst();
+		if (qc.isAmbiguousWhereWas(first, words.size() > 1 ? words.get(1) : null)) {
+			return false;
+		}
+		if (qc.past().contains(first)) {
+			return true;
+		}
+		boolean seenAux = false;
+		for (String w : words) {
+			if (seenAux && qc.pastParticiples().contains(w)) {
+				return true;
+			}
+			if (qc.perfectAuxiliaries().contains(w)) {
+				seenAux = true;
+			}
+		}
+		for (String w : words) {
+			if (qc.pastMarkers().contains(w)) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/** A question about what is coming: the upcoming channel's cue. */
 	static boolean isForward(String query) {
-		return query != null && FORWARD.matcher(query).find();
+		return isForward(query, detectLanguage(query, Lang.EN));
+	}
+
+	static boolean isForward(String query, Lang language) {
+		return query != null && LanguagePack.of(language).query().forwardPattern().matcher(query).find();
 	}
 
 	/**
 	 * Capitalised words of the query that are not its first word and not an entity or owner name: the specific things
-	 * the question names ("my apartment in Shinjuku"), lowercased for matching against renderings. The cue predicate's
-	 * vocabulary is not excluded: "Software Engineer Manager" is a title whose every word counts.
+	 * the question names ("my apartment in Shinjuku"), lowercased for matching against renderings. In languages that
+	 * capitalise all common nouns (German), only words with an inner capital (brand names such as "iPad" or "macOS")
+	 * are treated as named things, avoiding false misses on ordinary nouns ("Wann war mein letzter Zahnarzttermin?").
 	 */
 	static List<String> namedThings(String query, Set<String> entityTokens, EntityTypeRegistry types) {
+		return namedThings(query, entityTokens, types, detectLanguage(query, Lang.EN));
+	}
+
+	static List<String> namedThings(String query, Set<String> entityTokens, EntityTypeRegistry types, Lang language) {
+		boolean capitalizesNouns = LanguagePack.of(language).capitalizesNouns();
 		var out = new ArrayList<String>();
 		String[] words = query.trim().split("\\s+");
 		for (int i = 1; i < words.length; i++) {
@@ -406,7 +537,14 @@ public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<Strin
 					break;
 				}
 			}
-			if (w.length() < 2 || (!Character.isUpperCase(w.charAt(0)) && !innerCapital)) {
+			if (w.length() < 2) {
+				continue;
+			}
+			if (capitalizesNouns) {
+				if (!innerCapital) {
+					continue;
+				}
+			} else if (!Character.isUpperCase(w.charAt(0)) && !innerCapital) {
 				continue;
 			}
 			if (w.equals("I") || w.length() <= 3 && w.chars().allMatch(Character::isUpperCase)) {
@@ -420,6 +558,45 @@ public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<Strin
 			}
 		}
 		return out;
+	}
+
+	private static List<String> unicodeWordsRaw(String text) {
+		if (text == null || text.isBlank()) {
+			return List.of();
+		}
+		var out = new ArrayList<String>();
+		Matcher m = WORD.matcher(text);
+		while (m.find()) {
+			String w = stripOuterApostrophes(m.group());
+			if (!w.isEmpty()) {
+				out.add(w);
+			}
+		}
+		return out;
+	}
+
+	private static List<String> unicodeWordsLower(String text) {
+		List<String> raw = unicodeWordsRaw(text);
+		if (raw.isEmpty()) {
+			return List.of();
+		}
+		var out = new ArrayList<String>(raw.size());
+		for (String w : raw) {
+			out.add(w.toLowerCase(Locale.ROOT));
+		}
+		return out;
+	}
+
+	private static String stripOuterApostrophes(String s) {
+		int start = 0;
+		int end = s.length();
+		while (start < end && s.charAt(start) == '\'') {
+			start++;
+		}
+		while (end > start && s.charAt(end - 1) == '\'') {
+			end--;
+		}
+		return s.substring(start, end);
 	}
 
 	/**

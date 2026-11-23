@@ -32,18 +32,19 @@
 package se.hirt.mnemic.knowledge;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 
 /**
  * The language of the fact layer (MNEMIC_LANGUAGE). Observations stay in whatever language they were said; facts are
  * rendered from templates, and the templates, the temporal suffixes, the words around a negation, a restriction, or a
- * closure, and the family qualifiers are the language's. Switching the store's language re-renders every fact from what
- * is stored; nothing is lost, since the words are never the record.
+ * closure, and the family qualifiers live in {@code lang/<code>.json} resources loaded through {@link LanguagePack}.
+ * Switching the store's language re-renders every fact from what is stored; nothing is lost, since the words are never
+ * the record.
  */
 public enum Lang {
-	EN("en"), DE("de");
+	EN("en"), DE("de"), SV("sv"), FR("fr"), ES("es");
 
 	private final String code;
 
@@ -55,7 +56,15 @@ public enum Lang {
 		return code;
 	}
 
-	/** {@code en} or {@code de}; anything else is refused so a typo cannot render a store in the wrong words. */
+	/** The resource-backed cue and template pack for this language. */
+	public LanguagePack pack() {
+		return LanguagePack.of(this);
+	}
+
+	/**
+	 * {@code en}, {@code de}, {@code sv}, {@code fr}, or {@code es}; anything else is refused so a typo cannot render a
+	 * store in the wrong words.
+	 */
 	public static Lang of(String code) {
 		if (code == null || code.isBlank()) {
 			return EN;
@@ -66,7 +75,7 @@ public enum Lang {
 				return l;
 			}
 		}
-		throw new IllegalArgumentException("Unsupported language '" + code + "'; use en or de.");
+		throw new IllegalArgumentException("Unsupported language '" + code + "'; use en, de, sv, fr, or es.");
 	}
 
 	/**
@@ -74,117 +83,94 @@ public enum Lang {
 	 * "boxes" → box, "vehicles" → vehicle. Which one names a kind is for the type registry to say.
 	 */
 	public static List<String> singulars(String word) {
-		var out = new ArrayList<String>();
+		return singulars(word, EN);
+	}
+
+	/**
+	 * The forms a word of a question in {@code lang} may be the plural or definite form of, the word itself first:
+	 * applies English rules plus {@code lang}'s suffix rules from {@link LanguagePack}.
+	 */
+	public static List<String> singulars(String word, Lang lang) {
+		var out = new LinkedHashSet<String>();
 		out.add(word);
 		if (word == null || word.length() < 4) {
-			return out;
+			return new ArrayList<>(out);
 		}
-		if (word.endsWith("ies")) {
-			out.add(word.substring(0, word.length() - 3) + "y");
+		applyPluralRules(word, LanguagePack.of(EN).pluralSuffixes(), out);
+		if (lang != null && lang != EN) {
+			applyPluralRules(word, LanguagePack.of(lang).pluralSuffixes(), out);
 		}
-		if (word.endsWith("es")) {
-			out.add(word.substring(0, word.length() - 2));
+		return new ArrayList<>(out);
+	}
+
+	private static void applyPluralRules(String word, List<LanguagePack.PluralRule> rules, LinkedHashSet<String> out) {
+		for (LanguagePack.PluralRule rule : rules) {
+			String candidate = rule.apply(word);
+			if (candidate != null && !candidate.isEmpty()) {
+				out.add(candidate);
+			}
 		}
-		if (word.endsWith("s") && !word.endsWith("ss")) {
-			out.add(word.substring(0, word.length() - 1));
-		}
-		return out;
 	}
 
 	// ── temporal suffixes ──
 
 	public String since(String start) {
-		return this == DE ? " (seit " + start + ")" : " (since " + start + ")";
+		return pack().fact().formatSince(start);
 	}
 
 	public String fromEnded(String start) {
-		return this == DE ? " (von " + start + ", beendet)" : " (from " + start + ", ended)";
+		return pack().fact().formatFromEnded(start);
 	}
 
 	public String until(String end) {
-		return this == DE ? " (bis " + end + ")" : " (until " + end + ")";
+		return pack().fact().formatUntil(end);
 	}
 
 	public String ended() {
-		return this == DE ? " (beendet)" : " (ended)";
+		return pack().fact().ended();
 	}
 
 	/** The words a suffix may start with, for stripping one before a new suffix is appended. */
 	public static String suffixWords() {
-		return "since|from|until|ended|seit|von|bis|beendet";
+		return LanguagePack.allSuffixWordsRegex();
 	}
 
 	// ── the words around a fact ──
 
 	public String believed() {
-		return this == DE ? " (vermutet)" : " (believed)";
+		return pack().fact().believed();
 	}
 
 	public String notPrefix() {
-		return this == DE ? "nicht: " : "not: ";
+		return pack().fact().notPrefix();
 	}
 
 	public String onlyWithin(String bound) {
-		return this == DE ? "nur innerhalb von " + bound : "only within " + bound;
+		return pack().fact().formatOnlyWithin(bound);
 	}
 
 	public String closure(String subject, String verbPhrase, String type) {
-		return this == DE
-				? "Was " + subject + " an " + typePlural(type) + " " + verbPhrase + ", ist vollständig erfasst"
-				: "what " + subject + " " + verbPhrase + " among " + typePlural(type) + " is completely recorded";
+		return pack().fact().formatClosure(subject, verbPhrase, typePlural(type));
 	}
-
-	private static final Map<String, String> PLURAL_DE = Map.ofEntries(Map.entry("place", "Orten"),
-			Map.entry("country", "Ländern"), Map.entry("person", "Personen"),
-			Map.entry("organization", "Organisationen"), Map.entry("project", "Projekten"),
-			Map.entry("product", "Produkten"), Map.entry("team", "Teams"), Map.entry("thing", "Dingen"),
-			Map.entry("technology", "Technologien"), Map.entry("domain", "Domains"), Map.entry("event", "Ereignissen"));
 
 	public String typePlural(String type) {
-		if (this == DE) {
-			return PLURAL_DE.getOrDefault(type, type);
+		String mapped = pack().fact().typePlurals().get(type);
+		if (mapped != null) {
+			return mapped;
 		}
-		return switch (type) {
-		case "person" -> "people";
-		default -> type.endsWith("s") ? type
+		if (this != EN) {
+			return type;
+		}
+		return type.endsWith("s") ? type
 				: type.endsWith("y") && !type.matches(".*[aeiou]y") ? type.substring(0, type.length() - 1) + "ies"
 						: type.endsWith("ch") || type.endsWith("sh") || type.endsWith("x") ? type + "es" : type + "s";
-		};
 	}
-
-	private static final Map<String, String> QUALIFIER_DE = Map.ofEntries(Map.entry("mother", "Mutter"),
-			Map.entry("father", "Vater"), Map.entry("parent", "Elternteil"), Map.entry("mom", "Mutter"),
-			Map.entry("dad", "Vater"), Map.entry("stepmother", "Stiefmutter"), Map.entry("stepfather", "Stiefvater"),
-			Map.entry("stepparent", "Stiefelternteil"), Map.entry("brother", "Bruder"),
-			Map.entry("sister", "Schwester"), Map.entry("sibling", "Geschwister"),
-			Map.entry("half-brother", "Halbbruder"), Map.entry("half-sister", "Halbschwester"),
-			Map.entry("half-sibling", "Halbgeschwister"), Map.entry("stepbrother", "Stiefbruder"),
-			Map.entry("stepsister", "Stiefschwester"), Map.entry("stepsibling", "Stiefgeschwister"),
-			Map.entry("twin", "Zwilling"), Map.entry("twin brother", "Zwillingsbruder"),
-			Map.entry("twin sister", "Zwillingsschwester"), Map.entry("wife", "Ehefrau"),
-			Map.entry("husband", "Ehemann"), Map.entry("spouse", "Ehepartner"), Map.entry("partner", "Partner"),
-			Map.entry("girlfriend", "Freundin"), Map.entry("boyfriend", "Freund"), Map.entry("fiancé", "Verlobter"),
-			Map.entry("fiancée", "Verlobte"), Map.entry("step-parent", "Stiefelternteil"),
-			Map.entry("grandmother", "Großmutter"), Map.entry("grandfather", "Großvater"),
-			Map.entry("grandparent", "Großelternteil"),
-			Map.entry("maternal grandmother", "Großmutter mütterlicherseits"),
-			Map.entry("maternal grandfather", "Großvater mütterlicherseits"),
-			Map.entry("maternal grandparent", "Großelternteil mütterlicherseits"),
-			Map.entry("paternal grandmother", "Großmutter väterlicherseits"),
-			Map.entry("paternal grandfather", "Großvater väterlicherseits"),
-			Map.entry("paternal grandparent", "Großelternteil väterlicherseits"), Map.entry("aunt", "Tante"),
-			Map.entry("uncle", "Onkel"), Map.entry("aunt or uncle", "Tante oder Onkel"),
-			Map.entry("cousin", "Cousin oder Cousine"), Map.entry("mother-in-law", "Schwiegermutter"),
-			Map.entry("father-in-law", "Schwiegervater"), Map.entry("parent-in-law", "Schwiegerelternteil"),
-			Map.entry("son-in-law", "Schwiegersohn"), Map.entry("daughter-in-law", "Schwiegertochter"),
-			Map.entry("child-in-law", "Schwiegerkind"), Map.entry("brother-in-law", "Schwager"),
-			Map.entry("sister-in-law", "Schwägerin"), Map.entry("sibling-in-law", "Schwager oder Schwägerin"));
 
 	/** A family qualifier in the language's words; the stored value stays the vocabulary's (English) term. */
 	public String qualifier(String qualifier) {
 		if (qualifier == null || this == EN) {
 			return qualifier;
 		}
-		return QUALIFIER_DE.getOrDefault(qualifier.toLowerCase(Locale.ROOT), qualifier);
+		return pack().fact().qualifiers().getOrDefault(qualifier.toLowerCase(Locale.ROOT), qualifier);
 	}
 }

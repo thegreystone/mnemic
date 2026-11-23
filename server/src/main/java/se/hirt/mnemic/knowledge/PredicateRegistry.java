@@ -215,88 +215,21 @@ public final class PredicateRegistry {
 	}
 
 	/**
-	 * German templates, negations, and cue words for the seed predicates. The base row of a predicate keeps its English
-	 * template; a language row overrides the rendering and adds cue words when it is the store's language. Stored, not
-	 * compiled in, so a user can correct them like any other template (correct on the predicate).
+	 * Seeds the per-language rendering templates and cue words from {@link LanguagePack} for every language that
+	 * defines them. Stored in {@code predicate_render}, not compiled in, so a user can correct them like any other
+	 * template (correct on the predicate).
 	 */
-	private static final List<String[]> RENDERS_DE = List.of(
-			new String[] {"works_at", "{subject} arbeitet bei {object}", "{subject} arbeitet nicht bei {object}",
-					"arbeitet,arbeiten,arbeitgeber,angestellt,job,firma,stelle,tätig", ""},
-			new String[] {"holds_role", "{subject} hat die Rolle {object}[[ bei {scope}]]",
-					"{subject} hat nicht die Rolle {object}[[ bei {scope}]]",
-					"rolle,titel,position,leiter,leiterin,direktor,direktorin,ingenieur,geschäftsführer", ""},
-			new String[] {"leads", "{subject} leitet {object}", "{subject} leitet {object} nicht",
-					"leitet,leiten,führt,verantwortet,verantwortlich", ""},
-			new String[] {"lives_in", "{subject} wohnt in {object}", "{subject} wohnt nicht in {object}",
-					"wohnt,wohnen,lebt,leben,zuhause,wohnort,wohnhaft", ""},
-			new String[] {"born_in", "{subject} wurde in {object} geboren", "{subject} wurde nicht in {object} geboren",
-					"geboren,geburtsort,gebürtig", ""},
-			new String[] {"member_of", "{subject} ist Mitglied von {object}",
-					"{subject} ist nicht Mitglied von {object}", "mitglied,verein,mitgliedschaft", ""},
-			new String[] {"parent_of", "{subject} ist {qualifier|Elternteil} von {object}",
-					"{subject} ist nicht {qualifier|Elternteil} von {object}", "mutter,vater,eltern,elternteil",
-					"kind,kinder,sohn,tochter,söhne,töchter"},
-			new String[] {"spouse_of", "{subject} ist {qualifier|Ehepartner} von {object}",
-					"{subject} ist nicht {qualifier|Ehepartner} von {object}",
-					"verheiratet,ehefrau,ehemann,ehepartner,heiratete,frau,mann", ""},
-			new String[] {"gender", "{subject} ist {object}", "{subject} ist nicht {object}",
-					"geschlecht,männlich,weiblich,mann,frau", ""},
-			new String[] {"partner_of", "{subject} ist {qualifier|Partner} von {object}",
-					"{subject} ist nicht {qualifier|Partner} von {object}",
-					"partner,partnerin,freund,freundin,lebensgefährte,lebensgefährtin,zusammen", ""},
-			new String[] {"engaged_to", "{subject} ist mit {object} verlobt",
-					"{subject} ist nicht mit {object} verlobt", "verlobt,verlobte,verlobter,verlobung", ""},
-			new String[] {"step_parent_of", "{subject} ist {qualifier|Stiefelternteil} von {object}",
-					"{subject} ist nicht {qualifier|Stiefelternteil} von {object}",
-					"stiefmutter,stiefvater,stiefeltern", "stiefkind,stiefsohn,stieftochter"},
-			new String[] {"grandparent_of", "{subject} ist {qualifier|Großelternteil} von {object}",
-					"{subject} ist nicht {qualifier|Großelternteil} von {object}",
-					"großmutter,großvater,großeltern,oma,opa,grossmutter,grossvater",
-					"enkel,enkelin,enkelkind,enkelkinder"},
-			new String[] {"aunt_uncle_of", "{subject} ist {qualifier|Tante oder Onkel} von {object}",
-					"{subject} ist nicht {qualifier|Tante oder Onkel} von {object}", "tante,onkel", "neffe,nichte"},
-			new String[] {"cousin_of", "{subject} ist {qualifier|Cousin} von {object}",
-					"{subject} ist nicht {qualifier|Cousin} von {object}", "cousin,cousine,cousins,vetter,kusine", ""},
-			new String[] {"in_law_of", "{subject} ist {qualifier|angeheiratet} mit {object}",
-					"{subject} ist nicht {qualifier|angeheiratet} mit {object}",
-					"schwiegermutter,schwiegervater,schwiegereltern,schwiegersohn,schwiegertochter,schwager,schwägerin",
-					""},
-			new String[] {"sibling_of", "{subject} ist {qualifier|Geschwister} von {object}",
-					"{subject} ist nicht {qualifier|Geschwister} von {object}",
-					"bruder,schwester,geschwister,halbbruder,halbschwester,stiefbruder,stiefschwester,zwilling", ""},
-			new String[] {"owns", "{subject} besitzt {object}", "{subject} besitzt {object} nicht",
-					"besitzt,besitzen,gekauft,kaufte,kaufen,erworben,eigentum,eigentümer", ""},
-			new String[] {"prefers", "{subject} bevorzugt {object}[[ ({qualifier})]]",
-					"{subject} bevorzugt {object} nicht", "bevorzugt,lieber,liebling,lieblings,gefällt,mag", ""},
-			new String[] {"dislikes", "{subject} mag {object} nicht[[ ({qualifier})]]", null,
-					"hasst,abneigung,verabscheut", ""},
-			new String[] {"uses", "{subject} verwendet {object}[[ ({qualifier})]]",
-					"{subject} verwendet {object} nicht", "verwendet,benutzt,nutzt,einsatz,arbeitet mit", ""},
-			new String[] {"decided", "{subject} hat entschieden: {object}[[ ({qualifier})]]", null,
-					"entschieden,entscheidung,beschlossen,gewählt,entschied", ""},
-			new String[] {"considering", "{subject} erwägt {object}[[ ({qualifier})]]",
-					"{subject} erwägt {object} nicht", "erwägt,überlegt,plant,vorhaben,absicht,tendiert,erwägen", ""},
-			new String[] {"related_to", "{subject} steht in Beziehung zu {object}[[ ({qualifier})]]", null,
-					"verwandt,beziehung,bezug", ""},
-			new String[] {"knows", "{subject} kennt {object}[[ ({qualifier})]]", "{subject} kennt {object} nicht",
-					"kennt,kennen,kollege,kollegin,traf,getroffen,bekannt", ""},
-			new String[] {"part_of", "{subject} ist Teil von {object}", "{subject} ist nicht Teil von {object}",
-					"teil,innerhalb", ""},
-			new String[] {"located_in", "{subject} liegt in {object}", "{subject} liegt nicht in {object}",
-					"liegt,befindet,sitz,standort,hauptsitz,gelegen", ""},
-			new String[] {"has_phone", "{subject} hat die Telefonnummer {object}[[ ({qualifier})]]",
-					"{subject} hat nicht die Telefonnummer {object}",
-					"telefon,telefonnummer,handy,handynummer,natel,mobil,mobilnummer,festnetz", ""});
-
 	private void seedRendersIfMissing() {
 		db.write(tx -> {
-			for (String[] r : RENDERS_DE) {
-				tx.update(
-						"""
-								INSERT OR IGNORE INTO predicate_render(name, language, render, negated, lexicon, inverse_lexicon)
-								SELECT ?, 'de', ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM predicate WHERE name = ?)""",
-						r[0], r[1], r[2], json(List.of(r[3].split(","))),
-						json(r[4].isEmpty() ? List.of() : List.of(r[4].split(","))), r[0]);
+			for (LanguagePack pack : LanguagePack.all()) {
+				for (LanguagePack.PredicateRender r : pack.predicateRenders()) {
+					tx.update(
+							"""
+									INSERT OR IGNORE INTO predicate_render(name, language, render, negated, lexicon, inverse_lexicon)
+									SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM predicate WHERE name = ?)""",
+							r.name(), pack.code(), r.render(), r.negated(), json(r.lexicon()), json(r.inverseLexicon()),
+							r.name());
+				}
 			}
 			return null;
 		});
@@ -1808,10 +1741,8 @@ public final class PredicateRegistry {
 	private static List<SeedGroup> seedGroups() {
 		return List.of(new SeedGroup("family",
 				"The kinship relations: parents, marriages and partnerships, siblings, and what is derived from them.",
-				List.of("family", "families", "relatives", "relative", "kin", "kinship", "familie", "familien",
-						"verwandte", "verwandten", "verwandtschaft", "angehörige", "angehörigen"),
-				List.of("parent_of", "spouse_of", "partner_of", "engaged_to", "step_parent_of", "grandparent_of",
-						"aunt_uncle_of", "cousin_of", "in_law_of", "sibling_of")));
+				LanguagePack.groupLexicon("family"), List.of("parent_of", "spouse_of", "partner_of", "engaged_to",
+						"step_parent_of", "grandparent_of", "aunt_uncle_of", "cousin_of", "in_law_of", "sibling_of")));
 	}
 
 	/**

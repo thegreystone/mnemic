@@ -44,6 +44,9 @@ import se.hirt.mnemic.proposal.Proposal.PredicateDef;
 import se.hirt.mnemic.recall.RecallResult;
 
 import java.nio.file.Path;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 
@@ -115,6 +118,21 @@ class LanguageTest {
 					"re-rendered at open from the stored subject, object, and bounds");
 			assertEquals("de", e.database().meta("language"));
 		}
+		try (Engine e = TestHomes.engine(home, Lang.SV)) {
+			assertEquals("Mattias Sandell arbetar på Initrode (2010 – 2018)",
+					e.facts().get(factId).orElseThrow().rendering(), "re-rendered in Swedish from what is stored");
+			assertEquals("sv", e.database().meta("language"));
+		}
+		try (Engine e = TestHomes.engine(home, Lang.FR)) {
+			assertEquals("Mattias Sandell travaille chez Initrode (2010 – 2018)",
+					e.facts().get(factId).orElseThrow().rendering(), "re-rendered in French from what is stored");
+			assertEquals("fr", e.database().meta("language"));
+		}
+		try (Engine e = TestHomes.engine(home, Lang.ES)) {
+			assertEquals("Mattias Sandell trabaja en Initrode (2010 – 2018)",
+					e.facts().get(factId).orElseThrow().rendering(), "re-rendered in Spanish from what is stored");
+			assertEquals("es", e.database().meta("language"));
+		}
 		try (Engine e = TestHomes.engine(home, Lang.EN)) {
 			assertEquals("Mattias Sandell works at Initrode (2010 – 2018)",
 					e.facts().get(factId).orElseThrow().rendering(), "and back, losslessly");
@@ -124,10 +142,13 @@ class LanguageTest {
 	@Test
 	@Scenario("R3")
 	void anUnknownLanguageIsRefusedAndTheDefaultIsEnglish() {
-		assertThrows(IllegalArgumentException.class, () -> Lang.of("fr"));
+		assertThrows(IllegalArgumentException.class, () -> Lang.of("ja"));
 		assertEquals(Lang.EN, Lang.of(null));
 		assertEquals(Lang.EN, Lang.of(""));
 		assertEquals(Lang.DE, Lang.of(" De "));
+		assertEquals(Lang.SV, Lang.of(" sv "));
+		assertEquals(Lang.FR, Lang.of(" fr "));
+		assertEquals(Lang.ES, Lang.of(" ES "));
 		try (Engine e = TestHomes.engine("r3-default")) {
 			assertEquals("en", e.lang().code());
 			assertFalse(e.facts().get(1).isPresent());
@@ -161,11 +182,11 @@ class LanguageTest {
 			assertEquals("Mattias Sandell ist Mentor von Anna Lindqvist", stored(e, o, 0).rendering());
 			List<?> changes = (List<?>) corrected.get("changes");
 			assertEquals("renders.de", ((Map<?, ?>) changes.getFirst()).get("field"));
-			var french = new PredicateDef("coaches", "Subject coaches object.", "person", "person", false, null, false,
-					null, "medium", List.of(), "{subject} coaches {object}", List.of(), List.of(),
-					Map.of("fr", "{subject} entraîne {object}"));
+			var unsupported = new PredicateDef("coaches", "Subject coaches object.", "person", "person", false, null,
+					false, null, "medium", List.of(), "{subject} coaches {object}", List.of(), List.of(),
+					Map.of("ja", "{subject} は {object} を指導する"));
 			RememberOutcome refused = remember(e, "Ich trainiere Anna.", proposal()
-					.entity("e1", "Anna Lindqvist", "person").predicate(french).fact("self", "coaches", "e1"));
+					.entity("e1", "Anna Lindqvist", "person").predicate(unsupported).fact("self", "coaches", "e1"));
 			assertEquals(0, refused.applied().facts().size());
 			assertTrue(refused.applied().warnings().getFirst().contains("Unsupported language"),
 					refused.applied().warnings().toString());
@@ -231,6 +252,233 @@ class LanguageTest {
 					proposal().entity("e1", "Sara Berg", "person").fact("self", "betreut", "e1"));
 			assertEquals("mentors", later.applied().facts().getFirst().predicate());
 			assertEquals(List.of(), later.applied().questions());
+		}
+	}
+
+	@Test
+	@Scenario("R7")
+	void germanCapitalisedNounsDoNotCauseFalseMissesInRecall() {
+		for (Lang storeLang : List.of(Lang.EN, Lang.DE)) {
+			try (Engine e = TestHomes.engine(TestHomes.fresh("r7-de-nouns-" + storeLang.code()), storeLang)) {
+				remember(e, "Ich hatte am 15. März einen Zahnarzttermin bei Dr. Weber.",
+						proposal().entity("e1", "Dr. Weber", "person").event("ev1", "zahnarzttermin", "2026-03-15",
+								"self", "e1"));
+				RecallResult r = recall(e, "Wann war mein letzter Zahnarzttermin?");
+				assertEquals("events", r.structured().state(), "must not miss on capitalised German noun: " + r.text());
+				assertFalse(r.text().contains("not on record"), r.text());
+				assertFalse(r.events().isEmpty(), r.text());
+			}
+		}
+	}
+
+	@Test
+	@Scenario("R8")
+	void germanPolarPastForwardAndKindQuestionsWorkEndToEnd() {
+		Clock fixed = Clock.fixed(Instant.parse("2026-06-01T12:00:00Z"), ZoneOffset.UTC);
+		try (Engine e = new Engine(
+				TestHomes.options(TestHomes.fresh("r8-de-queries")).withLang(Lang.DE).withClock(fixed))) {
+			remember(e, "Ich besitze kein Boot.", proposal().fact(new FactRef("self", "owns", "Boot", null, null, null,
+					null, List.of(), null, null, Boolean.TRUE, null)));
+			RecallResult boat = recall(e, "Besitzt Mattias ein Boot?");
+			assertTrue(boat.structured().knownFalse(), "German V1 polar negation: " + boat.text());
+
+			// Ended job found via German Perfekt past question.
+			remember(e, "Ich arbeitete von 2010 bis 2018 bei Initrode.",
+					proposal().entity("e1", "Initrode", "organization")
+							.fact(fact("self", "works_at", "e1", null, null, "2010", "2018", null, null, null)));
+			RecallResult pastJob = recall(e, "Hat Mattias bei Initrode gearbeitet?");
+			assertTrue(pastJob.structured().matched(), "German Perfekt past probes ended facts: " + pastJob.text());
+
+			// Future-dated ownership surfaced by German forward cue ("bald", "hole ... ab").
+			remember(e, "Ich hole den Polestar am 15. Juni 2026 ab.", proposal().entity("e1", "Polestar 4", "car")
+					.fact(fact("self", "owns", "e1", null, null, "2026-06-15", null, null, null, null)));
+			RecallResult upcoming = recall(e, "Welches Fahrzeug hole ich bald ab?");
+			assertFalse(upcoming.hits().isEmpty(), upcoming.text());
+			assertTrue(upcoming.hits().stream().anyMatch(h -> h.observation().text().contains("Polestar")),
+					"upcoming channel ranks future German fact: " + upcoming.text());
+
+			// Kind filtering in German: "Welche Autos besitzt Mattias?" narrows to seed type car.
+			remember(e, "Ich besitze einen Volvo und ein Ferienhaus.", proposal().entity("e1", "Volvo XC60", "car")
+					.entity("e2", "Ferienhaus", "place").fact("self", "owns", "e1").fact("self", "owns", "e2"));
+			RecallResult cars = recall(e, "Welche Autos besitzt Mattias?");
+			assertTrue(cars.structured().matched(), cars.text());
+			assertEquals(1, cars.structured().facts().size(), "narrowed to car only: " + cars.text());
+			assertTrue(cars.structured().facts().getFirst().rendering().contains("Volvo XC60"), cars.text());
+		}
+	}
+
+	@Test
+	@Scenario("R9")
+	void aSwedishStoreRendersFactsAndAnswersSwedishQuestions() {
+		Clock fixed = Clock.fixed(Instant.parse("2026-06-01T12:00:00Z"), ZoneOffset.UTC);
+		try (Engine e = new Engine(TestHomes.options(TestHomes.fresh("r9-sv")).withLang(Lang.SV).withClock(fixed))) {
+			assertEquals("sv", e.lang().code());
+			RememberOutcome job = remember(e, "Jag arbetar på Hooli sedan 2018.",
+					proposal().entity("e1", "Hooli", "organization")
+							.fact(fact("self", "works_at", "e1", null, null, "2018", null, null, null, null)));
+			assertEquals("Mattias Sandell arbetar på Hooli (sedan 2018)", stored(e, job, 0).rendering());
+
+			RememberOutcome mother = remember(e, "Marit är Oskars mor.",
+					proposal().entity("e1", "Marit Nyberg", "person").entity("e2", "Oskar Nyberg", "person")
+							.fact(fact("e1", "parent_of", "e2", "mother", null, null, null, null, null, null)));
+			assertEquals("Marit Nyberg är mor till Oskar Nyberg", stored(e, mother, 0).rendering());
+			assertEquals("mother", stored(e, mother, 0).qualifier());
+
+			RememberOutcome home = remember(e, "Jag bor i Lund.",
+					proposal().entity("e1", "Lund", "place").fact("self", "lives_in", "e1"));
+			assertEquals("Mattias Sandell bor i Lund", stored(e, home, 0).rendering());
+
+			// "Var bor Mattias?" is a where-question, NOT polar/past.
+			RecallResult where = recall(e, "Var bor Mattias?");
+			assertTrue(where.structured().matched(), where.text());
+			assertEquals("lives_in", where.structured().predicate());
+
+			// Swedish family group cue ("familj") reaches kinship predicates via "till" binding.
+			RecallResult family = recall(e, "Vem är familj till Oskar?");
+			assertTrue(family.structured().matched(), "Swedish family group cue: " + family.text());
+
+			// Swedish V1 polar negation: "Äger Mattias en båt?" -> known_false.
+			RememberOutcome noBoat = remember(e, "Jag äger ingen båt.", proposal().fact(new FactRef("self", "owns",
+					"båt", null, null, null, null, List.of(), null, null, Boolean.TRUE, null)));
+			assertEquals("Mattias Sandell äger inte båt", stored(e, noBoat, 0).rendering());
+			RecallResult boat = recall(e, "Äger Mattias en båt?");
+			assertTrue(boat.structured().knownFalse(), "Swedish V1 polar negation: " + boat.text());
+
+			// Swedish past (both preterite and perfekt) probes ended facts.
+			remember(e, "Jag jobbade på Initrode från 2010 till 2018.",
+					proposal().entity("e1", "Initrode", "organization")
+							.fact(fact("self", "works_at", "e1", null, null, "2010", "2018", null, null, null)));
+			assertTrue(recall(e, "Jobbade Mattias på Initrode?").structured().matched());
+			assertTrue(recall(e, "Har Mattias jobbat på Initrode?").structured().matched());
+
+			// Swedish kind filtering: "Vilka bilar äger Mattias?" narrows to seed type car.
+			remember(e, "Jag äger en Volvo och en stuga.", proposal().entity("e1", "Volvo EX40", "car")
+					.entity("e2", "Stuga", "place").fact("self", "owns", "e1").fact("self", "owns", "e2"));
+			RecallResult cars = recall(e, "Vilka bilar äger Mattias?");
+			assertTrue(cars.structured().matched(), cars.text());
+			assertEquals(1, cars.structured().facts().size(), "narrowed to car only: " + cars.text());
+			assertTrue(cars.structured().facts().getFirst().rendering().contains("Volvo EX40"), cars.text());
+		}
+	}
+
+	@Test
+	@Scenario("R10")
+	void aFrenchStoreRendersFactsAndAnswersFrenchQuestions() {
+		Clock fixed = Clock.fixed(Instant.parse("2026-06-01T12:00:00Z"), ZoneOffset.UTC);
+		try (Engine e = new Engine(TestHomes.options(TestHomes.fresh("r10-fr")).withLang(Lang.FR).withClock(fixed))) {
+			assertEquals("fr", e.lang().code());
+			RememberOutcome job = remember(e, "Je travaille chez Hooli depuis 2018.",
+					proposal().entity("e1", "Hooli", "organization")
+							.fact(fact("self", "works_at", "e1", null, null, "2018", null, null, null, null)));
+			assertEquals("Mattias Sandell travaille chez Hooli (depuis 2018)", stored(e, job, 0).rendering());
+
+			RememberOutcome mother = remember(e, "Marit est la mère d'Oskar.",
+					proposal().entity("e1", "Marit Nyberg", "person").entity("e2", "Oskar Nyberg", "person")
+							.fact(fact("e1", "parent_of", "e2", "mother", null, null, null, null, null, null)));
+			assertEquals("Marit Nyberg est mère de Oskar Nyberg", stored(e, mother, 0).rendering());
+			assertEquals("mother", stored(e, mother, 0).qualifier());
+
+			RememberOutcome home = remember(e, "J'habite à Lyon.",
+					proposal().entity("e1", "Lyon", "place").fact("self", "lives_in", "e1"));
+			assertEquals("Mattias Sandell habite à Lyon", stored(e, home, 0).rendering());
+
+			RecallResult where = recall(e, "Où habite Mattias ?");
+			assertTrue(where.structured().matched(), where.text());
+			assertEquals("lives_in", where.structured().predicate());
+
+			// French family group cue ("famille") reaches kinship predicates via elided "d'" binding.
+			RecallResult family = recall(e, "Qui est la famille d'Oskar ?");
+			assertTrue(family.structured().matched(), "French family group cue: " + family.text());
+
+			// French polar negation ("Est-ce que ...") -> known_false.
+			RememberOutcome noBoat = remember(e, "Je ne possède pas de bateau.", proposal().fact(new FactRef("self",
+					"owns", "bateau", null, null, null, null, List.of(), null, null, Boolean.TRUE, null)));
+			assertEquals("Mattias Sandell ne possède pas bateau", stored(e, noBoat, 0).rendering());
+			RecallResult boat = recall(e, "Est-ce que Mattias possède un bateau ?");
+			assertTrue(boat.structured().knownFalse(), "French polar negation: " + boat.text());
+
+			// French passé composé probes ended facts.
+			remember(e, "J'ai travaillé chez Initrode de 2010 à 2018.",
+					proposal().entity("e1", "Initrode", "organization")
+							.fact(fact("self", "works_at", "e1", null, null, "2010", "2018", null, null, null)));
+			assertTrue(recall(e, "Est-ce que Mattias a travaillé chez Initrode ?").structured().matched());
+
+			// Future-dated ownership surfaced by French forward cue ("bientôt").
+			remember(e, "Je vais récupérer la Polestar le 15 juin 2026.", proposal().entity("e1", "Polestar 4", "car")
+					.fact(fact("self", "owns", "e1", null, null, "2026-06-15", null, null, null, null)));
+			RecallResult upcoming = recall(e, "Quel véhicule vais-je récupérer bientôt ?");
+			assertFalse(upcoming.hits().isEmpty(), upcoming.text());
+			assertTrue(upcoming.hits().stream().anyMatch(h -> h.observation().text().contains("Polestar")),
+					"upcoming channel ranks future French fact: " + upcoming.text());
+
+			// French kind filtering: "Quelles voitures possède Mattias ?" narrows to seed type car.
+			remember(e, "Je possède une Renault 5 et un chalet.", proposal().entity("e1", "Renault 5", "car")
+					.entity("e2", "Chalet", "place").fact("self", "owns", "e1").fact("self", "owns", "e2"));
+			RecallResult cars = recall(e, "Quelles voitures possède Mattias ?");
+			assertTrue(cars.structured().matched(), cars.text());
+			assertEquals(1, cars.structured().facts().size(), "narrowed to car only: " + cars.text());
+			assertTrue(cars.structured().facts().getFirst().rendering().contains("Renault 5"), cars.text());
+		}
+	}
+
+	@Test
+	@Scenario("R11")
+	void aSpanishStoreRendersFactsAndAnswersSpanishQuestions() {
+		Clock fixed = Clock.fixed(Instant.parse("2026-06-01T12:00:00Z"), ZoneOffset.UTC);
+		try (Engine e = new Engine(TestHomes.options(TestHomes.fresh("r11-es")).withLang(Lang.ES).withClock(fixed))) {
+			assertEquals("es", e.lang().code());
+			RememberOutcome job = remember(e, "Trabajo en Hooli desde 2018.",
+					proposal().entity("e1", "Hooli", "organization")
+							.fact(fact("self", "works_at", "e1", null, null, "2018", null, null, null, null)));
+			assertEquals("Mattias Sandell trabaja en Hooli (desde 2018)", stored(e, job, 0).rendering());
+
+			RememberOutcome mother = remember(e, "Marit es la madre de Oskar.",
+					proposal().entity("e1", "Marit Nyberg", "person").entity("e2", "Oskar Nyberg", "person")
+							.fact(fact("e1", "parent_of", "e2", "mother", null, null, null, null, null, null)));
+			assertEquals("Marit Nyberg es madre de Oskar Nyberg", stored(e, mother, 0).rendering());
+			assertEquals("mother", stored(e, mother, 0).qualifier());
+
+			RememberOutcome home = remember(e, "Vivo en Madrid.",
+					proposal().entity("e1", "Madrid", "place").fact("self", "lives_in", "e1"));
+			assertEquals("Mattias Sandell vive en Madrid", stored(e, home, 0).rendering());
+
+			RecallResult where = recall(e, "¿Dónde vive Mattias?");
+			assertTrue(where.structured().matched(), where.text());
+			assertEquals("lives_in", where.structured().predicate());
+
+			// Spanish family group cue ("familia") reaches kinship predicates via "de" binding.
+			RecallResult family = recall(e, "¿Quién es la familia de Oskar?");
+			assertTrue(family.structured().matched(), "Spanish family group cue: " + family.text());
+
+			// Spanish polar negation with leading ¿ -> known_false.
+			RememberOutcome noBoat = remember(e, "No tengo barco.", proposal().fact(new FactRef("self", "owns", "barco",
+					null, null, null, null, List.of(), null, null, Boolean.TRUE, null)));
+			assertEquals("Mattias Sandell no posee barco", stored(e, noBoat, 0).rendering());
+			RecallResult boat = recall(e, "¿Tiene Mattias un barco?");
+			assertTrue(boat.structured().knownFalse(), "Spanish polar negation: " + boat.text());
+
+			// Spanish preterite and pretérito perfecto probe ended facts.
+			remember(e, "Trabajé en Initrode de 2010 a 2018.", proposal().entity("e1", "Initrode", "organization")
+					.fact(fact("self", "works_at", "e1", null, null, "2010", "2018", null, null, null)));
+			assertTrue(recall(e, "¿Trabajó Mattias en Initrode?").structured().matched());
+			assertTrue(recall(e, "¿Ha trabajado Mattias en Initrode?").structured().matched());
+
+			// Future-dated ownership surfaced by Spanish forward cue ("pronto").
+			remember(e, "Voy a recoger el Polestar el 15 de junio de 2026.",
+					proposal().entity("e1", "Polestar 4", "car")
+							.fact(fact("self", "owns", "e1", null, null, "2026-06-15", null, null, null, null)));
+			RecallResult upcoming = recall(e, "¿Qué vehículo voy a recoger pronto?");
+			assertFalse(upcoming.hits().isEmpty(), upcoming.text());
+			assertTrue(upcoming.hits().stream().anyMatch(h -> h.observation().text().contains("Polestar")),
+					"upcoming channel ranks future Spanish fact: " + upcoming.text());
+
+			// Spanish kind filtering: "¿Qué coches tiene Mattias?" narrows to seed type car.
+			remember(e, "Tengo un SEAT León y una cabaña.", proposal().entity("e1", "SEAT León", "car")
+					.entity("e2", "Cabaña", "place").fact("self", "owns", "e1").fact("self", "owns", "e2"));
+			RecallResult cars = recall(e, "¿Qué coches tiene Mattias?");
+			assertTrue(cars.structured().matched(), cars.text());
+			assertEquals(1, cars.structured().facts().size(), "narrowed to car only: " + cars.text());
+			assertTrue(cars.structured().facts().getFirst().rendering().contains("SEAT León"), cars.text());
 		}
 	}
 }
