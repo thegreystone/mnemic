@@ -94,19 +94,25 @@ store, the conversation empty), 43 steps are statements. The script is `bench/us
 | Qwen 3.5 9B | native tools, 09-26 tree | `usage-qwen9b-s11`, 2026-09-26 | 62 | 11 | 40 | 1 | 0 | 0.8 | none |
 | Qwen 3.5 9B | native tools, closest relations offered | `usage-qwen9b-s12`, 2026-09-26 | 60 (62) | 10 | 39 | 1 | 0 | 0.7 | none |
 | Qwen 3.5 9B | native tools, store-audit fixes and event roles | `usage-qwen9b-s13`, 2026-09-29 | 58 (60) | 11 | 36 | 0 | 0 | 0.9 | none |
+| Qwen 3.5 9B | native tools, 0.4.0 release candidate, native binary | `usage-qwen9b-v040-native`, 2026-11-24 | 61 (62) | 10 (11) | 41 | 0 | 0 | 0.8 | none |
 
 The judge is Opus 5.5 for the Claude rows and the 9B itself for the Qwen rows, whose verdicts were checked by
 hand; the number in parentheses is the hand count where it differs (a correct abstention or a partial answer
 the small judge refused). Cost is at list price for assistant and judge together. The `s6b` rows are on the text
-protocol and predate this branch's later changes; the `s13` rows are native tools on the current tree.
+protocol and predate this branch's later changes; the `s13` rows are native tools on the 2026-09-29 tree. The
+last row is the 0.4.0 release candidate (`c95023b`) served by the Windows native image instead of the runner jar.
 
 What the remaining misses are:
 
 - **Qwen, native tools**: the model says "I've recorded that" without calling `remember`. The instructions now
   end rule 3 with "Say recorded only after `remember` returns" (2026-09-26); the narrated writes went from five
-  and four a run to three, and the three left are one shape, the project decisions ("for the Mnemic project we
-  decided ..."), so the SQLite decision is still unknown after the break. The text protocol never lost a
-  statement, since every turn had to be an explicit action; it lost eight steps to the call cap instead.
+  and four a run to three, and on the 0.4.0 run to two, both leanings ("I'm leaning toward a Zenit 4 ...") that
+  Qwen acknowledged and never sent. The text protocol never lost a statement, since every turn had to be an
+  explicit action; it lost eight steps to the call cap instead.
+- **Qwen, an order read as a decision**: after "I ordered the Zenit 4 ...", "Have I decided on a new car?" was
+  answered "No" (0.4.0 run, and a hedge in `s13`). Qwen stored the order under a predicate of its own, `ordered`,
+  which nothing links to `decided`, and the order's text never says "car", so the recall is a MISS with no
+  candidates; the model then answered "No" with the order in its own conversation.
 - **Qwen, text**: identical recall calls repeated to the cap, and its own JSON: braces dropped, a bare string
   for an argument object, a bracket missing after an array. Native tool calls remove all of it.
 - **Haiku, text**: `parent_of` written with self as the parent (eight of nine times), which the direction line
