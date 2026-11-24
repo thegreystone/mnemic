@@ -3,11 +3,10 @@
 <plist version="1.0">
 <dict>
     <!-- The hardened runtime's library validation only admits dylibs signed by the same team. Mnemic loads
-         three that are not: sqlite-jdbc extracts libsqlitejdbc.dylib to a temp directory and dlopens it,
+         two that are not: sqlite-jdbc extracts libsqlitejdbc.dylib to a temp directory and dlopens it, and
          the ONNX Runtime (libonnxruntime.dylib, Microsoft's build, written to ~/.mnemic/models on first start)
-         is opened through the foreign-function API, and sqlite-vec, when configured, is loaded as a SQLite
-         extension. This entitlement lets them load; Apple accepts it for notarization. No JIT entitlement:
-         a native image compiles nothing at run time. -->
+         is opened through the foreign-function API. This entitlement lets them load; Apple accepts it for
+         notarization. No JIT entitlement: a native image compiles nothing at run time. -->
     <key>com.apple.security.cs.disable-library-validation</key>
     <true/>
 </dict>

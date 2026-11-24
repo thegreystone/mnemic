@@ -34,10 +34,6 @@ import se.hirt.mnemic.embed.Embedding;
 import se.hirt.mnemic.embed.VectorStore;
 import se.hirt.mnemic.knowledge.Containment;
 import se.hirt.mnemic.knowledge.Deriver;
-import se.hirt.mnemic.knowledge.Rule;
-import se.hirt.mnemic.knowledge.Entity;
-import se.hirt.mnemic.knowledge.Bounds;
-import se.hirt.mnemic.knowledge.Event;
 import se.hirt.mnemic.knowledge.EntityService;
 import se.hirt.mnemic.knowledge.EntityTypeRegistry;
 import se.hirt.mnemic.knowledge.EventService;
@@ -47,13 +43,9 @@ import se.hirt.mnemic.knowledge.FactQueries.History;
 import se.hirt.mnemic.knowledge.FactService;
 import se.hirt.mnemic.knowledge.FactService.Applied;
 import se.hirt.mnemic.knowledge.FactService.Corrected;
-import se.hirt.mnemic.knowledge.FactService.EventOut;
-import se.hirt.mnemic.knowledge.Question;
 import se.hirt.mnemic.knowledge.FactService.Removed;
-import se.hirt.mnemic.knowledge.FactService.FactOut;
 import se.hirt.mnemic.knowledge.Knowledge;
 import se.hirt.mnemic.knowledge.Lang;
-import se.hirt.mnemic.knowledge.Predicate;
 import se.hirt.mnemic.knowledge.PredicateRegistry;
 import se.hirt.mnemic.knowledge.QuestionResolver.Resolve;
 import se.hirt.mnemic.knowledge.QuestionService;
@@ -67,56 +59,55 @@ import se.hirt.mnemic.proposal.Proposal;
 import se.hirt.mnemic.protocol.Json;
 import se.hirt.mnemic.protocol.MnemicException;
 import se.hirt.mnemic.recall.Briefing;
-import se.hirt.mnemic.recall.OwnerAlias;
 import se.hirt.mnemic.recall.RecallService;
 import se.hirt.mnemic.recall.TokenEstimator;
 
-import org.jboss.logging.Logger;
-
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
-import java.util.Objects;
 import java.util.function.Supplier;
 
 /**
- * Every service over one {@link Database}, and the operations that span them. Constructed once per process by CDI
- * ({@link EngineProducer}), or directly by scenario tests and the benchmark harness without any container, so the same
- * code path is measured and tested. The clock is injectable so scenarios about elapsed time are deterministic.
+ * Orchestrates every service over one {@link Database} and the operations that span them. Constructed once per process
+ * by CDI ({@link EngineProducer}), or directly by scenario tests and the benchmark harness without any container, so
+ * the same code path is measured and tested. The clock is injectable so scenarios about elapsed time are deterministic.
+ * Corrections, maintenance/rebuilds, semantic indexing, and derivation gating are delegated to package-private
+ * collaborators ({@link CorrectionCoordinator}, {@link StoreMaintenance}, {@link SemanticIndexer},
+ * {@link DerivationGate}).
  */
 public final class Engine implements AutoCloseable {
 
-	private static final Logger LOG = Logger.getLogger(Engine.class);
-
 	public static final String DB_FILE = "mnemic.db";
+
+	/** The vector scheme: 2 since a fact about the owner carries a first-person vector too. */
+	static final String VECTOR_SCHEME = SemanticIndexer.VECTOR_SCHEME;
+	static final String LAST_CONSOLIDATION = StoreMaintenance.LAST_CONSOLIDATION;
 
 	/** How an engine is opened; {@link #of(Path, String)} gives the defaults, the {@code with} methods override. */
 	public record Options(Path home, String version, int observationSoftLimitChars, String ownerName, Clock clock,
-			ModelProposer proposer, int proposerBatch, List<String> ownerIdentity, String vecLibrary,
-			EmbedderHolder embedder, Lang lang, Supplier<Embedding> vocabulary) {
+			ModelProposer proposer, int proposerBatch, List<String> ownerIdentity, EmbedderHolder embedder, Lang lang,
+			Supplier<Embedding> vocabulary) {
 
 		public static Options of(Path home, String version) {
-			return new Options(home, version, 4000, null, Clock.systemUTC(), null, 20, List.of(), null,
+			return new Options(home, version, 4000, null, Clock.systemUTC(), null, 20, List.of(),
 					new EmbedderHolder(null), Lang.EN, null);
 		}
 
 		public Options withSoftLimit(int chars) {
-			return new Options(home, version, chars, ownerName, clock, proposer, proposerBatch, ownerIdentity,
-					vecLibrary, embedder, lang, vocabulary);
+			return new Options(home, version, chars, ownerName, clock, proposer, proposerBatch, ownerIdentity, embedder,
+					lang, vocabulary);
 		}
 
 		/** {@code identity}: the owner's other names, addresses, and handles, seeded as aliases. */
 		public Options withOwner(String name, List<String> identity) {
 			return new Options(home, version, observationSoftLimitChars, name, clock, proposer, proposerBatch, identity,
-					vecLibrary, embedder, lang, vocabulary);
+					embedder, lang, vocabulary);
 		}
 
 		public Options withOwner(String name) {
@@ -125,7 +116,7 @@ public final class Engine implements AutoCloseable {
 
 		public Options withClock(Clock clock) {
 			return new Options(home, version, observationSoftLimitChars, ownerName, clock, proposer, proposerBatch,
-					ownerIdentity, vecLibrary, embedder, lang, vocabulary);
+					ownerIdentity, embedder, lang, vocabulary);
 		}
 
 		/**
@@ -133,13 +124,7 @@ public final class Engine implements AutoCloseable {
 		 */
 		public Options withProposer(ModelProposer proposer, int batch) {
 			return new Options(home, version, observationSoftLimitChars, ownerName, clock, proposer, batch,
-					ownerIdentity, vecLibrary, embedder, lang, vocabulary);
-		}
-
-		/** The sqlite-vec loadable library to load at open. */
-		public Options withVecLibrary(String library) {
-			return new Options(home, version, observationSoftLimitChars, ownerName, clock, proposer, proposerBatch,
-					ownerIdentity, library, embedder, lang, vocabulary);
+					ownerIdentity, embedder, lang, vocabulary);
 		}
 
 		/** An embedder the caller owns and closes, so one model can serve many engines. */
@@ -150,7 +135,7 @@ public final class Engine implements AutoCloseable {
 		/** The embedder's lifecycle, which may deliver the embedder after the engine has started. */
 		public Options withEmbedder(EmbedderHolder holder) {
 			return new Options(home, version, observationSoftLimitChars, ownerName, clock, proposer, proposerBatch,
-					ownerIdentity, vecLibrary, holder, lang, vocabulary);
+					ownerIdentity, holder, lang, vocabulary);
 		}
 
 		/** The model that compares vocabulary by meaning, in place of the store's embedder; for tests. */
@@ -161,13 +146,13 @@ public final class Engine implements AutoCloseable {
 		/** As above, for a model that may arrive, change, or go away while the engine runs. */
 		public Options withVocabularyEmbedding(Supplier<Embedding> vocabulary) {
 			return new Options(home, version, observationSoftLimitChars, ownerName, clock, proposer, proposerBatch,
-					ownerIdentity, vecLibrary, embedder, lang, vocabulary);
+					ownerIdentity, embedder, lang, vocabulary);
 		}
 
 		/** The language of the fact layer; a change re-renders every fact at open. */
 		public Options withLang(Lang lang) {
 			return new Options(home, version, observationSoftLimitChars, ownerName, clock, proposer, proposerBatch,
-					ownerIdentity, vecLibrary, embedder, lang, vocabulary);
+					ownerIdentity, embedder, lang, vocabulary);
 		}
 	}
 
@@ -183,6 +168,15 @@ public final class Engine implements AutoCloseable {
 		}
 	}
 
+	/** A reading given to an observation: what it produced, and what the reading it replaced had produced. */
+	public record Reading(Applied applied, Removed removed, boolean replaced) {
+	}
+
+	/** What a rebuild did: the log entries re-derived, and what could not be done again. */
+	public record Rebuilt(int observations, int corrections, int answers, List<String> unmatched, List<String> noOps,
+			long factsBefore, long factsAfter, long openQuestionsBefore, List<String> questions) {
+	}
+
 	/** What {@code consolidate} found and did (EXTRACTION.md, Layer 3). */
 	public record Consolidation(long pendingProposals, List<Map<String, Object>> backlog,
 			List<Map<String, Object>> openQuestions, List<Map<String, Object>> inferredVocabulary,
@@ -196,12 +190,6 @@ public final class Engine implements AutoCloseable {
 			List<Map<String, Object>> notRetired) {
 	}
 
-	/** The vector scheme: 2 since a fact about the owner carries a first-person vector too ({@link OwnerAlias}). */
-	static final String VECTOR_SCHEME = "2";
-	/** Bench knob: {@code -Dmnemic.owner-alias=false} embeds owner facts without the first-person vector. */
-	private static final boolean OWNER_ALIAS = !"false"
-			.equalsIgnoreCase(System.getProperty("mnemic.owner-alias", "true"));
-
 	private final Options options;
 	private final Database db;
 	private final Knowledge knowledge;
@@ -209,10 +197,14 @@ public final class Engine implements AutoCloseable {
 	private final VectorStore vectors;
 	private final RecallService recall;
 	private final Briefing briefing;
+	private final DerivationGate derivationGate;
+	private final SemanticIndexer indexer;
+	private final CorrectionCoordinator corrections;
+	private final StoreMaintenance maintenance;
 
 	public Engine(Options options) {
 		this.options = options;
-		this.db = new Database(options.home().resolve(DB_FILE), options.vecLibrary());
+		this.db = new Database(options.home().resolve(DB_FILE));
 		this.observations = new ObservationService(db, options.observationSoftLimitChars(), options.clock());
 		this.knowledge = Knowledge.open(db, options.lang(), options.ownerName(), options.ownerIdentity(),
 				options.clock(), options.vocabulary() != null ? options.vocabulary() : () -> options.embedder().get());
@@ -221,6 +213,17 @@ public final class Engine implements AutoCloseable {
 				knowledge.events(), knowledge.containment(), TokenEstimator.CHARS_PER_TOKEN, options.clock(), vectors,
 				options.embedder(), knowledge.entityTypes());
 		this.briefing = recall.briefing(knowledge.questions());
+		this.derivationGate = new DerivationGate(knowledge);
+		this.indexer = new SemanticIndexer(vectors, observations, knowledge, options.embedder(), options.lang());
+		this.corrections = new CorrectionCoordinator(db, observations, knowledge, options.clock(), indexer,
+				derivationGate);
+		this.maintenance = new StoreMaintenance(db, observations, knowledge, vectors, indexer, options.proposer(),
+				options.proposerBatch());
+
+		reconcileOnOpen();
+	}
+
+	private void reconcileOnOpen() {
 		String renderedIn = db.meta("language");
 		if (db.migrated() > 0 || !options.lang().code().equals(renderedIn)) {
 			// A migration may change how facts read, and so does the language: every rendering follows from what is
@@ -233,10 +236,7 @@ public final class Engine implements AutoCloseable {
 		knowledge.factService().backfillCorrectionReadings();
 		// Events retyped from a sentence before events kept a detail get the sentence back as their detail.
 		knowledge.events().backfillRetypedDetails();
-		if (!VECTOR_SCHEME.equals(db.meta("vector_scheme"))) {
-			vectors.dropKind(VectorStore.FACT); // the backfill makes them again from the renderings
-			db.setMeta("vector_scheme", VECTOR_SCHEME);
-		}
+		indexer.ensureScheme(db);
 		// A seed that took over a predicate registered from use: its facts read the seed's way from now on.
 		for (String adopted : knowledge.predicates().adoptedAtStart()) {
 			knowledge.renderer().rerender(adopted);
@@ -245,7 +245,7 @@ public final class Engine implements AutoCloseable {
 		knowledge.deriver().derive();
 	}
 
-	// ── remember ────────────────────────────────────────────────────────
+	// ── remember and re-read ────────────────────────────────────────────
 
 	/**
 	 * Stores the observation verbatim, then validates and applies the proposal if there is one. The observation is
@@ -282,11 +282,12 @@ public final class Engine implements AutoCloseable {
 				throw MnemicException.invalidArgument("The proposal defines vocabulary only, and none of it was "
 						+ "accepted: " + String.join(" ", applied.warnings()));
 			}
-			embed(obs, applied);
-			Deriver.Outcome derived = needsDerivation(proposal, applied, resolved) ? derive() : Deriver.Outcome.NOTHING;
+			indexer.embed(obs, applied);
+			Deriver.Outcome derived = derivationGate.needsDerivation(proposal, applied, resolved) ? derive()
+					: Deriver.Outcome.NOTHING;
 			return new RememberOutcome(r, applied, resolved, "assistant", derived);
 		}
-		embed(obs, Applied.NOTHING);
+		indexer.embed(obs, Applied.NOTHING);
 		ModelProposer proposer = options.proposer();
 		if (answerOnly || proposer == null || proposer.mode() != ModelProposer.Mode.SYNC) {
 			return new RememberOutcome(r, Applied.NOTHING, resolved, "none", resolved.isEmpty() ? null : derive());
@@ -295,15 +296,11 @@ public final class Engine implements AutoCloseable {
 		if (!made.ok()) {
 			return new RememberOutcome(r, Applied.NOTHING.withWarning(made.warning()), resolved, "none");
 		}
-		Applied applied = applyServerProposal(obs, made.proposal());
-		embed(obs, applied);
-		Deriver.Outcome derived = needsDerivation(made.proposal(), applied, resolved) ? derive()
+		Applied applied = applyServerProposal(observations, knowledge, proposer, obs, made.proposal());
+		indexer.embed(obs, applied);
+		Deriver.Outcome derived = derivationGate.needsDerivation(made.proposal(), applied, resolved) ? derive()
 				: Deriver.Outcome.NOTHING;
 		return new RememberOutcome(r, applied, resolved, "server:" + proposer.id(), derived);
-	}
-
-	/** A reading given to an observation: what it produced, and what the reading it replaced had produced. */
-	public record Reading(Applied applied, Removed removed, boolean replaced) {
 	}
 
 	/**
@@ -321,12 +318,12 @@ public final class Engine implements AutoCloseable {
 		}
 		if ("correction".equals(obs.source().kind())) {
 			throw MnemicException.invalidArgument(
-					obs.ref() + " is a correction record; correct the fact it produced " + "instead of re-reading it.");
+					obs.ref() + " is a correction record; correct the fact it produced instead of re-reading it.");
 		}
 		boolean replaced = obs.proposalJson() != null && !"{}".equals(obs.proposalJson());
 		record RereadResult(Observation stored, Applied applied, Removed removed) {
 		}
-		RereadResult result = runCorrection(() -> {
+		RereadResult result = runAtomic(db, knowledge, () -> {
 			Removed removed = Removed.NONE;
 			if (replaced) {
 				removed = knowledge.factService().forgetDerived(obs.id(), true);
@@ -335,12 +332,13 @@ public final class Engine implements AutoCloseable {
 			observations.attachProposal(obs.id(), Json.write(proposal), Proposal.CURRENT_SPEC_VERSION, null);
 			Observation stored = observations.get(obs.id()).orElseThrow();
 			Applied applied = knowledge.factService().apply(stored, proposal);
-			if (needsDerivation(removed) || needsDerivation(proposal, applied, List.of())) {
+			if (derivationGate.needsDerivation(removed)
+					|| derivationGate.needsDerivation(proposal, applied, List.of())) {
 				derive();
 			}
 			return new RereadResult(stored, applied, removed);
 		});
-		embed(result.stored(), result.applied());
+		indexer.embed(result.stored(), result.applied());
 		return new Reading(result.applied(), result.removed(), replaced);
 	}
 
@@ -349,114 +347,17 @@ public final class Engine implements AutoCloseable {
 		return reread(observationId, proposal).applied();
 	}
 
-	/** What a rebuild did: the log entries re-derived, and what could not be done again. */
-	public record Rebuilt(int observations, int corrections, int answers, List<String> unmatched, List<String> noOps,
-			long factsBefore, long factsAfter, long openQuestionsBefore, List<String> questions) {
-	}
-
-	/**
-	 * Re-derives the projection from the log: every observation with a reading is read again in order, correction
-	 * records do their work again against the fact their key now names, and the answers once given to an observation's
-	 * questions are given again when the same question comes back. Entities keep their ids; facts and events get new
-	 * ones. What could not be replayed (a correction whose fact no longer exists) is reported.
-	 */
-	public Rebuilt rebuild() {
-		Rebuilt rebuilt;
-		try {
-			rebuilt = db.write(tx -> {
-				long before = knowledge.facts().count();
-				long openBefore = knowledge.questions().openCount();
-				List<Observation> log = observations.all().stream()
-						.filter(o -> !o.retired() && o.proposalJson() != null && !"{}".equals(o.proposalJson()))
-						.toList();
-				// The answers on record, kept before the questions go with the projection.
-				var prior = new HashMap<Long, List<Question>>();
-				for (Observation o : log) {
-					prior.put(o.id(), knowledge.questions().ofObservation(o.id()));
-				}
-				// A clean projection first, newest entry back, so nothing derived from a later reading outlives a
-				// rebuild.
-				for (Observation o : log.reversed()) {
-					knowledge.factService().forgetDerived(o.id(), true);
-					vectors.forget(o.id());
-					knowledge.questions().deleteOf(o.id());
-				}
-				int n = 0;
-				int corrections = 0;
-				int answers = 0;
-				var unmatched = new ArrayList<String>();
-				var noOps = new ArrayList<String>();
-				for (Observation o : log) {
-					if ("correction".equals(o.source().kind())) {
-						switch (knowledge.factService().replayCorrection(o)) {
-						case "replayed" -> corrections++;
-						case "no_op" -> noOps.add(o.ref());
-						default -> unmatched.add(o.ref());
-						}
-						continue;
-					}
-					knowledge.factService().apply(o, Proposal.parse(o.proposalJson()));
-					answers += replayAnswers(o, prior.getOrDefault(o.id(), List.of()));
-					n++;
-				}
-				derive();
-				// Questions the replay asked and no earlier answer settled: a change of state the reply names, so a
-				// maintenance run does not leave surprises to be counted.
-				List<String> open = knowledge.questions().open(500).stream().map(Question::ref).toList();
-				return new Rebuilt(n, corrections, answers, unmatched, noOps, before, knowledge.facts().count(),
-						openBefore, open);
-			});
-		} catch (Throwable t) {
-			reloadRegistries(t);
-			throw t;
+	/** Answers open questions without recording an observation: the answers live on the questions themselves. */
+	public List<Map<String, Object>> answer(List<Resolve> resolves) {
+		List<Map<String, Object>> resolved = knowledge.resolver().resolve(resolves, options.clock().instant());
+		indexer.embedMissing(50);
+		if (!resolved.isEmpty()) {
+			derive();
 		}
-		// Re-embed after the rebuilt projection has committed so inference does not hold the SQLite write lock.
-		Embedder embedder = options.embedder().get();
-		if (embedder != null) {
-			String model = embedder.id();
-			long missing = vectors.missingObservationCount(model) + vectors.missingFactCount(model);
-			while (missing > 0 && embedMissing(500) > 0) {
-				long next = vectors.missingObservationCount(model) + vectors.missingFactCount(model);
-				if (next >= missing) {
-					break;
-				}
-				missing = next;
-			}
-		}
-		return rebuilt;
+		return resolved;
 	}
 
-	/** Answers once given to this observation's questions, given again to the questions its re-reading raised. */
-	private int replayAnswers(Observation o, List<Question> prior) {
-		int n = 0;
-		for (Question q : knowledge.questions().open(500)) {
-			if (q.observationId() == null || q.observationId() != o.id()) {
-				continue;
-			}
-			Optional<Question> earlier = prior.stream()
-					.filter(p -> "answered".equals(p.status()) && p.kind().equals(q.kind())
-							&& Objects.equals(p.subject(), q.subject()) && Objects.equals(p.predicate(), q.predicate()))
-					.findFirst();
-			if (earlier.isEmpty()) {
-				continue;
-			}
-			try {
-				knowledge.resolver().resolve(o, List.of(new Resolve(q.ref(), earlier.get().answer())));
-				n++;
-			} catch (MnemicException e) {
-				// The answer no longer applies (a candidate gone): the question stays open for a person.
-			}
-		}
-		return n;
-	}
-
-	/** Stores the server-made proposal on the observation, with its provenance, then applies it. */
-	private Applied applyServerProposal(Observation obs, Proposal p) {
-		observations.attachProposal(obs.id(), Json.write(p), Proposal.CURRENT_SPEC_VERSION, options.proposer().id());
-		return knowledge.factService().apply(observations.get(obs.id()).orElseThrow(), p);
-	}
-
-	// ── observations ────────────────────────────────────────────────────
+	// ── observations and forgetting ─────────────────────────────────────
 
 	/**
 	 * Retires an observation that was wrong or superseded (EVALUATION.md D8); its facts are left to retract or correct.
@@ -519,7 +420,7 @@ public final class Engine implements AutoCloseable {
 			// An entity created by an earlier forgotten observation may have lost its last reference just now.
 			knowledge.entities().removeOrphansOfForgotten();
 		}
-		if (needsDerivation(removed)) {
+		if (derivationGate.needsDerivation(removed)) {
 			derive();
 		}
 		return forgotten;
@@ -530,502 +431,68 @@ public final class Engine implements AutoCloseable {
 		return knowledge.entities().remove(entityId);
 	}
 
-	/**
-	 * Corrects an entity: its name, its type, the aliases it keeps ({@code aliases} is the list to keep; the entity's
-	 * own name and the owner's identity always stay), or {@code merge_into}, which folds it into the entity named
-	 * (facts, events, and aliases move; the id keeps resolving to the survivor). The user says what a thing is called;
-	 * a wrong fuzzy match earlier is undone by dropping the alias it left.
-	 */
+	// ── corrections (delegated to CorrectionCoordinator) ────────────────
+
 	public Map<String, Object> correctEntity(long entityId, Map<String, Object> replacement, String reason) {
-		requireReplacement(replacement, "{\"aliases\": [\"Hooli\", \"Hooli Inc\"]} or {\"name\": \"Hooli AG\"} or "
-				+ "{\"type\": \"organization\"} or {\"merge_into\": \"ent-7\"}");
-		return runCorrection(() -> {
-			var before = knowledge.entities().get(entityId)
-					.orElseThrow(() -> MnemicException.notFound("No entity ent-" + entityId));
-			List<String> aliasesBefore = knowledge.entities().aliases(before.id());
-			var rest = new LinkedHashMap<String, Object>(replacement);
-			Object mergeInto = rest.remove("merge_into");
-			Map<String, Object> merge = null;
-			long id = before.id();
-			if (mergeInto != null) {
-				Entity into = knowledge.entities().byRef(String.valueOf(mergeInto)).orElseThrow(() -> MnemicException
-						.notFound("No entity '" + mergeInto + "' to merge " + before.ref() + " into."));
-				if (into.id() == before.id()) {
-					throw MnemicException.invalidArgument(before.ref() + " cannot be merged into itself.");
-				}
-				if (before.id() == knowledge.entities().owner().id()) {
-					throw MnemicException.invalidArgument("The owner is never merged away; merge the other entity into "
-							+ before.ref() + " instead.");
-				}
-				merge = knowledge.entities().merge(before.id(), into.id(), null,
-						"correct: " + (reason == null || reason.isBlank() ? "the same thing twice" : reason));
-				id = into.id();
-			}
-			var after = rest.isEmpty() ? knowledge.entities().get(id).orElseThrow()
-					: knowledge.entities().correct(id, rest);
-			int rerendered = 0;
-			if (!after.name().equals(before.name()) && merge == null) {
-				rerendered = knowledge.renderer().rerenderMentioning(id);
-			}
-			List<Map<String, Object>> folded = List.of();
-			if (merge != null) {
-				// The facts that now say the same thing twice fold at once, not at the next consolidate (2026-09-28).
-				folded = knowledge.consolidator().foldDuplicatesOf(id);
-				derive();
-			}
-			var out = new LinkedHashMap<String, Object>();
-			out.put("entity", after.ref());
-			out.put("before", entityState(before, aliasesBefore));
-			out.put("after", entityState(after, knowledge.entities().aliases(id)));
-			if (merge != null) {
-				out.put("merged", merge);
-			}
-			if (!folded.isEmpty()) {
-				out.put("folded", folded);
-			}
-			out.put("rerendered_facts", rerendered);
-			out.put("reason", reason);
-			return out;
-		});
+		return corrections.correctEntity(entityId, replacement, reason);
 	}
-
-	/** Answers open questions without recording an observation: the answers live on the questions themselves. */
-	public List<Map<String, Object>> answer(List<Resolve> resolves) {
-		List<Map<String, Object>> resolved = knowledge.resolver().resolve(resolves, options.clock().instant());
-		embedMissing(50);
-		if (!resolved.isEmpty()) {
-			derive();
-		}
-		return resolved;
-	}
-
-	// ── corrections ─────────────────────────────────────────────────────
-
-	/**
-	 * Corrects a fact without destroying history (EVALUATION.md D1): the reason becomes a correction observation, the
-	 * replacement is derived from it, the original is marked {@code corrected} and linked. A replacement of
-	 * {@code {"wrong": true}} retracts the fact instead (D7).
-	 */
-	private static final Set<String> FACT_PROPERTIES = Set.of("subject", "predicate", "object", "qualifier", "scope",
-			"valid_time", "ended", "caller_confidence", "wrong", "redundant");
 
 	public Corrected correct(long factId, Map<String, Object> replacement, String reason) {
-		String about = knowledge.facts().get(factId).map(f -> f.rendering()).orElse("f-" + factId);
-		String why = reason == null || reason.isBlank() ? "" : ": " + reason;
-		if (replacement != null) {
-			for (String key : replacement.keySet()) {
-				if (!FACT_PROPERTIES.contains(key)) {
-					throw MnemicException.invalidArgument("Unknown fact property '" + key + "'; correctable: subject, "
-							+ "predicate, object, qualifier, scope, valid_time, ended, caller_confidence; or "
-							+ "{\"wrong\": true} to withdraw, {\"redundant\": true} to retire a fact a derivation "
-							+ "covers.");
-				}
-			}
-		}
-		Corrected result;
-		if (replacement != null && Boolean.TRUE.equals(replacement.get("redundant"))) {
-			result = runCorrection(() -> {
-				Observation record = correctionRecord("Retirement of " + about + why, factId);
-				Corrected retired = knowledge.factService().retire(factId, reason, record);
-				if (needsDerivation(retired)) {
-					derive();
-				}
-				return retired;
-			});
-		} else if (replacement != null && Boolean.TRUE.equals(replacement.get("wrong"))) {
-			result = runCorrection(() -> {
-				Observation record = correctionRecord("Retraction of " + about + why, factId);
-				Corrected retracted = knowledge.factService().retract(factId, reason, record);
-				if (needsDerivation(retracted)) {
-					derive();
-				}
-				return retracted;
-			});
-		} else {
-			if (replacement == null || replacement.isEmpty()) {
-				throw MnemicException.invalidArgument("'changes' must name what changes, e.g. {\"object\": "
-						+ "\"Schübelbach\"} or {\"valid_time\": {\"start\": \"2014\"}} or {\"ended\": true}.");
-			}
-			result = runCorrection(() -> {
-				Observation record = correctionRecord("Correction of " + about + why + " → " + Json.write(replacement),
-						factId);
-				Corrected corrected = knowledge.factService().correct(factId, replacement, reason, record);
-				if (needsDerivation(corrected)) {
-					derive();
-				}
-				return corrected;
-			});
-		}
-		embedMissing(50);
-		return result;
+		return corrections.correct(factId, replacement, reason);
 	}
 
-	/**
-	 * Runs a correction observation + mutation + derivation atomically in one transaction so a refused or failed
-	 * correction leaves neither an orphan correction record nor a forgotten tombstone, and restores registry caches on
-	 * rollback.
-	 */
-	private <T> T runCorrection(Supplier<T> work) {
-		try {
-			return db.write(tx -> work.get());
-		} catch (Throwable t) {
-			reloadRegistries(t);
-			throw t;
-		}
-	}
-
-	private void reloadRegistries(Throwable failure) {
-		try {
-			knowledge.predicates().reload();
-			knowledge.eventTypes().reload();
-			knowledge.entityTypes().reload();
-			knowledge.entities().reloadOwner();
-		} catch (Throwable reloadFailure) {
-			failure.addSuppressed(reloadFailure);
-		}
-	}
-
-	/**
-	 * A correction record carries its change in itself: nothing to propose from its text, so it never joins the
-	 * backlog.
-	 */
-	private static boolean definesOnly(Proposal p) {
-		return p.facts().isEmpty() && p.events().isEmpty() && p.entities().isEmpty() && p.closures().isEmpty()
-				&& !(p.predicates().isEmpty() && p.eventTypes().isEmpty() && p.entityTypes().isEmpty());
-	}
-
-	private Observation correctionRecord(String text, long factId) {
-		Remembered r = observations.remember(text, new Source("correction", "f-" + factId, null, null, null),
-				options.clock().instant(), "{}", null, null);
-		return observations.get(r.observationId()).orElseThrow();
-	}
-
-	/**
-	 * Moves an event to another date ({@code correct(evt-3, {valid_time: {start: "2027-06-19"}})}): the facts its
-	 * effects opened or closed move with it. The reason becomes a correction observation whose reading names the event
-	 * by key and the new date, so a rebuild moves it again. An assistant tried to move a wedding through its event type
-	 * and got a refusal about predicates (2026-09-23).
-	 */
 	public Map<String, Object> correctEvent(long eventId, Map<String, Object> replacement, String reason) {
-		Event ev = knowledge.events().get(eventId)
-				.orElseThrow(() -> MnemicException.notFound("No event evt-" + eventId));
-		if (replacement != null && !replacement.isEmpty()
-				&& Set.of("type", "detail", "roles").containsAll(replacement.keySet())) {
-			Object type = replacement.get("type");
-			Object detail = replacement.get("detail");
-			Object roles = replacement.get("roles");
-			if (roles != null && !(roles instanceof Map<?, ?>)) {
-				throw MnemicException.invalidArgument("'roles' maps a participant to its role: {\"roles\": "
-						+ "{\"Calle Wilund\": \"with\"}}; an empty role clears one.");
-			}
-			return retypeEvent(ev, type == null ? ev.type() : String.valueOf(type),
-					detail == null ? null : String.valueOf(detail), knowledge.factService().rolesByName(ev, roles),
-					reason);
-		}
-		if (replacement == null || !(replacement.get("valid_time") instanceof Map<?, ?> vt)
-				|| !replacement.keySet().equals(Set.of("valid_time"))) {
-			throw MnemicException.invalidArgument("An event is corrected by its date, {\"valid_time\": {\"start\": "
-					+ "\"2027-06-19\"}} (a year, a month, or a day; 'end' too for a span), or by its type and detail, "
-					+ "{\"type\": \"graduated\", \"detail\": \"M.Sc. in Computer Science\"} (a type is a verb or two "
-					+ "words; the detail is what the type and participants leave unsaid), one at a time. To change who "
-					+ "took part, re-read its observation with remember(observation_id, proposal).");
-		}
-		var warnings = new ArrayList<String>();
-		Instant now = options.clock().instant();
-		Bounds b = Bounds.of(
-				new Proposal.ValidTime(vtText(vt.get("start")), vtText(vt.get("end")), vtText(vt.get("precision"))),
-				now, warnings);
-		if (b.start() == null && b.end() == null) {
-			throw MnemicException
-					.invalidArgument("'valid_time' names no date: give 'start' (2027-06-19, 2027-06, or 2027).");
-		}
-		if (java.util.Objects.equals(b.start(), ev.validStart()) && java.util.Objects.equals(b.end(), ev.validEnd())) {
-			throw MnemicException.invalidArgument("The correction changes nothing about " + ev.ref() + ": it is dated "
-					+ ev.validStart() + " already.");
-		}
-		String why = reason == null || reason.isBlank() ? "" : ": " + reason;
-		List<String> names = ev.participants().stream().map(id -> knowledge.entities().nameOf(id)).toList();
-		var reading = new LinkedHashMap<String, Object>();
-		reading.put("redates", Map.of("type", ev.type(), "participants", names, "valid_start",
-				ev.validStart() == null ? "" : ev.validStart()));
-		reading.put("valid_time", vt);
-		if (reason != null && !reason.isBlank()) {
-			reading.put("reason", reason);
-		}
-		return runCorrection(() -> {
-			Remembered r = observations.remember("Re-dating of " + ev.rendering() + why + " → " + Json.write(vt),
-					new Source("correction", ev.ref(), null, null, null), now, Json.write(reading), null, null);
-			Observation record = observations.get(r.observationId()).orElseThrow();
-			EventService.Redated moved = knowledge.factService().redate(eventId, b, record);
-			Set<String> relevant = knowledge.deriver().relevantPredicates();
-			if (!moved.opened().isEmpty() || !moved.closed().isEmpty() || eventAffectsDerivation(ev.type(), relevant)) {
-				derive();
-			}
-			var out = new LinkedHashMap<String, Object>();
-			out.put("event", ev.ref());
-			out.put("before",
-					Map.of("valid_start", ev.validStart() == null ? "" : ev.validStart(), "rendering", moved.before()));
-			out.put("after", Map.of("valid_start", b.start() == null ? "" : b.start(), "rendering", moved.after()));
-			out.put("facts_moved", java.util.stream.Stream.concat(moved.opened().stream(), moved.closed().stream())
-					.map(id -> "f-" + id).toList());
-			out.put("observation", record.ref());
-			if (!warnings.isEmpty()) {
-				out.put("warnings", warnings);
-			}
-			return out;
-		});
+		return corrections.correctEvent(eventId, replacement, reason);
 	}
 
-	/**
-	 * Gives an event another type from a correction record, so that a rebuild does it again: the sentence an early
-	 * reading put where the type goes becomes a type of a word or two in one call, where a re-read of the whole
-	 * observation was needed before (2026-09-27).
-	 */
-	private Map<String, Object> retypeEvent(
-		Event ev, String given, String detail, Map<Long, String> roles, String reason) {
-		String type = EventTypeRegistry.key(given);
-		boolean retyping = !type.equals(ev.type());
-		if (retyping && (type.isBlank() || !EventTypeRegistry.typeLike(given))) {
-			throw MnemicException.invalidArgument("An event type is a verb or two words (graduated, "
-					+ "purchased_property); '" + given + "' reads as a description. Put it in 'detail' instead.");
-		}
-		String newDetail = detail == null || detail.isBlank() ? null : detail.strip();
-		// Only the roles that change: a role said again as it stands is no change.
-		var changedRoles = new LinkedHashMap<Long, String>();
-		for (Map.Entry<Long, String> r : roles.entrySet()) {
-			String now = r.getValue() == null || r.getValue().isBlank() ? null : r.getValue().strip();
-			if (!java.util.Objects.equals(now, ev.roleOf(r.getKey()))) {
-				changedRoles.put(r.getKey(), now == null ? "" : now);
-			}
-		}
-		if (!retyping && (newDetail == null || newDetail.equals(ev.detail())) && changedRoles.isEmpty()) {
-			throw MnemicException.invalidArgument("The correction changes nothing about " + ev.ref() + ": its type is '"
-					+ type + "' already" + (newDetail == null ? "" : ", and so is its detail")
-					+ (roles.isEmpty() ? "." : ", and so are the roles given."));
-		}
-		String why = reason == null || reason.isBlank() ? "" : ": " + reason;
-		Instant now = options.clock().instant();
-		List<String> names = ev.participants().stream().map(id -> knowledge.entities().nameOf(id)).toList();
-		var reading = new LinkedHashMap<String, Object>();
-		reading.put("retypes", Map.of("type", ev.type(), "participants", names, "valid_start",
-				ev.validStart() == null ? "" : ev.validStart()));
-		reading.put("type", type);
-		if (newDetail != null) {
-			reading.put("detail", newDetail);
-		}
-		var roleNames = new LinkedHashMap<String, String>();
-		changedRoles.forEach((id, role) -> roleNames.put(knowledge.entities().nameOf(id), role));
-		if (!roleNames.isEmpty()) {
-			reading.put("roles", roleNames);
-		}
-		if (reason != null && !reason.isBlank()) {
-			reading.put("reason", reason);
-		}
-		var said = new ArrayList<String>();
-		if (retyping) {
-			said.add(type);
-		}
-		if (newDetail != null) {
-			said.add("detail \"" + newDetail + "\"");
-		}
-		roleNames.forEach(
-				(who, role) -> said.add(role.isEmpty() ? who + " without a role" : who + " as \"" + role + "\""));
-		String change = String.join(", ", said);
-		return runCorrection(() -> {
-			Remembered r = observations.remember(
-					(retyping ? "Retyping of " : "Correction of ") + ev.rendering() + why + " → " + change,
-					new Source("correction", ev.ref(), null, null, null), now, Json.write(reading), null, null);
-			Observation record = observations.get(r.observationId()).orElseThrow();
-			Map<String, Object> changed = knowledge.factService().retype(ev.id(), type, newDetail, changedRoles,
-					record);
-			Set<String> relevant = knowledge.deriver().relevantPredicates();
-			if (eventAffectsDerivation(ev.type(), relevant) || eventAffectsDerivation(type, relevant)) {
-				derive();
-			}
-			var out = new LinkedHashMap<String, Object>();
-			out.put("event", ev.ref());
-			out.putAll(changed);
-			out.put("observation", record.ref());
-			return out;
-		});
-	}
-
-	private static String vtText(Object o) {
-		return o == null ? null : String.valueOf(o);
-	}
-
-	/**
-	 * Corrects a predicate's definition (EVALUATION.md J5): the change is logged with its reason and every fact under
-	 * the predicate is re-rendered.
-	 */
 	public Map<String, Object> correctPredicate(String name, Map<String, Object> replacement, String reason) {
-		if (replacement == null || replacement.isEmpty()) {
-			throw MnemicException.invalidArgument("'changes' must name what changes, e.g. {\"render\": "
-					+ "\"{object} is {subject}'s {qualifier|parent}\"} or {\"lexicon\": [\"mother\", \"father\"]}.");
-		}
-		var before = knowledge.predicates().get(name)
-				.orElseThrow(() -> MnemicException.notFound("No predicate " + name));
-		if (replacement.get("merge_into") != null) {
-			return mergePredicate(before, String.valueOf(replacement.get("merge_into")), replacement, reason);
-		}
-		var after = knowledge.predicates().update(name, replacement, reason);
-		int rerendered = knowledge.renderer().rerender(name);
-		var out = new LinkedHashMap<String, Object>();
-		out.put("predicate", name);
-		out.put("before", Map.of("render", before.render(), "lexicon", before.lexicon(), "qualifiers",
-				before.qualifiers(), "functional", before.functional()));
-		out.put("after", Map.of("render", after.render(), "lexicon", after.lexicon(), "qualifiers", after.qualifiers(),
-				"functional", after.functional()));
-		out.put("rerendered_facts", rerendered);
-		// A predicate that just became functional has facts stored as if it were not: they are checked now.
-		out.put("rechecked_conflicts",
-				!before.functional() && after.functional() ? knowledge.factService().recheckFunctional(name) : 0);
-		out.put("changes", knowledge.predicates().changes(name));
-		if (replacement.containsKey("defined_as")) {
-			out.put("defined_as", knowledge.predicates().rulesOf(name).stream().map(Rule::toMap).toList());
-		}
-		if (replacement.containsKey("implies")) {
-			out.put("implies", knowledge.predicates().impliesOf(name));
-		}
-		// The derivations rest on the rules, the implications, and whether the relation outlives a death.
-		if (replacement.containsKey("defined_as") || replacement.containsKey("implies")
-				|| replacement.containsKey("lasting")) {
-			out.put("derived", derive().toMap());
-		}
-		return out;
+		return corrections.correctPredicate(name, replacement, reason);
 	}
 
-	/** Folds one predicate into another: {@code correct(pred:coaches, {merge_into: "mentors"})}. */
-	private Map<String, Object> mergePredicate(
-		Predicate from, String into, Map<String, Object> replacement, String reason) {
-		if (replacement.size() > 1) {
-			throw MnemicException.invalidArgument("'merge_into' stands alone; correct the target afterwards.");
-		}
-		var target = knowledge.predicates().get(into)
-				.orElseThrow(() -> MnemicException.notFound("No predicate " + into));
-		int moved = knowledge.predicates().merge(from.name(), target.name(), reason);
-		knowledge.eventTypes().renamePredicate(from.name(), target.name(), reason);
-		knowledge.renderer().rerender(target.name());
-		var out = new LinkedHashMap<String, Object>();
-		out.put("predicate", from.name());
-		out.put("merged_into", target.name());
-		out.put("merged_facts", moved);
-		out.put("aliases", knowledge.predicates().get(target.name()).orElseThrow().aliases());
-		out.put("changes", knowledge.predicates().changes(target.name()));
-		return out;
-	}
-
-	/** Corrects an event type's definition; the change is logged with its reason. */
 	public Map<String, Object> correctEventType(String name, Map<String, Object> replacement, String reason) {
-		requireReplacement(replacement, "{\"closes\": [\"works_at\"]} or {\"lexicon\": [\"quit\", \"resigned\"]}");
-		var before = knowledge.eventTypes().get(name)
-				.orElseThrow(() -> MnemicException.notFound("No event type " + name));
-		if (replacement.containsKey("remove")) {
-			if (replacement.size() > 1 || !Boolean.TRUE.equals(replacement.get("remove"))) {
-				throw MnemicException.invalidArgument("{\"remove\": true} stands alone.");
-			}
-			knowledge.eventTypes().remove(before.name(), reason);
-			var out = new LinkedHashMap<String, Object>();
-			out.put("event_type", before.name());
-			out.put("removed", true);
-			out.put("before", eventTypeMap(before));
-			return out;
-		}
-		var after = knowledge.eventTypes().update(name, replacement, reason,
-				p -> knowledge.predicates().get(p).isPresent());
-		int rerendered = knowledge.events().rerender(after.name());
-		var out = new LinkedHashMap<String, Object>();
-		out.put("event_type", after.name());
-		out.put("before", eventTypeMap(before));
-		out.put("after", eventTypeMap(after));
-		out.put("rerendered_events", rerendered);
-		out.put("changes", knowledge.eventTypes().changes(after.name()));
-		return out;
+		return corrections.correctEventType(name, replacement, reason);
 	}
 
-	/** Corrects an entity type's definition; the change is logged with its reason. */
 	public Map<String, Object> correctEntityType(String name, Map<String, Object> replacement, String reason) {
-		requireReplacement(replacement, "{\"parent\": \"place\"} or {\"type_words\": [\"kanton\", \"canton\"]}");
-		var before = knowledge.entityTypes().get(name)
-				.orElseThrow(() -> MnemicException.notFound("No entity type " + name));
-		if (replacement.containsKey("remove")) {
-			if (replacement.size() > 1 || !Boolean.TRUE.equals(replacement.get("remove"))) {
-				throw MnemicException.invalidArgument("{\"remove\": true} stands alone.");
-			}
-			List<String> naming = knowledge.predicates().all().stream()
-					.filter(p -> p.domain().contains(before.name()) || p.range().contains(before.name()))
-					.map(Predicate::name).toList();
-			if (!naming.isEmpty()) {
-				throw MnemicException.invalidArgument(
-						"'" + before.name() + "' is in the domain or range of " + naming + "; correct them first.");
-			}
-			knowledge.entityTypes().remove(before.name(), reason);
-			var out = new LinkedHashMap<String, Object>();
-			out.put("entity_type", before.name());
-			out.put("removed", true);
-			out.put("before", typeMap(before));
-			return out;
-		}
-		var after = knowledge.entityTypes().update(name, replacement, reason);
-		var out = new LinkedHashMap<String, Object>();
-		out.put("entity_type", after.name());
-		out.put("before", typeMap(before));
-		out.put("after", typeMap(after));
-		if (replacement.containsKey("kinds")) {
-			out.put("placed", knowledge.factService().placeNamedKinds(after.name()));
-		}
-		out.put("changes", knowledge.entityTypes().changes(after.name()));
-		return out;
+		return corrections.correctEntityType(name, replacement, reason);
 	}
 
-	/**
-	 * Corrects a predicate group ({@code correct(group:family, {lexicon: [...]})}): its description, cue words, words
-	 * in another language, or the groups it belongs to. The change is logged with its reason.
-	 */
 	public Map<String, Object> correctGroup(String name, Map<String, Object> replacement, String reason) {
-		requireReplacement(replacement, "{\"lexicon\": [\"family\", \"relatives\"]} or {\"groups\": [\"family\"]}");
-		var before = knowledge.predicates().group(name).orElseThrow(() -> MnemicException.notFound("No group " + name));
-		var after = knowledge.predicates().updateGroup(before.name(), replacement, reason);
-		var out = new LinkedHashMap<String, Object>();
-		out.put("group", after.name());
-		out.put("before", before.toMap());
-		out.put("after", after.toMap());
-		out.put("members", knowledge.predicates().membersOf(after.name()).stream().map(Predicate::name).toList());
-		out.put("changes", knowledge.predicates().groupChanges(after.name()));
-		return out;
+		return corrections.correctGroup(name, replacement, reason);
 	}
 
-	private static Map<String, Object> eventTypeMap(EventTypeRegistry.EventType t) {
-		var m = new LinkedHashMap<String, Object>();
-		m.put("opens", t.opens());
-		m.put("closes", t.closes());
-		m.put("supersedes", t.supersedes());
-		m.put("ends_entity", t.endsEntity());
-		m.put("lexicon", t.lexicon());
-		m.put("render", t.render());
-		return m;
+	// ── maintenance, rebuild, and reporting ─────────────────────────────
+
+	public Rebuilt rebuild() {
+		return maintenance.rebuild();
 	}
 
-	private static Map<String, Object> typeMap(EntityTypeRegistry.EntityType t) {
-		var m = new LinkedHashMap<String, Object>();
-		m.put("parent", t.parent());
-		m.put("synonyms", t.synonyms());
-		m.put("type_words", t.typeWords());
-		m.put("kinds", t.kinds());
-		return m;
+	public Consolidation consolidate(boolean dryRun) {
+		return consolidate(dryRun, List.of());
 	}
 
-	private static void requireReplacement(Map<String, Object> replacement, String example) {
-		if (replacement == null || replacement.isEmpty()) {
-			throw MnemicException.invalidArgument("'changes' must name what changes, e.g. " + example + ".");
-		}
+	public Consolidation consolidate(boolean dryRun, List<Long> retire) {
+		return consolidate(dryRun, retire, false);
 	}
 
-	public History history(long entityId, String predicate) {
-		return knowledge.facts().history(entityId, predicate);
+	/** {@code rebuild}: re-derive the projection from the log first (never on a dry run). */
+	public Consolidation consolidate(boolean dryRun, List<Long> retire, boolean rebuild) {
+		return maintenance.consolidate(dryRun, retire, rebuild);
 	}
 
-	// ── recall and consolidation ────────────────────────────────────────
+	/** The newest observation the previous consolidation had seen; 0 before the first. */
+	public long lastConsolidationMark() {
+		return maintenance.lastConsolidationMark();
+	}
+
+	static List<Map<String, Object>> recentFirst(List<Map<String, Object>> entries, long mark) {
+		return StoreMaintenance.recentFirst(entries, mark);
+	}
+
+	/** Embeds what has no vector yet, up to {@code limit} rows of each kind; the number embedded. */
+	public int embedMissing(int limit) {
+		return indexer.embedMissing(limit);
+	}
 
 	/** The session briefing for a recall without a query (EVALUATION.md F10). */
 	public String briefing(int maxTokens) {
@@ -1047,9 +514,8 @@ public final class Engine implements AutoCloseable {
 	public Path writeReport(Consolidation c, boolean dryRun) {
 		Path path = home().resolve(Report.FILE);
 		try {
-			Files.writeString(path, Report.render(this, c, dryRun, options.clock().instant()),
-					java.nio.charset.StandardCharsets.UTF_8);
-		} catch (java.io.IOException e) {
+			Files.writeString(path, Report.render(this, c, dryRun, options.clock().instant()), StandardCharsets.UTF_8);
+		} catch (IOException e) {
 			throw MnemicException.internal("Could not write " + path + ": " + e.getMessage(), e);
 		}
 		return path;
@@ -1067,231 +533,57 @@ public final class Engine implements AutoCloseable {
 			return Optional.empty();
 		}
 		try {
-			return Optional.of(Files.readString(path, java.nio.charset.StandardCharsets.UTF_8));
-		} catch (java.io.IOException e) {
+			return Optional.of(Files.readString(path, StandardCharsets.UTF_8));
+		} catch (IOException e) {
 			return Optional.empty();
 		}
 	}
 
-	public Consolidation consolidate(boolean dryRun) {
-		return consolidate(dryRun, List.of());
+	public History history(long entityId, String predicate) {
+		return knowledge.facts().history(entityId, predicate);
 	}
+
+	/** Brings the derived facts in line with the current facts and rules (family K). */
+	public Deriver.Outcome derive() {
+		return knowledge.deriver().derive();
+	}
+
+	// ── package-private shared helpers ──────────────────────────────────
 
 	/**
-	 * Housekeeping (EXTRACTION.md, Layer 3; EVALUATION.md G2, G3, J6): merges, re-closing, and the lists a caller needs
-	 * to finish what Mnemic cannot do alone. {@code dryRun} reports without changing anything; {@code retire} names
-	 * observations with nothing to propose (an answer, a note), taken out of the backlog. In hybrid mode the configured
-	 * model reads a batch of the backlog per call.
+	 * Runs a multi-step mutation + derivation atomically in one transaction and restores in-memory registry caches if
+	 * the transaction rolls back.
 	 */
-	public Consolidation consolidate(boolean dryRun, List<Long> retire) {
-		return consolidate(dryRun, retire, false);
-	}
-
-	/** {@code rebuild}: re-derive the projection from the log first (never on a dry run). */
-	public Consolidation consolidate(boolean dryRun, List<Long> retire, boolean rebuild) {
-		Rebuilt rebuilt = rebuild && !dryRun ? rebuild() : null;
-		var retired = new ArrayList<String>();
-		var notRetired = new ArrayList<Map<String, Object>>();
-		if (!dryRun) {
-			for (long id : retire) {
-				if (observations.retire(id)) {
-					retired.add("obs-" + id);
-				} else {
-					// Said, not dropped: a note that was never in the backlog came back as an empty list (2026-09-28).
-					notRetired.add(Map.of("observation", "obs-" + id, "why", whyNotRetired(id)));
-				}
-			}
-			for (Observation o : observations.backlog(200)) {
-				if ("correction".equals(o.source().kind()) && observations.retire(o.id())) {
-					retired.add(o.ref());
-				}
-			}
-		}
-		if (!dryRun) {
-			options.embedder().retryIfFailed();
-		}
-		int embedded = dryRun ? 0 : embedMissing(500);
-		var c = knowledge.consolidator().consolidate(dryRun);
-		if (!dryRun) {
-			derive();
-		}
-		List<Map<String, Object>> proposed = dryRun ? List.of() : proposeBacklog();
-		List<Map<String, Object>> backlog = observations.backlog(20).stream().map(o -> {
-			var m = new LinkedHashMap<String, Object>();
-			m.put("observation", o.ref());
-			m.put("source", o.source().kind());
-			m.put("observed_at", o.observedAt().toString());
-			m.put("excerpt", o.text().length() > 160 ? o.text().substring(0, 160) + "…" : o.text());
-			return (Map<String, Object>) m;
-		}).toList();
-		List<Map<String, Object>> open = knowledge.questions().open(20).stream().map(q -> q.toMap()).toList();
-		// Newest first, and what arrived since the last consolidation flagged, so a capped reply and the page show
-		// what the reader has not seen before what it has (2026-09-27).
-		long mark = lastConsolidationMark();
-		var out = new Consolidation(observations.pendingProposals(), recentFirst(backlog, mark),
-				recentFirst(open, mark), recentFirst(c.inferredVocabulary(), mark),
-				recentFirst(c.similarVocabulary(), mark), recentFirst(c.descriptiveEvents(), mark),
-				recentFirst(c.unusedVocabulary(), mark), recentFirst(c.unresolvedDerivations(), mark),
-				recentFirst(c.misfiledRelations(), mark), recentFirst(c.attributeUnknown(), mark), c.merges(),
-				recentFirst(c.nameCollisions(), mark), c.reclosed(), proposed, c.resolvedQuestions(),
-				recentFirst(c.review(), mark), retired, embedded, recentFirst(c.duplicates(), mark), rebuilt,
-				c.removedEntities(), c.repairs(), notRetired);
-		if (!dryRun) {
-			db.setMeta(LAST_CONSOLIDATION, String.valueOf(observations.newestId()));
-		}
-		return out;
-	}
-
-	/** Why consolidate's retire left an observation as it was, with the call that does what was likely meant. */
-	private String whyNotRetired(long id) {
-		Optional<Observation> o = observations.get(id);
-		if (o.isEmpty()) {
-			return "no such observation";
-		}
-		if (o.get().forgotten()) {
-			return "forgotten already";
-		}
-		return "not waiting for a reading, so there was no backlog to take it out of; to take it out of recall, "
-				+ "correct(obs-" + id + ", {\"retired\": true})";
-	}
-
-	static final String LAST_CONSOLIDATION = "last_consolidation_observation";
-	private static final java.util.regex.Pattern OBS_REF = java.util.regex.Pattern.compile("obs-(\\d+)");
-	private static final java.util.regex.Pattern ANY_REF = java.util.regex.Pattern.compile("(?:f|evt|ent|q)-(\\d+)");
-
-	/** The newest observation the previous consolidation had seen; 0 before the first. */
-	public long lastConsolidationMark() {
-		String v = db.meta(LAST_CONSOLIDATION);
+	static <T> T runAtomic(Database db, Knowledge knowledge, Supplier<T> work) {
 		try {
-			return v == null ? 0 : Long.parseLong(v);
-		} catch (NumberFormatException e) {
-			return 0;
+			return db.write(tx -> work.get());
+		} catch (Throwable t) {
+			reloadRegistries(knowledge, t);
+			throw t;
 		}
 	}
 
-	/**
-	 * Findings ordered newest first, by the observation they cite (or the newest id of any kind they name), each marked
-	 * {@code new: true} when its observation came after the previous consolidation.
-	 */
-	static List<Map<String, Object>> recentFirst(List<Map<String, Object>> entries, long mark) {
-		var scored = new ArrayList<Map.Entry<Map<String, Object>, long[]>>();
-		for (Map<String, Object> e : entries) {
-			long obs = 0;
-			long any = 0;
-			for (Object v : e.values()) {
-				String text = String.valueOf(v);
-				var m = OBS_REF.matcher(text);
-				while (m.find()) {
-					obs = Math.max(obs, Long.parseLong(m.group(1)));
-				}
-				var a = ANY_REF.matcher(text);
-				while (a.find()) {
-					any = Math.max(any, Long.parseLong(a.group(1)));
-				}
-			}
-			var copy = new LinkedHashMap<String, Object>(e);
-			if (obs > mark) {
-				copy.put("new", true);
-			}
-			scored.add(Map.entry(copy, new long[] {obs > mark ? 1 : 0, obs, any}));
-		}
-		scored.sort((x, y) -> {
-			for (int i = 0; i < 3; i++) {
-				int c = Long.compare(y.getValue()[i], x.getValue()[i]);
-				if (c != 0) {
-					return c;
-				}
-			}
-			return 0;
-		});
-		return scored.stream().map(Map.Entry::getKey).toList();
-	}
-
-	private List<Map<String, Object>> proposeBacklog() {
-		ModelProposer proposer = options.proposer();
-		if (proposer == null) {
-			return List.of();
-		}
-		var proposed = new ArrayList<Map<String, Object>>();
-		for (Observation o : observations.backlog(options.proposerBatch())) {
-			var m = new LinkedHashMap<String, Object>();
-			m.put("observation", o.ref());
-			ModelProposer.Result made = proposer.propose(o.text(), o.observedAt());
-			if (made.ok()) {
-				Applied a = applyServerProposal(o, made.proposal());
-				m.put("proposer", proposer.id());
-				m.put("facts", a.facts().stream().map(FactOut::id).toList());
-				m.put("questions", a.questions().stream().map(q -> q.get("id")).toList());
-				if (!a.warnings().isEmpty()) {
-					m.put("warnings", a.warnings());
-				}
-			} else {
-				m.put("warning", made.warning());
-			}
-			proposed.add(m);
-		}
-		return proposed;
-	}
-
-	// ── the semantic channel's vectors ──────────────────────────────────
-
-	/**
-	 * The observation's text and each new fact's rendering, embedded as they are stored. A failure here never fails the
-	 * remember; consolidate backfills what is missing.
-	 */
-	private void embed(Observation obs, Applied applied) {
-		Embedder embedder = options.embedder().get();
-		if (embedder == null) {
-			return;
-		}
+	private static void reloadRegistries(Knowledge knowledge, Throwable failure) {
 		try {
-			if (!vectors.has(VectorStore.OBSERVATION, obs.id(), embedder.id())) {
-				vectors.putChunks(VectorStore.OBSERVATION, obs.id(), embedder.id(), embedder.embedChunks(obs.text()));
-			}
-			for (FactOut f : applied.facts()) {
-				long id = Long.parseLong(f.id().substring(2));
-				if (!vectors.has(VectorStore.FACT, id, embedder.id())) {
-					vectors.putChunks(VectorStore.FACT, id, embedder.id(), factVectors(embedder, f.rendering()));
-				}
-			}
-		} catch (RuntimeException e) {
-			LOG.warnf("Embedding skipped for %s: %s", obs.ref(), e.getMessage());
+			knowledge.predicates().reload();
+			knowledge.eventTypes().reload();
+			knowledge.entityTypes().reload();
+			knowledge.entities().reloadOwner();
+		} catch (Throwable reloadFailure) {
+			failure.addSuppressed(reloadFailure);
 		}
 	}
 
-	/**
-	 * A fact's vectors: its rendering, and for a fact that names the owner the rendering as the owner would say it, so
-	 * a first-person question lands on it; the item scores by its better vector.
-	 */
-	private List<float[]> factVectors(Embedder embedder, String rendering) {
-		var out = new ArrayList<float[]>();
-		out.add(embedder.embed(rendering));
-		String mine = OWNER_ALIAS
-				? OwnerAlias.firstPerson(rendering, knowledge.entities().owner().name(), options.lang()) : null;
-		if (mine != null) {
-			out.add(embedder.embed(mine));
-		}
-		return out;
+	/** Stores the server-made proposal on the observation, with its provenance, then applies it. */
+	static Applied applyServerProposal(
+		ObservationService observations, Knowledge knowledge, ModelProposer proposer, Observation obs, Proposal p) {
+		observations.attachProposal(obs.id(), Json.write(p), Proposal.CURRENT_SPEC_VERSION, proposer.id());
+		return knowledge.factService().apply(observations.get(obs.id()).orElseThrow(), p);
 	}
 
-	/** Embeds what has no vector yet, up to {@code limit} rows of each kind; the number embedded. */
-	public int embedMissing(int limit) {
-		Embedder embedder = options.embedder().get();
-		if (embedder == null) {
-			return 0;
-		}
-		int n = 0;
-		for (long id : vectors.missingObservations(embedder.id(), limit)) {
-			observations.get(id).ifPresent(
-					o -> vectors.putChunks(VectorStore.OBSERVATION, id, embedder.id(), embedder.embedChunks(o.text())));
-			n++;
-		}
-		for (long id : vectors.missingFacts(embedder.id(), limit)) {
-			knowledge.facts().get(id).ifPresent(
-					f -> vectors.putChunks(VectorStore.FACT, id, embedder.id(), factVectors(embedder, f.rendering())));
-			n++;
-		}
-		return n;
+	private static boolean definesOnly(Proposal p) {
+		return p.facts().isEmpty() && p.events().isEmpty() && p.entities().isEmpty() && p.closures().isEmpty()
+				&& !(p.predicates().isEmpty() && p.eventTypes().isEmpty() && p.entityTypes().isEmpty());
 	}
 
 	// ── accessors ───────────────────────────────────────────────────────
@@ -1356,91 +648,6 @@ public final class Engine implements AutoCloseable {
 
 	public EntityService entities() {
 		return knowledge.entities();
-	}
-
-	private static Map<String, Object> entityState(Entity e, List<String> aliases) {
-		var m = new LinkedHashMap<String, Object>();
-		m.put("name", e.name());
-		m.put("type", e.type());
-		m.put("aliases", aliases);
-		return m;
-	}
-
-	/** Brings the derived facts in line with the current facts and rules (family K). */
-	public Deriver.Outcome derive() {
-		return knowledge.deriver().derive();
-	}
-
-	private boolean needsDerivation(Proposal proposal, Applied applied, List<Map<String, Object>> resolved) {
-		if (resolved != null && !resolved.isEmpty()) {
-			return true;
-		}
-		if (proposal != null && (!proposal.predicates().isEmpty() || !proposal.closures().isEmpty())) {
-			return true;
-		}
-		Set<String> relevant = knowledge.deriver().relevantPredicates();
-		if (relevant.isEmpty() || applied == null) {
-			return false;
-		}
-		for (FactOut f : applied.facts()) {
-			if (relevant.contains(f.predicate())) {
-				return true;
-			}
-		}
-		for (EventOut ev : applied.events()) {
-			if (eventAffectsDerivation(ev.type(), relevant)) {
-				return true;
-			}
-		}
-		for (Map<String, Object> s : applied.superseded()) {
-			Object pred = s.get("predicate");
-			if (pred == null || relevant.contains(String.valueOf(pred))) {
-				return true;
-			}
-		}
-		return false;
-	}
-
-	private boolean needsDerivation(Removed removed) {
-		if (removed == null) {
-			return false;
-		}
-		if (removed.reopened() > 0 || removed.eventsUpdated() || !removed.events().isEmpty()) {
-			return true;
-		}
-		if (removed.predicates().isEmpty()) {
-			return false;
-		}
-		Set<String> relevant = knowledge.deriver().relevantPredicates();
-		for (String p : removed.predicates()) {
-			if (relevant.contains(p)) {
-				return true;
-			}
-		}
-		return false;
-	}
-
-	private boolean needsDerivation(Corrected corrected) {
-		if (corrected == null) {
-			return false;
-		}
-		Set<String> relevant = knowledge.deriver().relevantPredicates();
-		if (relevant.isEmpty()) {
-			return false;
-		}
-		return (corrected.original() != null && relevant.contains(corrected.original().predicate()))
-				|| (corrected.replacement() != null && relevant.contains(corrected.replacement().predicate()));
-	}
-
-	private boolean eventAffectsDerivation(String type, Set<String> relevant) {
-		if (relevant.isEmpty()) {
-			return false;
-		}
-		return knowledge.eventTypes().get(type)
-				.map(et -> et.endsEntity() || et.opens().stream().anyMatch(relevant::contains)
-						|| et.closes().stream().anyMatch(relevant::contains)
-						|| et.supersedes().stream().anyMatch(relevant::contains))
-				.orElse(false);
 	}
 
 	public Deriver deriver() {

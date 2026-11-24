@@ -113,7 +113,7 @@ final class Bakeoff {
 		var items = new ArrayList<Item>();
 		for (JsonNode n : root.path("items")) {
 			var q = new LinkedHashMap<String, String>();
-			n.path("q").fields().forEachRemaining(e -> q.put(e.getKey(), e.getValue().asText()));
+			n.path("q").properties().forEach(e -> q.put(e.getKey(), e.getValue().asText()));
 			items.add(new Item(n.path("id").asText(), n.path("text").asText(),
 					n.hasNonNull("group") ? n.path("group").asText() : null, q));
 		}
@@ -277,7 +277,7 @@ final class Bakeoff {
 		for (String lang : languages) {
 			sb.append(" R@1 ").append(lang).append(" | MRR ").append(lang).append(" |");
 		}
-		sb.append("\n|---|---|---|---|---|---|---|---|");
+		sb.append("\n|---|---|---|---|---|---|---|");
 		for (String ignored : languages) {
 			sb.append("---|---|");
 		}

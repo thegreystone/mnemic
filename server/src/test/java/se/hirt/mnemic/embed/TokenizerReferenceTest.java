@@ -62,9 +62,7 @@ class TokenizerReferenceTest {
 		ref.path("sentences").forEach(n -> sentences.add(n.asText()));
 		var problems = new ArrayList<String>();
 		int checked = 0;
-		var models = ref.path("models").fields();
-		while (models.hasNext()) {
-			var e = models.next();
+		for (var e : ref.path("models").properties()) {
 			Path tok = Path.of(dir, e.getKey(), "tokenizer.json");
 			if (!Files.exists(tok)) {
 				continue;

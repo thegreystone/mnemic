@@ -70,7 +70,7 @@ public final class Protocol {
 			if (in == null) {
 				throw new IllegalStateException(resource + " missing from the server resources");
 			}
-			return new String(in.readAllBytes(), StandardCharsets.UTF_8).strip();
+			return new String(in.readAllBytes(), StandardCharsets.UTF_8).replace("\r\n", "\n").strip();
 		} catch (IOException e) {
 			throw new UncheckedIOException(e);
 		}

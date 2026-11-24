@@ -70,12 +70,6 @@ public interface MnemicConfig {
 	}
 
 	/**
-	 * The sqlite-vec loadable library (vec0.dll / vec0.so / vec0.dylib). When set, the store loads it at open and
-	 * {@code status} reports {@code vec}; when unset, vectors are scanned. Env: MNEMIC_VEC_LIBRARY.
-	 */
-	Optional<String> vecLibrary();
-
-	/**
 	 * The ONNX Runtime shared library; when set, {@code status} reports what the probe found. Env: MNEMIC_ORT_LIBRARY.
 	 */
 	Optional<String> ortLibrary();
@@ -99,7 +93,10 @@ public interface MnemicConfig {
 	 */
 	Optional<String> embedModelUrl();
 
-	/** The language of the fact layer: en (default) or de. Observations stay verbatim. Env: MNEMIC_LANGUAGE. */
+	/**
+	 * The language of the fact layer: en (default), de, sv, fr, or es. Observations stay verbatim. Env:
+	 * MNEMIC_LANGUAGE.
+	 */
 	Optional<String> language();
 
 	Observation observation();

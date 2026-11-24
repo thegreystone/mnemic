@@ -99,7 +99,7 @@ jobs:
         run: security find-identity -v -p codesigning "$RUNNER_TEMP/build.keychain"
 
       # Sign before the sanity test so the test exercises the hardened-runtime binary. The entitlements let the
-      # binary load the sqlite-jdbc, ONNX Runtime, and sqlite-vec libraries, none of which carries our signature.
+      # binary load the sqlite-jdbc and ONNX Runtime libraries, neither of which carries our signature.
       - name: Sign native binary (macOS)
         if: runner.os == 'macOS'
         env:

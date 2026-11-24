@@ -880,8 +880,8 @@ artifact at build time, pinned by hash, and written to the models directory on
 first start, so no code is downloaded at run time. Observations are embedded
 per chunk of about 300 tokens; a fact that names the owner also gets a
 vector of its first-person wording, so a question asked as "I" lands on a
-fact rendered with the owner's name. Search is an exact scan over every vector unless the optional
-sqlite-vec library is configured. The native image ships all of this; the FFM
+fact rendered with the owner's name. Search is an exact scan over every vector.
+The native image ships all of this; the FFM
 downcalls were the least-proven part of the design and are now measured
 rather than promised.
 

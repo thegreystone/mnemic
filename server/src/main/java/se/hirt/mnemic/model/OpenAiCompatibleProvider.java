@@ -28,6 +28,7 @@
  */
 package se.hirt.mnemic.model;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import se.hirt.mnemic.model.ChatModel.AssistantMessage;
@@ -59,6 +60,8 @@ import java.util.regex.Pattern;
 public final class OpenAiCompatibleProvider implements ModelProvider {
 
 	private static final ObjectMapper MAPPER = new ObjectMapper();
+	private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
+	};
 	private static final int MAX_ATTEMPTS = 5;
 
 	public OpenAiCompatibleProvider() {
@@ -235,9 +238,9 @@ public final class OpenAiCompatibleProvider implements ModelProvider {
 			JsonNode raw = fn.path("arguments");
 			try {
 				if (raw.isObject()) {
-					args = MAPPER.convertValue(raw, Map.class);
+					args = MAPPER.convertValue(raw, MAP_TYPE);
 				} else if (!raw.asText("").isBlank()) {
-					args = MAPPER.readValue(raw.asText(), Map.class);
+					args = MAPPER.readValue(raw.asText(), MAP_TYPE);
 				}
 			} catch (IOException | IllegalArgumentException e) {
 				args = new LinkedHashMap<>(Map.of("_unparsed", raw.asText("")));

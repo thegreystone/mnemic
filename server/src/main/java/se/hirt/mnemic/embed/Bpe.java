@@ -74,9 +74,7 @@ public final class Bpe implements Tokenizer {
 		JsonNode model = root.get("model");
 		JsonNode v = model.get("vocab");
 		int max = -1;
-		var fields = v.fields();
-		while (fields.hasNext()) {
-			var e = fields.next();
+		for (var e : v.properties()) {
 			vocab.put(e.getKey(), e.getValue().asInt());
 			max = Math.max(max, e.getValue().asInt());
 		}

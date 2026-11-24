@@ -145,8 +145,7 @@ class MnemicToolsTest {
 		assertTrue(channels.get("semantic").toString().startsWith("off ("), channels.toString());
 		assertEquals("off", ((Map<?, ?>) result.get("embedder")).get("state"));
 		assertTrue(result.get("ort_bundled").toString().contains("ONNX Runtime"), result.toString());
-		// The two runtime fields explain themselves when nothing is loaded, instead of reading as null.
-		assertTrue(result.get("vec").toString().startsWith("scan"), result.get("vec").toString());
+		// The runtime field explains itself when nothing is loaded, instead of reading as null.
 		String ort = result.get("ort").toString();
 		assertTrue(ort.contains("not loaded") || ort.toLowerCase().contains("onnxruntime"), ort);
 		assertTrue(result.get("pending_proposal_ids") instanceof List, result.toString());
