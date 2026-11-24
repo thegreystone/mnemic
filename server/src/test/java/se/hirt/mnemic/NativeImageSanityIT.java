@@ -154,33 +154,6 @@ class NativeImageSanityIT {
 		}
 	}
 
-	/** P2: sqlite-vec loads inside the native image. Runs when MNEMIC_VEC_LIBRARY names the loadable library. */
-	@Test
-	void nativeBinaryLoadsSqliteVec() throws Exception {
-		String lib = System.getenv("MNEMIC_VEC_LIBRARY");
-		org.junit.jupiter.api.Assumptions.assumeTrue(lib != null && Files.exists(Path.of(lib)),
-				"MNEMIC_VEC_LIBRARY not set: sqlite-vec prototype not exercised");
-		Process process = start("-Dmnemic.vec-library=" + lib);
-		try {
-			OutputStream stdin = process.getOutputStream();
-			InputStream stdout = process.getInputStream();
-			send(stdin, "{\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{},"
-					+ "\"clientInfo\":{\"name\":\"sanity-test\",\"version\":\"1.0\"}},\"jsonrpc\":\"2.0\",\"id\":0}");
-			assertNotNull(readResponse(stdout, 15_000), "No initialize response");
-			send(stdin, "{\"method\":\"notifications/initialized\",\"jsonrpc\":\"2.0\"}");
-			send(stdin,
-					"{\"method\":\"tools/call\",\"params\":{\"name\":\"status\",\"arguments\":{}},\"jsonrpc\":\"2.0\",\"id\":1}");
-			String status = readResponse(stdout, 20_000);
-			assertNotNull(status, "No status response");
-			// The tool result is JSON inside JSON, so the quotes arrive escaped.
-			assertTrue(status.contains("vec") && status.contains("v0.1."),
-					"sqlite-vec did not load in the native image: " + status);
-		} finally {
-			process.destroyForcibly();
-			process.waitFor();
-		}
-	}
-
 	/**
 	 * P3: foreign downcalls into ONNX Runtime inside the native image. Runs when MNEMIC_ORT_LIBRARY names the library.
 	 */

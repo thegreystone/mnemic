@@ -58,15 +58,8 @@ public final class Database implements AutoCloseable {
 	private long localVersion;
 	/** How many migrations this open applied; the engine re-renders every fact after any. */
 	private final int migrated;
-	/** The loaded sqlite-vec version, or null when no library was configured. */
-	private String vecVersion;
 
 	public Database(Path file) {
-		this(file, null);
-	}
-
-	/** {@code vecLibrary}: the sqlite-vec loadable library, loaded into this connection when given. */
-	public Database(Path file, String vecLibrary) {
 		this.file = file;
 		try {
 			if (file.getParent() != null) {
@@ -74,9 +67,6 @@ public final class Database implements AutoCloseable {
 			}
 			var props = new Properties();
 			props.setProperty("busy_timeout", "5000");
-			if (vecLibrary != null && !vecLibrary.isBlank()) {
-				props.setProperty("enable_load_extension", "true");
-			}
 			// Instantiate the driver directly: DriverManager rejects drivers loaded by another classloader
 			// (e.g. after a Quarkus test in the same JVM).
 			conn = new org.sqlite.JDBC().connect("jdbc:sqlite:" + file.toAbsolutePath(), props);
@@ -89,15 +79,6 @@ public final class Database implements AutoCloseable {
 			}
 			// Auto-commit stays on; every unit of work opens its own explicit transaction, so no lock is ever held
 			// between calls and a second process can always open the file.
-			if (vecLibrary != null && !vecLibrary.isBlank()) {
-				try (var ps = conn.prepareStatement("SELECT load_extension(?, 'sqlite3_vec_init')")) {
-					ps.setString(1, vecLibrary.replace('\\', '/'));
-					ps.execute();
-				}
-				try (var st = conn.createStatement(); var rs = st.executeQuery("SELECT vec_version()")) {
-					this.vecVersion = rs.next() ? rs.getString(1) : null;
-				}
-			}
 			int before = versionOrZero(conn);
 			Migrations.apply(conn);
 			this.migrated = versionOrZero(conn) - before;
@@ -298,10 +279,6 @@ public final class Database implements AutoCloseable {
 		try (Statement st = conn.createStatement()) {
 			st.execute(sql);
 		}
-	}
-
-	public String vecVersion() {
-		return vecVersion;
 	}
 
 	public int migrated() {

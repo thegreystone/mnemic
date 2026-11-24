@@ -1,0 +1,463 @@
+{
+  "predicates": [
+    {
+      "name": "works_at",
+      "description": "Subject works for object organization.",
+      "domain": ["person"],
+      "range": ["organization"],
+      "functional": true,
+      "volatility": "high",
+      "lexicon": ["work", "works", "worked", "working", "employer", "employed", "job", "company"],
+      "render": "{subject} works at {object}"
+    },
+    {
+      "name": "gender",
+      "description": "Subject's gender, as a literal: female, male, or the word given. The kinship rules read it ahead of the roles the subject holds, so state it when a person is nobody's mother, father, wife, or husband on record.",
+      "domain": ["person"],
+      "range": ["literal"],
+      "functional": true,
+      "volatility": "low",
+      "lasting": true,
+      "lexicon": ["gender", "male", "female", "man", "woman", "sex"],
+      "render": "{subject} is {object}",
+      "implies": {
+        "female": {"gender": "female"},
+        "male": {"gender": "male"},
+        "woman": {"gender": "female"},
+        "man": {"gender": "male"},
+        "f": {"gender": "female"},
+        "m": {"gender": "male"},
+        "girl": {"gender": "female"},
+        "boy": {"gender": "male"}
+      }
+    },
+    {
+      "name": "holds_role",
+      "description": "Subject holds the role (object, literal) at the scope organization.",
+      "domain": ["person"],
+      "range": ["literal"],
+      "functional": true,
+      "functional_scope": "scope",
+      "volatility": "high",
+      "lexicon": ["role", "title", "position", "director", "vp", "manager", "engineer", "ceo", "cto"],
+      "render": "{subject} holds the role {object}[[ at {scope}]]"
+    },
+    {
+      "name": "has_phone",
+      "description": "Subject's telephone number, a literal; the qualifier names the kind (mobile, home, work). A person or organization can have several.",
+      "domain": ["person", "organization"],
+      "range": ["literal"],
+      "volatility": "medium",
+      "lasting": true,
+      "lexicon": ["phone", "phones", "mobile", "cell", "cellphone", "smartphone", "tel", "telephone"],
+      "render": "{subject} has phone {object}[[ ({qualifier})]]"
+    },
+    {
+      "name": "leads",
+      "description": "Subject leads object project, team, product, or organization.",
+      "domain": ["person"],
+      "range": ["project", "team", "product", "organization"],
+      "volatility": "high",
+      "lexicon": ["lead", "leads", "leading", "led", "head", "heads"],
+      "render": "{subject} leads {object}"
+    },
+    {
+      "name": "lives_in",
+      "description": "Subject lives in object place.",
+      "domain": ["person"],
+      "range": ["place"],
+      "functional": true,
+      "volatility": "high",
+      "lexicon": ["live", "lives", "lived", "living", "home", "reside", "resides"],
+      "render": "{subject} lives in {object}"
+    },
+    {
+      "name": "born_in",
+      "description": "Subject was born in object place.",
+      "domain": ["person"],
+      "range": ["place"],
+      "functional": true,
+      "volatility": "low",
+      "lasting": true,
+      "lexicon": ["born", "birthplace"],
+      "render": "{subject} was born in {object}"
+    },
+    {
+      "name": "member_of",
+      "description": "Subject is a member of object organization or group.",
+      "domain": ["person"],
+      "range": ["organization", "team", "group", "project"],
+      "volatility": "medium",
+      "lexicon": ["member", "membership", "belongs"],
+      "render": "{subject} is a member of {object}"
+    },
+    {
+      "name": "parent_of",
+      "description": "Subject is a parent of object, and the qualifier names the subject's role (mother, father).",
+      "domain": ["person"],
+      "range": ["person"],
+      "volatility": "low",
+      "lasting": true,
+      "lexicon": ["parent", "parents"],
+      "render": "{subject} is {object}'s {qualifier|parent}",
+      "qualifiers": ["mother", "father", "mom", "dad"],
+      "inverse_lexicon": ["child", "children", "kid", "kids", "son", "sons", "daughter", "daughters", "offspring"],
+      "implies": {
+        "mother": {"gender": "female"},
+        "father": {"gender": "male"},
+        "mom": {"gender": "female"},
+        "dad": {"gender": "male"}
+      }
+    },
+    {
+      "name": "spouse_of",
+      "description": "Subject is married to object, and the qualifier names the subject's role (wife, husband). Stored once, found from both sides.",
+      "domain": ["person"],
+      "range": ["person"],
+      "functional": true,
+      "symmetric": true,
+      "volatility": "low",
+      "lexicon": ["spouse", "married", "marry"],
+      "render": "{subject} is {object}'s {qualifier|spouse}",
+      "qualifiers": ["wife", "husband"],
+      "implies": {
+        "wife": {"gender": "female"},
+        "husband": {"gender": "male"}
+      }
+    },
+    {
+      "name": "partner_of",
+      "description": "Subject and object are a couple without being married, and the qualifier names the subject's role (girlfriend, boyfriend, partner). Stored once, found from both sides; a wedding ends it and opens spouse_of.",
+      "domain": ["person"],
+      "range": ["person"],
+      "functional": true,
+      "symmetric": true,
+      "volatility": "medium",
+      "lexicon": ["partner", "partners", "girlfriend", "boyfriend", "sambo", "couple", "together"],
+      "render": "{subject} is {object}'s {qualifier|partner}",
+      "qualifiers": ["girlfriend", "boyfriend", "partner"],
+      "implies": {
+        "girlfriend": {"gender": "female"},
+        "boyfriend": {"gender": "male"}
+      }
+    },
+    {
+      "name": "engaged_to",
+      "description": "Subject is engaged to marry object. Stored once, found from both sides; a wedding ends it.",
+      "domain": ["person"],
+      "range": ["person"],
+      "functional": true,
+      "symmetric": true,
+      "volatility": "high",
+      "lexicon": ["engaged", "engagement", "fiancé", "fiancée", "fiance", "fiancee", "betrothed"],
+      "render": "{subject} is engaged to {object}",
+      "qualifiers": ["fiancé", "fiancée"],
+      "implies": {
+        "fiancée": {"gender": "female"},
+        "fiancé": {"gender": "male"}
+      }
+    },
+    {
+      "name": "step_parent_of",
+      "description": "Subject is a step-parent of object: the spouse or partner of a parent, and not a parent. The qualifier names the subject's role (stepmother, stepfather).",
+      "domain": ["person"],
+      "range": ["person"],
+      "volatility": "low",
+      "lasting": true,
+      "lexicon": ["stepparent", "step-parent", "stepmother", "stepfather", "stepmom", "stepdad"],
+      "render": "{subject} is {object}'s {qualifier|step-parent}",
+      "qualifiers": ["stepmother", "stepfather"],
+      "inverse_lexicon": ["stepchild", "stepchildren", "stepson", "stepdaughter"],
+      "implies": {
+        "stepmother": {"gender": "female"},
+        "stepfather": {"gender": "male"}
+      },
+      "rules": [
+        {
+          "path": ["spouse_of", "parent_of"],
+          "not": ["parent_of"],
+          "qualifier": "step-parent",
+          "by": {"attribute": "gender", "values": {"female": "stepmother", "male": "stepfather"}}
+        },
+        {
+          "path": ["partner_of", "parent_of"],
+          "not": ["parent_of"],
+          "qualifier": "step-parent",
+          "by": {"attribute": "gender", "values": {"female": "stepmother", "male": "stepfather"}}
+        }
+      ]
+    },
+    {
+      "name": "grandparent_of",
+      "description": "Subject is a parent of a parent of object; derived from parent_of, never stated when the parents are known. The qualifier names the subject's role and side (paternal grandmother).",
+      "domain": ["person"],
+      "range": ["person"],
+      "volatility": "low",
+      "lasting": true,
+      "lexicon": ["grandparent", "grandparents", "grandmother", "grandfather", "grandma", "grandpa", "granny"],
+      "render": "{subject} is {object}'s {qualifier|grandparent}",
+      "qualifiers": ["grandmother", "grandfather", "maternal grandmother", "paternal grandmother", "maternal grandfather", "paternal grandfather"],
+      "inverse_lexicon": ["grandchild", "grandchildren", "grandson", "granddaughter"],
+      "implies": {
+        "grandmother": {"gender": "female"},
+        "grandfather": {"gender": "male"},
+        "maternal grandmother": {"gender": "female"},
+        "paternal grandmother": {"gender": "female"},
+        "maternal grandfather": {"gender": "male"},
+        "paternal grandfather": {"gender": "male"}
+      },
+      "rules": [
+        {
+          "path": ["parent_of", "parent_of[mother]"],
+          "qualifier": "maternal grandparent",
+          "by": {"attribute": "gender", "values": {"female": "maternal grandmother", "male": "maternal grandfather"}}
+        },
+        {
+          "path": ["parent_of", "parent_of[father]"],
+          "qualifier": "paternal grandparent",
+          "by": {"attribute": "gender", "values": {"female": "paternal grandmother", "male": "paternal grandfather"}}
+        },
+        {
+          "path": ["parent_of", "parent_of"],
+          "qualifier": "grandparent",
+          "by": {"attribute": "gender", "values": {"female": "grandmother", "male": "grandfather"}}
+        }
+      ]
+    },
+    {
+      "name": "aunt_uncle_of",
+      "description": "Subject is a sibling of a parent of object, or married to one; derived from sibling_of, parent_of, and spouse_of. The qualifier names the subject's role (aunt, uncle).",
+      "domain": ["person"],
+      "range": ["person"],
+      "volatility": "low",
+      "lasting": true,
+      "lexicon": ["aunt", "aunts", "uncle", "uncles", "auntie"],
+      "render": "{subject} is {object}'s {qualifier|aunt or uncle}",
+      "qualifiers": ["aunt", "uncle"],
+      "inverse_lexicon": ["nephew", "nephews", "niece", "nieces"],
+      "implies": {
+        "aunt": {"gender": "female"},
+        "uncle": {"gender": "male"}
+      },
+      "rules": [
+        {
+          "path": ["sibling_of", "parent_of"],
+          "not": ["parent_of"],
+          "qualifier": "aunt or uncle",
+          "by": {"attribute": "gender", "values": {"female": "aunt", "male": "uncle"}}
+        },
+        {
+          "path": ["spouse_of", "sibling_of", "parent_of"],
+          "not": ["parent_of"],
+          "qualifier": "aunt or uncle",
+          "by": {"attribute": "gender", "values": {"female": "aunt", "male": "uncle"}}
+        }
+      ]
+    },
+    {
+      "name": "cousin_of",
+      "description": "Subject and object are children of siblings; derived from parent_of and sibling_of. Stored once, found from both sides.",
+      "domain": ["person"],
+      "range": ["person"],
+      "symmetric": true,
+      "volatility": "low",
+      "lasting": true,
+      "lexicon": ["cousin", "cousins", "first cousin"],
+      "render": "{subject} is {object}'s {qualifier|cousin}",
+      "qualifiers": ["cousin"],
+      "rules": [
+        {
+          "path": ["^parent_of", "sibling_of", "parent_of"],
+          "not": ["sibling_of"],
+          "qualifier": "cousin"
+        }
+      ]
+    },
+    {
+      "name": "in_law_of",
+      "description": "Subject is related to object through object's marriage or a sibling's; derived from spouse_of, parent_of, and sibling_of. The qualifier names the subject's role (mother-in-law, son-in-law, brother-in-law).",
+      "domain": ["person"],
+      "range": ["person"],
+      "volatility": "medium",
+      "lasting": true,
+      "lexicon": ["in-law", "in-laws", "mother-in-law", "father-in-law", "parents-in-law", "son-in-law", "daughter-in-law", "brother-in-law", "sister-in-law"],
+      "render": "{subject} is {object}'s {qualifier|in-law}",
+      "qualifiers": ["mother-in-law", "father-in-law", "parent-in-law", "son-in-law", "daughter-in-law", "child-in-law", "brother-in-law", "sister-in-law", "sibling-in-law"],
+      "implies": {
+        "mother-in-law": {"gender": "female"},
+        "father-in-law": {"gender": "male"},
+        "sister-in-law": {"gender": "female"},
+        "brother-in-law": {"gender": "male"},
+        "daughter-in-law": {"gender": "female"},
+        "son-in-law": {"gender": "male"}
+      },
+      "rules": [
+        {
+          "path": ["parent_of", "spouse_of"],
+          "qualifier": "parent-in-law",
+          "by": {"attribute": "gender", "values": {"female": "mother-in-law", "male": "father-in-law"}}
+        },
+        {
+          "path": ["spouse_of", "^parent_of"],
+          "qualifier": "child-in-law",
+          "by": {"attribute": "gender", "values": {"female": "daughter-in-law", "male": "son-in-law"}}
+        },
+        {
+          "path": ["sibling_of", "spouse_of"],
+          "qualifier": "sibling-in-law",
+          "by": {"attribute": "gender", "values": {"female": "sister-in-law", "male": "brother-in-law"}}
+        },
+        {
+          "path": ["spouse_of", "sibling_of"],
+          "qualifier": "sibling-in-law",
+          "by": {"attribute": "gender", "values": {"female": "sister-in-law", "male": "brother-in-law"}}
+        }
+      ]
+    },
+    {
+      "name": "sibling_of",
+      "description": "Subject is a sibling of object, and the qualifier names the subject's role (brother, half-sister). Stored once, found from both sides; derived from parent_of when a parent is shared.",
+      "domain": ["person"],
+      "range": ["person"],
+      "symmetric": true,
+      "volatility": "low",
+      "lasting": true,
+      "lexicon": ["sibling", "siblings"],
+      "render": "{subject} is {object}'s {qualifier|sibling}",
+      "qualifiers": ["brother", "sister", "twin", "twin brother", "twin sister", "half-brother", "half-sister", "stepbrother", "stepsister"],
+      "rules": [
+        {
+          "path": ["^parent_of", "parent_of"],
+          "qualifier": "sibling",
+          "min_paths": 2,
+          "by": {"attribute": "gender", "values": {"female": "sister", "male": "brother"}}
+        },
+        {
+          "path": ["^parent_of", "parent_of"],
+          "qualifier": "half-sibling",
+          "max_paths": 1,
+          "min_degree": 2,
+          "by": {"attribute": "gender", "values": {"female": "half-sister", "male": "half-brother"}}
+        },
+        {
+          "path": ["^parent_of", "parent_of"],
+          "qualifier": "sibling"
+        }
+      ]
+    },
+    {
+      "name": "owns",
+      "description": "Subject owns object.",
+      "domain": ["*"],
+      "range": ["*"],
+      "volatility": "medium",
+      "lexicon": ["own", "owns", "owned", "buy", "bought", "purchase", "purchased", "acquired"],
+      "render": "{subject} owns {object}[[ ({qualifier})]]",
+      "ends": ["considering"]
+    },
+    {
+      "name": "prefers",
+      "description": "Subject prefers object.",
+      "domain": ["person"],
+      "range": ["*"],
+      "volatility": "medium",
+      "lexicon": ["prefer", "prefers", "favourite", "favorite", "likes", "like", "enjoys"],
+      "render": "{subject} prefers {object}[[ ({qualifier})]]"
+    },
+    {
+      "name": "dislikes",
+      "description": "Subject dislikes object.",
+      "domain": ["person"],
+      "range": ["*"],
+      "volatility": "medium",
+      "lexicon": ["dislike", "dislikes", "hates", "hate"],
+      "render": "{subject} dislikes {object}[[ ({qualifier})]]"
+    },
+    {
+      "name": "uses",
+      "description": "Subject uses object technology or thing.",
+      "domain": ["*"],
+      "range": ["*"],
+      "volatility": "medium",
+      "lexicon": ["use", "uses", "using", "targets", "target", "built"],
+      "render": "{subject} uses {object}[[ ({qualifier})]]"
+    },
+    {
+      "name": "decided",
+      "description": "Subject made the decision object: a decision in words, or the thing decided on.",
+      "domain": ["*"],
+      "range": ["literal", "*"],
+      "volatility": "low",
+      "lexicon": ["decide", "decided", "decision", "chose", "choice", "pick", "picked"],
+      "render": "{subject} decided {object}[[ ({qualifier})]]",
+      "ends": ["considering"]
+    },
+    {
+      "name": "considering",
+      "description": "Subject is considering object: a leaning, plan, or intention in words, or the thing it is about; not a decision.",
+      "domain": ["*"],
+      "range": ["literal", "*"],
+      "volatility": "high",
+      "lexicon": ["considering", "consider", "considers", "leaning", "intend", "intends", "intention", "plan", "plans", "planning", "weighing", "thinking"],
+      "render": "{subject} is considering {object}[[ ({qualifier})]]"
+    },
+    {
+      "name": "related_to",
+      "description": "Subject is related to object (generic).",
+      "domain": ["*"],
+      "range": ["*"],
+      "symmetric": true,
+      "volatility": "medium",
+      "lexicon": ["related", "relation"],
+      "render": "{subject} is related to {object}[[ ({qualifier})]]"
+    },
+    {
+      "name": "knows",
+      "description": "Subject knows object person.",
+      "domain": ["person"],
+      "range": ["person"],
+      "symmetric": true,
+      "volatility": "medium",
+      "lexicon": ["know", "knows", "met", "colleague"],
+      "render": "{subject} knows {object}[[ ({qualifier})]]"
+    },
+    {
+      "name": "part_of",
+      "description": "Subject is part of object.",
+      "domain": ["*"],
+      "range": ["*"],
+      "volatility": "medium",
+      "containment": true,
+      "lexicon": ["part", "within"],
+      "render": "{subject} is part of {object}"
+    },
+    {
+      "name": "located_in",
+      "description": "Subject place or organization is located in object place, and places nest (a town in a canton in a country), so several current values are expected.",
+      "domain": ["place", "organization"],
+      "range": ["place"],
+      "volatility": "low",
+      "containment": true,
+      "lexicon": ["located", "headquartered", "headquarters", "based"],
+      "render": "{subject} is located in {object}"
+    }
+  ],
+  "groups": [
+    {
+      "name": "family",
+      "description": "The kinship relations: parents, marriages and partnerships, siblings, and what is derived from them.",
+      "members": [
+        "parent_of",
+        "spouse_of",
+        "partner_of",
+        "engaged_to",
+        "step_parent_of",
+        "grandparent_of",
+        "aunt_uncle_of",
+        "cousin_of",
+        "in_law_of",
+        "sibling_of"
+      ]
+    }
+  ]
+}

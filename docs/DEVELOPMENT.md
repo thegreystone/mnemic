@@ -109,8 +109,7 @@ still works over the whole store, since a merge or a new sibling can change deri
   served store has left the runtime and the default model under `~/.mnemic/models`, the server pom's
   `local-embedder-*` profiles set both for the test JVMs, so those tests run there without any environment
   (2026-09-27); the profiles are activated by the runtime file's presence, and the version in their paths is
-  spelled out because a profile activation cannot read a property. `MNEMIC_VEC_LIBRARY` (the sqlite-vec loadable
-  library) gates only the sqlite-vec integration test. `MNEMIC_BAKEOFF_MODELS` (a directory of model folders)
+  spelled out because a profile activation cannot read a property. `MNEMIC_BAKEOFF_MODELS` (a directory of model folders)
   gates `TokenizerReferenceTest` and widens `OwnerAliasSampleTest`. `MNEMIC_EMBED_MIRROR` (a directory laid out
   like the model's Hugging Face repository) gates the two first-use download tests: scenario F2 in
   `SemanticRecallTest` and the one in `NativeImageSanityIT`.

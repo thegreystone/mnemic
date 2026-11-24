@@ -5,9 +5,11 @@ description: Keep and recall what the user tells you across conversations throug
 
 <!-- Copyright (C) 2026 Marcus Hirt. See LICENSE for license details. -->
 
+Tool names below are the server names; clients may add a namespace such as `mcp__plugin_mnemic_mnemic__recall`.
+
 # Mnemic memory protocol
 
-Mnemic keeps what the user tells you across conversations. It is local and never calls a model. Tool names below are the server names; clients may add a namespace such as `mcp__plugin_mnemic_mnemic__recall`. Follow this loop:
+Mnemic keeps what the user tells you across conversations. It is local and never calls a model. Follow this loop:
 
 1. RECALL BEFORE YOU ANSWER. Open a conversation with `recall` and no query: the briefing. Before answering
    anything about people, projects, places, decisions, or dates, call `recall` with the question in words.

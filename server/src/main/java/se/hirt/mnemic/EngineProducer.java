@@ -79,8 +79,7 @@ public class EngineProducer {
 		holder = embedderHolder(config);
 		Engine.Options options = Engine.Options.of(home, version).withSoftLimit(config.observation().softLimitChars())
 				.withOwner(config.owner().orElse(null), config.ownerIdentity())
-				.withProposer(proposer, config.proposer().batch())
-				.withVecLibrary(config.vecLibrary().map(MnemicMain::expandHome).orElse(null)).withEmbedder(holder)
+				.withProposer(proposer, config.proposer().batch()).withEmbedder(holder)
 				.withLang(Lang.of(config.language().orElse("en")));
 		try {
 			Engine created = new Engine(options);

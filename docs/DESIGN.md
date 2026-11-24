@@ -95,7 +95,7 @@ exist as of 2026-09-12.
 
 ## Knowledge model
 
-The canonical model, as implemented (schema 18):
+The canonical model, as implemented (schema 37):
 
 - **Entity** — an identifiable person, project, organization, place, concept, or other subject, with a type and
   aliases; the owner is an entity that first-person references resolve to.
@@ -113,7 +113,7 @@ The canonical model, as implemented (schema 18):
   uncertain place containment), held until the assistant answers.
 - **Predicate registry** — the vocabulary facts are written in: seed predicates plus caller-defined ones, each with
   description, domain, range, functional and symmetric flags, allowed qualifiers, volatility, aliases, a lexicon of
-  cue words, and a render template per language.
+  cue words, and a render template per language (`en`, `de`, `sv`, `fr`, `es`).
 
 Relations are not a separate object: a fact under a relational predicate is the typed connection between two
 entities. Provenance is carried by the observation's source columns and the fact-to-observation links; there is no
@@ -191,7 +191,7 @@ remember   recall   inspect   correct   forget   consolidate   status
 `remember` stores an observation with its reading, or attaches a reading to one stored without (`observation_id`);
 `inspect` shows anything by id or name; `correct` changes anything by id, including withdrawing a fact or retiring
 an observation. Every stored thing has one kind of id (`obs-`, `f-`, `ent-`, `evt-`, `q-`, `pred:`, `event:`,
-`type:`), so the assistant chooses a target, never a tool. Each tool's description tells the assistant when to use it
+`type:`, `group:`), so the assistant chooses a target, never a tool. Each tool's description tells the assistant when to use it
 and when not to; the schemas are in `MnemicTools.java` and summarised for users in the [README](../README.md).
 
 ## Persistence and vector search
@@ -201,9 +201,7 @@ compatible with the zero-infrastructure deployment goal.
 
 Vector search is local and, as decided after measurement, an exact scan: one float32 vector per observation chunk
 and per fact-rendering variant, per model, in the `embedding` table, scored by dot product in Java. At personal-knowledge scale this
-is faster than an approximate-nearest-neighbour index would be to maintain. The sqlite-vec extension can be loaded
-(`MNEMIC_VEC_LIBRARY`; `status` reports its version) and was proven to work inside the native image, but it is not
-used for search as of 2026-09-12; it is the fallback for a store that outgrows the scan. The vectors are an
+is faster than an approximate-nearest-neighbour index would be to maintain. The vectors are an
 acceleration structure: `consolidate` re-embeds whatever the current model has not seen.
 
 ## Embeddings
@@ -234,13 +232,13 @@ Key principles include:
 
 ## Technology choices
 
-As built (versions from the POMs, 2026-09-12):
+As built (versions from the POMs):
 
 - Java 25, GraalVM 25 for the native image
-- Quarkus 3.39.2 with `quarkus-mcp-server-stdio` 2.0.0 (MCP over stdio)
+- Quarkus 3.39.4 with `quarkus-mcp-server-stdio` 2.0.1 (MCP over stdio)
 - SQLite through `sqlite-jdbc` 3.53.4.0, FTS5 included; schema migrations with checksums, applied in place
 - ONNX Runtime 1.29.0, bundled per platform at build time, called through the Java FFM API
-- an exact float32 vector scan in Java; sqlite-vec loadable but unused for search
+- an exact float32 vector scan in Java
 - one local embedding model; no pluggable embedding providers (see Embeddings)
 
 These choices give a small, portable, zero-infrastructure executable consistent with Mnemic's local-first design.
@@ -248,7 +246,7 @@ These choices give a small, portable, zero-infrastructure executable consistent 
 ## Status
 
 The design work this document originally left open has been done and is recorded, with the measurements that
-decided it, in the project's internal decision record (the measurements are in [BENCHMARKS.md](BENCHMARKS.md)): the schema (eighteen migrations), temporal and provenance semantics,
+decided it, in the project's internal decision record (the measurements are in [BENCHMARKS.md](BENCHMARKS.md)): the schema (37 migrations), temporal and provenance semantics,
 ingestion and consolidation, hybrid recall ranking, the tool schemas, the local embedder and vector scan, the
 data-home layout and migrations, the memory protocol (`protocol/instructions.md`, served in the MCP initialize reply,
 `protocol/guide.md`, served by `inspect('guide')`, and `protocol/extraction-spec.md`, all in the server
@@ -256,5 +254,5 @@ resources), and staleness flagged from the time since a fact was last confirmed 
 question: such facts are annotated with their last confirmation and listed by `consolidate` for review; confidence
 itself does not decay).
 
-Still open as of 2026-09-12: an explicit permissions and threat model beyond the principles under Security and
+Still open: an explicit permissions and threat model beyond the principles under Security and
 privacy, and backup and recovery beyond copying `mnemic.db`.

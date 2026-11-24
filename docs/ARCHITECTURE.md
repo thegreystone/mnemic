@@ -19,10 +19,10 @@ The server has no runtime dependency on any vendor SDK. Everything that talks to
 ## Layers
 
 ```text
-MnemicTools ─── the MCP tool surface (argument parsing, reply shapes); ToolSupport wraps errors
+MnemicTools ─── the MCP tool surface (argument parsing, dispatch); ToolViews shapes replies, ToolSupport wraps errors
      │
-   Engine ───── one instance per data home; the operations that span services (remember, correct, consolidate)
-     │
+   Engine ───── one instance per data home; orchestrates write/read paths across services and package-private
+     │          collaborators (CorrectionCoordinator, StoreMaintenance, SemanticIndexer, DerivationGate)
      ├── observation   ObservationService: the verbatim store
      ├── knowledge     entities, predicates, events, facts, questions; the write path and the read path
      ├── recall        query analysis, the channels, fusion, rendering
@@ -40,8 +40,12 @@ code path that is measured is the code path that ships.
 
 `Engine` is opened from an `Engine.Options` record (data home, owner, clock, proposer, embedder, language) and owns
 one `Database`. It wires the knowledge layer through `Knowledge.open(...)`, which builds the services in dependency
-order and keeps the package-private helpers (`FactLedger`, `FactQuestions`, `ConflictCheck`) inside the package.
-The engine exposes the read-side services to the tool surface and the tests, and keeps the write side to itself.
+order and keeps the package-private helpers (`FactLedger`, `FactQuestions`, `ConflictCheck`, `ProposalApplier`,
+`FactCorrector`, `FactForgetter`, `PredicateSeeds`, `PredicateGroups`, `PredicateCueMatcher`) inside the package.
+Within `se.hirt.mnemic`, `Engine` focuses on lifecycle, `remember`/`reread`/`forget`, briefing/reporting, and delegates
+corrections (`CorrectionCoordinator`), consolidation/rebuilds (`StoreMaintenance`), embedding (`SemanticIndexer`), and
+derivation gating (`DerivationGate`) to package-private collaborators. The engine exposes the read-side services to the
+tool surface and the tests, and keeps the write side to itself.
 
 `EngineProducer` is the CDI wiring: it reads `MnemicConfig`, sets up the proposer and the `EmbedderHolder`, and
 produces the one engine per process. The holder starts the model download or load on a daemon thread, so the server
@@ -66,11 +70,12 @@ log. Two operations keep it so.
   new reading applies. This is for a reading that was wrong (a mis-filed event, a sentence where the type goes, a
   wrong object). `correct` is for when the user says the world is otherwise: new information, dated now, with its
   own record. A correction record itself is never re-read.
-- **Rebuilding.** `consolidate(rebuild: true)` (`Engine.rebuild`) takes every derived row back, newest entry first,
-  then reads every observation again in order: correction records do their work again against the fact their key
-  now names (or, when none matches, keep what the user stated as a fact of the record and are reported as
-  `unmatched`), and answers once given to an observation's questions are given again when the same question comes
-  back. Entities keep their ids; facts and events get new ones. The projection is therefore a cache of the log.
+- **Rebuilding.** `consolidate(rebuild: true)` (`Engine.rebuild`, implemented by `StoreMaintenance`) takes every
+  derived row back, newest entry first, then reads every observation again in order: correction records do their work
+  again against the fact their key now names (or, when none matches, keep what the user stated as a fact of the record
+  and are reported as `unmatched`), and answers once given to an observation's questions are given again when the same
+  question comes back. Entities keep their ids; facts and events get new ones. The projection is therefore a cache of
+  the log.
 - **Deriving.** Derived predicates (`Deriver`, EVALUATION.md family K) are the projection one layer further: after
   anything that changes facts, and at start, the rules are walked over the current facts and the derived rows are
   made, rewritten, or invalidated to match, each resting on the base facts it was walked over. They are never
@@ -97,10 +102,10 @@ remember(text, source, proposal)
   ObservationService.remember      store the text verbatim (idempotency key, duplicate detection)
   QuestionResolver.resolve         apply the caller's answers to open questions first
   FactService.apply                the proposal, entity by entity, event by event, fact by fact
-  Engine.embed                     vectors for the observation and the new facts, when an embedder is present
+  SemanticIndexer.embed            vectors for the observation and the new facts, when an embedder is present
 ```
 
-`FactService.apply` is the one place a proposal turns into rows:
+`FactService.apply` (backed by `ProposalApplier`) is the one place a proposal turns into rows:
 
 0. **Vocabulary** the proposal defines (`event_types`, `entity_types`) is registered first, so what follows can
    use it; a definition that names an unknown predicate or parent is skipped with a warning. A term the proposal
@@ -124,9 +129,9 @@ remember(text, source, proposal)
 4. **Closures** are facts of mode `closure` so that history and conflicts apply to them unchanged.
 
 Every status change of a fact goes through `FactLedger` (`fact_source` for provenance, `supersession` for the
-change), and nothing is deleted except by `forget`. Corrections (`FactService.correct`, `FactService.retract`) build a
-replacement proposal from the original row and send it through the same path, so history reads the same whether a
-fact was corrected by the user or superseded by an event.
+change), and nothing is deleted except by `forget`. Corrections (`FactService.correct`, `FactService.retract`,
+implemented by `FactCorrector`) build a replacement proposal from the original row and send it through the same
+path, so history reads the same whether a fact was corrected by the user or superseded by an event.
 
 `Consolidator` is the housekeeping pass: merges entities that share an alias, dates ended facts from closing events
 that arrived later, settles entity questions whose subject now exists, and folds duplicate facts and events.
@@ -161,13 +166,13 @@ questions, within the budget.
 | Class | Role |
 |---|---|
 | `EntityService` | entities and aliases: the owner, the resolution ladder, query-time spotting, merges |
-| `PredicateRegistry` | the seed vocabulary, caller definitions, resolution of proposed names, cues by vocabulary and by meaning (a group word cues every member), predicate groups, the lasting flag, corrections |
+| `PredicateRegistry` | facade over predicate CRUD, caller definitions, resolution of proposed names, rules/implies/ends metadata; delegates seeds (`PredicateSeeds`), groups (`PredicateGroups`), and cue matching (`PredicateCueMatcher`) |
 | `EventTypeRegistry` | which event types open, close, supersede, or end an entity; caller definitions, corrections |
 | `EntityTypeRegistry` | the kinds of entity: synonyms, type words, nesting (a country is a place); caller definitions, corrections |
 | `Vocabulary` | what the registries share: JSON list columns, list-valued corrections, the change log (package-private) |
 | `EventService` | events stored once, their effects on facts, lookups |
 | `QuestionService` | storage of the question queue |
-| `FactService` | the write path: a proposal to rows, corrections, retractions, forgetting |
+| `FactService` | facade over the write path: delegates proposal application (`ProposalApplier`), corrections/replays (`FactCorrector`), and forgetting/reopening (`FactForgetter`) |
 | `FactQueries` | the read path: by id, entity, observation; the probe over valid time; history; the review list |
 | `FactRenderer` | the words of a fact from its columns; re-rendering after template or language changes |
 | `FactLedger` | provenance links and status changes (package-private) |
@@ -177,7 +182,7 @@ questions, within the budget.
 | `Consolidator` | housekeeping |
 | `Containment` | where places lie, from `located_in` facts |
 | `Bounds` | a valid-time interval with precision and provenance; parsing of stated and relative dates |
-| `Names`, `Lang` | text normalisation; the language of the fact layer |
+| `Names`, `Lang`, `LanguagePack` | text normalisation; the language of the fact layer and JSON language packs (`lang/*.json`) |
 | `Knowledge` | wires the above over one database |
 
 Records `Entity`, `Fact`, `Event`, `Question`, `Supersession`, `Predicate` are the rows as the rest of the code
@@ -211,7 +216,7 @@ disposable and rebuilt by `Database.rebuildIndexes`.
 (`OrtRuntime`), with the tokenizer read from the model's own `tokenizer.json` (`Unigram` for sentencepiece
 vocabularies, `Bpe` for byte-level merges). The runtime library ships inside the build (`OrtLibrary`, pinned by
 hash); the model is fetched on first use (`ModelFetcher`, pinned by hash) into a models directory shared by every
-data home. `VectorStore` keeps vectors beside their rows and searches by scan; sqlite-vec is loaded when configured.
+data home. `VectorStore` keeps vectors beside their rows and searches by exact scan.
 `OwnerAlias` gives a fact about the owner a second, first-person vector so a first-person question lands on it.
 
 ## Extension points
@@ -219,17 +224,18 @@ data home. `VectorStore` keeps vectors beside their rows and searches by scan; s
 - **A language model vendor**: one `ModelProvider` implementation and one line in
   `META-INF/services/se.hirt.mnemic.model.ModelProvider`. The server ships Anthropic and OpenAI-compatible
   (LM Studio, Ollama, OpenAI) providers.
-- **A predicate**: a definition in a proposal, or a seed entry in `PredicateRegistry.seed()`; German templates in
-  `RENDERS_DE`.
+- **A predicate**: a definition in a proposal, or a seed entry in `server/src/main/resources/knowledge/seed-predicates.json`
+  (loaded by `PredicateSeeds`); per-language templates live in `server/src/main/resources/lang/*.json`.
 - **A predicate group**: `groups` in a predicate's definition or `correct(pred:x, {groups})` registers the group
-  from its first mention; `correct(group:x, {description, lexicon, groups})` says more; a seed group is an
-  entry in `PredicateRegistry.seedGroups()`, refreshed at start unless the owner regrouped a member.
+  from its first mention; `correct(group:x, {description, lexicon, groups})` says more; seed groups live in
+  `knowledge/seed-predicates.json` and are refreshed at start by `PredicateGroups` unless the owner regrouped a member.
 - **An event type or an entity type**: a definition in a proposal (`event_types`, `entity_types`), corrected
   through `correct`; or a seed entry in the registry's `seed()`. The three registries read their table once at
   start into hash maps and write through on every registration and correction, so the next start sees what this
   one defined.
-- **A language of the fact layer**: a `Lang` constant with its suffixes and words, templates in
-  `PredicateRegistry`, and first-person rules in `OwnerAlias`.
+- **A language of the fact layer**: a JSON pack in `server/src/main/resources/lang/<code>.json` (loaded by
+  `LanguagePack`), carrying suffixes, words, predicate/event render templates, and first-person rules for `OwnerAlias`
+  (currently `en`, `de`, `sv`, `fr`, `es`).
 - **A recall channel**: a method on `RecallService` that ranks observation ids into `Channels` and a line in
   `fuse`.
 - **A migration**: the next `Vnnn__name.sql`, listed in `Migrations.MIGRATIONS`; never edit an applied one.
@@ -248,4 +254,4 @@ data home. `VectorStore` keeps vectors beside their rows and searches by scan; s
 Scenario tests under `server/src/test/.../scenario` are tagged with the scenario ids of
 [EVALUATION.md](EVALUATION.md) and drive the engine without a container through `TestHomes`. `MnemicToolsTest` is
 the one `@QuarkusTest`. `NativeImageSanityIT` starts the native binary over stdio. The bench module's
-`HarnessTest` covers ingestion, metrics, and the proposer plumbing with a scripted model.
+`LongMemEvalRunner` runs the official dataset through `Engine` directly.
