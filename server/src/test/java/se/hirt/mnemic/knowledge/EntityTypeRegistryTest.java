@@ -70,7 +70,7 @@ class EntityTypeRegistryTest {
 					"a country drops the type words of the place it is");
 			assertEquals(List.of("kanton"), types.identityTokens("Kanton", "place"),
 					"a name that is only a type word keeps it");
-			assertEquals(15, types.all().size());
+			assertEquals(16, types.all().size());
 		}
 	}
 
@@ -251,7 +251,7 @@ class EntityTypeRegistryTest {
 			assertEquals("place", canton.parent());
 			assertEquals(List.of("kanton"), canton.synonyms());
 			assertEquals("canton", reopened.canonical("kanton"));
-			assertEquals(16, reopened.all().size());
+			assertEquals(17, reopened.all().size());
 		}
 	}
 

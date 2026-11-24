@@ -75,6 +75,12 @@ public final class QuestionService {
 				.stream().map(Question::from).toList());
 	}
 
+	/** Every question of a kind, whatever its status, oldest first. */
+	public List<Question> ofKind(String kind) {
+		return db.read(tx -> tx.query("SELECT * FROM question WHERE kind = ? ORDER BY id", kind).stream()
+				.map(Question::from).toList());
+	}
+
 	public long openCount() {
 		return db.read(tx -> tx.queryLong("SELECT COUNT(*) FROM question WHERE status = 'open'"));
 	}

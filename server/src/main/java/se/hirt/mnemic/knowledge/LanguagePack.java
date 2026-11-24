@@ -81,11 +81,19 @@ public final class LanguagePack {
 	}
 
 	/** Language-specific question heuristics used by {@code Query} and {@code StructuredProbe}. */
+	/**
+	 * {@code tenseFiller}: words that only place a question in the present ("current", "now"), which the valid-time
+	 * rules already do; as search terms they matched every observation that said "current" about anything.
+	 * {@code homographs}: a word and the words before which it is another word ("own" after "my", "his": the adjective,
+	 * not the verb the {@code owns} cue reads). {@code kindCopulaPattern}: "what are my cars", the kind after the
+	 * copula.
+	 */
 	public record QueryCues(Set<String> markers, Set<String> questionWords, Set<String> ofWords, Set<String> andWords,
 			Set<String> polar, Set<String> past, Set<String> perfectAuxiliaries, Set<String> pastParticiples,
 			Set<String> pastMarkers, String ambiguousWhereWasWord, Set<String> ambiguousWhereWasVerbs,
 			Pattern forwardPattern, Set<String> polarFiller, Set<String> kindFiller, Pattern kindPhrasePattern,
-			Set<String> selfPronouns) {
+			Set<String> selfPronouns, Set<String> tenseFiller, Map<String, Set<String>> homographs,
+			Pattern kindCopulaPattern) {
 
 		/**
 		 * Whether {@code first} followed by {@code second} is an ambiguous where/was opener acting as "where" (e.g.
@@ -205,6 +213,14 @@ public final class LanguagePack {
 		return Registry.ALL_AND;
 	}
 
+	/**
+	 * Homographs across all languages: a word, and the words before which it is another word ("own" after "my"). A text
+	 * searched may be in any language, whatever the question's.
+	 */
+	public static Map<String, Set<String>> allHomographs() {
+		return Registry.HOMOGRAPHS;
+	}
+
 	/** Pipe-joined temporal suffix starter words across all languages. */
 	public static String allSuffixWordsRegex() {
 		return Registry.SUFFIX_WORDS_REGEX;
@@ -250,6 +266,20 @@ public final class LanguagePack {
 		static final Map<Lang, LanguagePack> PACKS = loadAll();
 		static final Set<String> ALL_OF = buildAllOf();
 		static final Set<String> ALL_AND = buildAllAnd();
+		static final Map<String, Set<String>> HOMOGRAPHS = buildHomographs();
+
+		private static Map<String, Set<String>> buildHomographs() {
+			var out = new LinkedHashMap<String, Set<String>>();
+			for (LanguagePack p : PACKS.values()) {
+				p.query().homographs().forEach((word, before) -> out.merge(word, before, (a, b) -> {
+					var both = new LinkedHashSet<>(a);
+					both.addAll(b);
+					return Set.copyOf(both);
+				}));
+			}
+			return Map.copyOf(out);
+		}
+
 		static final String SUFFIX_WORDS_REGEX = buildSuffixWordsRegex();
 		static final Pattern OBJECT_PREPOSITION = buildObjectPrepositionPattern();
 
@@ -344,10 +374,17 @@ public final class LanguagePack {
 		Set<String> kindFiller = normSet(node.path("kind_filler"));
 		Pattern kindPhrase = compileKindPhrase(stringList(node.path("kind_leading_prepositions")),
 				stringList(node.path("kind_question_words")), stringList(node.path("kind_verbs")));
+		Pattern kindCopula = compileKindCopula(stringList(node.path("kind_leading_prepositions")),
+				stringList(node.path("kind_question_words")), stringList(node.path("kind_verbs")));
 		Set<String> selfPronouns = normSet(node.path("self_pronouns"));
+		Set<String> tenseFiller = normSet(node.path("tense_filler"));
+		var homographs = new LinkedHashMap<String, Set<String>>();
+		for (Map.Entry<String, JsonNode> e : node.path("homographs").properties()) {
+			homographs.put(Names.norm(e.getKey()), normSet(e.getValue()));
+		}
 		return new QueryCues(markers, questionWords, ofWords, andWords, polar, past, perfectAuxiliaries,
 				pastParticiples, pastMarkers, ambigWord, ambigVerbs, forward, polarFiller, kindFiller, kindPhrase,
-				selfPronouns);
+				selfPronouns, tenseFiller, Map.copyOf(homographs), kindCopula);
 	}
 
 	private static FactTemplates parseFact(JsonNode node, String path) {
@@ -438,6 +475,21 @@ public final class LanguagePack {
 		sb.append("(?:").append(joinQuotedPhrases(questionWords)).append(")\\s+(.+?)\\s+(?:")
 				.append(joinQuotedPhrases(verbs)).append(")(?![\\p{L}\\p{N}])");
 		return Pattern.compile(sb.toString(), Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CHARACTER_CLASS);
+	}
+
+	/** "what are my current cars": the question word, a verb, and the rest of the question, which names the kind. */
+	private static Pattern compileKindCopula(List<String> preps, List<String> questionWords, List<String> verbs) {
+		if (questionWords.isEmpty() || verbs.isEmpty()) {
+			return NEVER;
+		}
+		var sb = new StringBuilder("^[^\\p{L}\\p{N}]*");
+		if (!preps.isEmpty()) {
+			sb.append("(?:(?:").append(joinQuotedPhrases(preps)).append(")\\s+)?");
+		}
+		sb.append("(?:").append(joinQuotedPhrases(questionWords)).append(")\\s+(?:").append(joinQuotedPhrases(verbs))
+				.append(")\\s+(.+)$");
+		return Pattern.compile(sb.toString(),
+				Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CHARACTER_CLASS | Pattern.DOTALL);
 	}
 
 	private static String joinQuotedPhrases(List<String> phrases) {

@@ -37,11 +37,15 @@ State as of 2026-09-25, branch `api-review`.
 |---|---|---|---|---|---|---|
 | `m0-session` | 2026-09-07 | FTS5 BM25 over observations, nothing else | 0.857 [0.830, 0.883] | 0.895 [0.871, 0.918] | | |
 | `api-review-lexical` | 2026-09-24 | this branch, no proposer: structured probe, BM25 over renderings and observations, RRF | 0.862 [0.835, 0.888] | 0.891 [0.865, 0.915] | 0 | 0 |
+| `cars-lexical` | 2026-11-24 | no proposer, after the T26–T30 recall fixes: "current"/"now" no search terms, "own" after a possessive not the verb | 0.865 [0.839, 0.891] | 0.891 [0.865, 0.915] | +0.004 [0.000, +0.011] | 0.000 [0.000, 0.000] |
 | `v031-facts-local-qwen9b-500` | 2026-09-22 | 0.3.1 release, facts from the local Qwen 3.5 9B (Q4_K_M) | 0.889 [0.864, 0.911] | 0.919 [0.896, 0.939] | **+0.030 [+0.009, +0.053]** | **+0.034 [+0.015, +0.055]** |
 | `api-review-facts-local-qwen9b-500` | 2026-09-25 | this branch, the same 9B proposals (23,717 of 23,867 from the cache) | 0.889 [0.865, 0.912] | 0.920 [0.898, 0.940] | **+0.032 [+0.011, +0.055]** | **+0.036 [+0.017, +0.057]** |
 
 The lexical engine on this branch is the same as before, question for question (paired difference 0.000
-against the 2026-09-07 lexical run). With facts, the branch is one question better than the 0.3.1 release at
+against the 2026-09-07 lexical run). `cars-lexical` is paired against `api-review-lexical`: the ranking changed
+on 29 questions, every one of them containing "current", "currently", "now", or "own"; mean recall rose on four
+("How many tanks do I currently have" 0.33 → 1.0) and fell on none. Without facts it does not exercise the
+kind verdict, the owner gate, or the folding of correction records. With facts, the branch is one question better than the 0.3.1 release at
 each cutoff and none worse (paired +0.002 [0.000, +0.006] at both), so the branch's changes, which are about
 what an assistant does with the store, neither gain nor lose at the retrieval level. The 150 proposals not in
 the cache were regenerated; 34 failed on the model's context size, as in the earlier runs. Recall p50 was 9 ms

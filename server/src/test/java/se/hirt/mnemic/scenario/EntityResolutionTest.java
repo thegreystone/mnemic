@@ -53,8 +53,16 @@ class EntityResolutionTest {
 					proposal().entity("e1", "Hooli", "organization").fact("self", "works_at", "e1"));
 			remember(e, "HooLi moved me to the platform org.",
 					proposal().entity("e1", "HooLi", "organization").fact("self", "works_at", "e1"));
-			remember(e, "HLI is headquartered in New York.", proposal().entity("e1", "HLI", "organization", "Hooli")
-					.entity("e2", "New York", "place").fact("e1", "located_in", "e2"));
+			RememberOutcome hli = remember(e, "HLI is headquartered in New York.",
+					proposal().entity("e1", "HLI", "organization", "Hooli").entity("e2", "New York", "place").fact("e1",
+							"located_in", "e2"));
+			// A name nobody carries with an alias one thing carries: a name may be shared, so whether HLI is that
+			// Hooli is asked, never assumed (2026-11-24); the answer adds HLI to its names.
+			Map<String, Object> asked = hli.applied().questions().getFirst();
+			assertEquals("entity_resolution", asked.get("kind"), asked.toString());
+			String hooliRef = e.entities().byRef("Hooli").orElseThrow().ref();
+			assertTrue(asked.toString().contains(hooliRef), asked.toString());
+			e.answer(List.of(new Resolve(asked.get("id").toString(), hooliRef)));
 			List<Entity> spotted = e.entities().spot("HLI");
 			assertEquals(1, spotted.size());
 			Entity hooliEntity = spotted.getFirst();
@@ -196,7 +204,7 @@ class EntityResolutionTest {
 
 	@Test
 	@Scenario("B3")
-	void sameNameDifferentTypeIsAskedOnce() {
+	void sameNameDifferentTypeIsAskedAtEveryUntypedMention() {
 		try (Engine e = engine("b3")) {
 			remember(e, "I'm reading Java Concurrency in Practice.",
 					proposal().entity("e1", "Java Concurrency in Practice", "book").fact("self", "prefers", "e1"));
@@ -221,15 +229,18 @@ class EntityResolutionTest {
 					proposal().entity("e1", "Java", "place").fact("self", "prefers", "e1"));
 			assertTrue(again.applied().questions().isEmpty(), again.applied().questions().toString());
 			assertEquals("place", e.entities().byRef(again.applied().entities().getFirst().id()).orElseThrow().type());
-			// Untyped, the name fits both: asked, and the answer settles every later untyped mention.
+			// Untyped, the name fits both: asked, and asked again at the next untyped mention, which may mean the
+			// other one (2026-11-24: every mention, where one answer used to settle the rest).
 			RememberOutcome bare = remember(e, "Java again.", proposal().fact("self", "prefers", "Java"));
 			Map<String, Object> q2 = bare.applied().questions().getFirst();
 			assertEquals("entity_resolution", q2.get("kind"), q2.toString());
 			e.answer(List.of(new Resolve(q2.get("id").toString(), tech.ref())));
-			RememberOutcome settled = remember(e, "Java once more.", proposal().fact("self", "uses", "Java"));
-			assertTrue(settled.applied().questions().isEmpty(), "asked once: " + settled.applied().questions());
 			assertEquals(tech.id(),
-					e.facts().factsOfObservation(settled.observation().observationId()).getFirst().objectId());
+					e.facts().factsOfObservation(bare.observation().observationId()).getFirst().objectId());
+			RememberOutcome again2 = remember(e, "Java once more.", proposal().fact("self", "uses", "Java"));
+			Map<String, Object> q3 = again2.applied().questions().getFirst();
+			assertEquals("entity_resolution", q3.get("kind"), "asked again: " + again2.applied());
+			assertTrue(again2.applied().facts().isEmpty(), "held until answered");
 		}
 	}
 

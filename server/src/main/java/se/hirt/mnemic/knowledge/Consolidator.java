@@ -39,14 +39,15 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Housekeeping over stored knowledge (EXTRACTION.md, Layer 3; EVALUATION.md G2, G3, J6): merges entities that share an
- * alias, closes facts whose closing event arrived later, settles entity questions whose subject now exists, folds
- * duplicate facts and events, and lists what a caller should look at. A dry run reports without changing anything.
+ * Housekeeping over stored knowledge (EXTRACTION.md, Layer 3; EVALUATION.md G2, G3, J6): asks whether entities that
+ * share an alias are one (never merging unasked), closes facts whose closing event arrived later, settles entity
+ * questions whose subject now exists, folds duplicate facts and events, and lists what a caller should look at. A dry
+ * run reports without changing anything.
  */
 public final class Consolidator {
 
 	/** What consolidation did or would do. */
-	public record Outcome(List<Map<String, Object>> merges, List<Map<String, Object>> nameCollisions, int reclosed,
+	public record Outcome(List<Map<String, Object>> sameEntity, List<Map<String, Object>> nameCollisions, int reclosed,
 			List<Map<String, Object>> inferredVocabulary, List<Map<String, Object>> similarVocabulary,
 			List<Map<String, Object>> descriptiveEvents, List<Map<String, Object>> unusedVocabulary,
 			List<Map<String, Object>> unresolvedDerivations, List<Map<String, Object>> misfiledRelations,
@@ -67,11 +68,13 @@ public final class Consolidator {
 	private final FactRenderer renderer;
 	private final QuestionService questions;
 	private final Deriver deriver;
+	private final FactQuestions asks;
 
 	Consolidator(Database db, EntityService entities, PredicateRegistry predicates, EventTypeRegistry eventTypes,
 			EntityTypeRegistry entityTypes, EventService events, FactQueries facts, QuestionResolver resolver,
 			FactLedger ledger, FactRenderer renderer, QuestionService questions, Deriver deriver) {
 		this.questions = questions;
+		this.asks = new FactQuestions(questions, entities, facts);
 		this.deriver = deriver;
 		this.db = db;
 		this.entities = entities;
@@ -86,7 +89,7 @@ public final class Consolidator {
 	}
 
 	public Outcome consolidate(boolean dryRun) {
-		List<Map<String, Object>> merges = mergeSharedAliases(dryRun);
+		List<Map<String, Object>> sameEntity = askSharedAliases(dryRun);
 		int reclosed = recloseByEvents(dryRun) + endByPredicates(dryRun);
 		List<Map<String, Object>> resolved = resolver.settleExactSubjects(dryRun);
 		var duplicates = new ArrayList<Map<String, Object>>();
@@ -99,7 +102,7 @@ public final class Consolidator {
 		if (!dryRun) {
 			forgetDefinedBy();
 		}
-		return new Outcome(merges, nameCollisions(), reclosed, inferredVocabulary(), predicates.closePairs(),
+		return new Outcome(sameEntity, nameCollisions(), reclosed, inferredVocabulary(), predicates.closePairs(),
 				descriptiveEvents(), unusedVocabulary(), unresolvedDerivations(dryRun), misfiledRelations(),
 				deriver.attributeUnknown(), resolved, facts.review(5), duplicates, removed, repairs);
 	}
@@ -431,21 +434,37 @@ public final class Consolidator {
 		return out;
 	}
 
-	private List<Map<String, Object>> mergeSharedAliases(boolean dryRun) {
-		var merges = new ArrayList<Map<String, Object>>();
+	/**
+	 * Things of one kind that share a name are asked about, never merged unasked: two people may both be "Mona"
+	 * (2026-11-24, where consolidate used to merge every such pair). A pair asked before, whatever the answer, is not
+	 * asked again; a dry run says what it would ask.
+	 */
+	private List<Map<String, Object>> askSharedAliases(boolean dryRun) {
+		var asked = new ArrayList<Map<String, Object>>();
+		var pairs = new java.util.HashSet<String>();
 		for (long[] pair : entities.duplicateAliasPairs()) {
 			Entity a = entities.get(pair[0]).orElseThrow();
 			Entity b = entities.get(pair[1]).orElseThrow();
-			if (a.id() == b.id()) {
+			if (a.id() == b.id() || a.id() == entities.owner().id() || b.id() == entities.owner().id()
+					|| !pairs.add(Math.min(a.id(), b.id()) + ":" + Math.max(a.id(), b.id()))
+					|| asks.askedSameEntity(a.id(), b.id())) {
 				continue;
 			}
+			String shared = entities.sharedAlias(a.id(), b.id());
+			var m = new LinkedHashMap<String, Object>();
+			m.put("entity", b.ref());
+			m.put("name", b.name());
+			m.put("and", a.ref());
+			m.put("and_name", a.name());
+			m.put("shared", shared);
 			if (dryRun) {
-				merges.add(Map.of("would_merge", b.ref(), "into", a.ref(), "reason", "shared alias"));
+				m.put("would_ask", "same_entity");
 			} else {
-				merges.add(entities.merge(b.id(), a.id(), null, "consolidate: shared alias"));
+				asks.sameEntity(null, a, b, shared).ifPresent(q -> m.put("asked", q.ref()));
 			}
+			asked.add(m);
 		}
-		return merges;
+		return asked;
 	}
 
 	/** Facts flagged ended without a date whose closing event is on record: the event dates the end. */

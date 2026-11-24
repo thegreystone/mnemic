@@ -612,6 +612,23 @@
       "meines",
       "the user",
       "user"
+    ],
+    "tense_filler": [
+      "aktuell",
+      "aktuelle",
+      "aktuellen",
+      "aktueller",
+      "aktuelles",
+      "derzeit",
+      "derzeitig",
+      "derzeitige",
+      "derzeitigen",
+      "zurzeit",
+      "momentan",
+      "jetzt",
+      "gegenwärtig",
+      "gegenwärtige",
+      "gegenwärtigen"
     ]
   },
   "fact": {

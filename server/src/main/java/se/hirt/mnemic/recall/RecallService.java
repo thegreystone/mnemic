@@ -40,6 +40,7 @@ import se.hirt.mnemic.knowledge.Event;
 import se.hirt.mnemic.knowledge.EventService;
 import se.hirt.mnemic.knowledge.Fact;
 import se.hirt.mnemic.knowledge.FactQueries;
+import se.hirt.mnemic.knowledge.LanguagePack;
 import se.hirt.mnemic.knowledge.Predicate;
 import se.hirt.mnemic.knowledge.PredicateRegistry;
 import se.hirt.mnemic.knowledge.QuestionService;
@@ -121,6 +122,10 @@ public final class RecallService {
 				anchor(id, f);
 			}
 		}
+
+		List<List<Long>> ranked() {
+			return List.of(structured, keys, lexical, semantic, upcoming);
+		}
 	}
 
 	/**
@@ -198,6 +203,7 @@ public final class RecallService {
 		}
 		semanticChannel(q, asOf, now, includeHistory, ch);
 		upcomingChannel(q, asOf, now, ch);
+		foldCorrections(ch, now);
 		Ranking ranking = fuse(ch);
 		List<Hit> hits = budget(ranking, ch, q, s, maxTokens, limit, includeHistory);
 		if ("miss".equals(s.state()) && !hits.isEmpty()) {
@@ -246,7 +252,9 @@ public final class RecallService {
 		boolean cueIsTheQuestion = !q.cues().isEmpty() && s.predicate() != null && !"entity".equals(s.state())
 				&& q.beyondEntities().stream().allMatch(q.cueTokens()::contains);
 		boolean narrowed = q.polar() && (!q.residual().isEmpty() || !q.others(ownerId).isEmpty());
-		boolean answerCue = functionalCue || !"any".equals(cueDirection) || cueIsTheQuestion || narrowed;
+		// "What are my cars": the kind asked for picked the facts, which are the answer whatever relation they hold.
+		boolean kindAsked = s.kind() != null && s.matched();
+		boolean answerCue = functionalCue || !"any".equals(cueDirection) || cueIsTheQuestion || narrowed || kindAsked;
 		boolean ownerOnly = q.others(ownerId).isEmpty() && ("entity".equals(s.state()) || !answerCue);
 		return new Gates(cueDirection, answerCue, ownerOnly);
 	}
@@ -494,13 +502,19 @@ public final class RecallService {
 			return;
 		}
 		List<Row> rows = db.read(tx -> asOf == null ? tx.query("""
-				SELECT o.id FROM observation_fts f JOIN observation o ON o.id = f.rowid
+				SELECT o.id, o.text FROM observation_fts f JOIN observation o ON o.id = f.rowid
 				WHERE observation_fts MATCH ? AND o.forgotten_at IS NULL
 				ORDER BY bm25(observation_fts), o.id DESC LIMIT ?""", q.fts(), CANDIDATES) : tx.query("""
-				SELECT o.id FROM observation_fts f JOIN observation o ON o.id = f.rowid
+				SELECT o.id, o.text FROM observation_fts f JOIN observation o ON o.id = f.rowid
 				WHERE observation_fts MATCH ? AND o.forgotten_at IS NULL AND o.observed_at <= ?
 				ORDER BY bm25(observation_fts), o.id DESC LIMIT ?""", q.fts(), asOf.toString(), CANDIDATES));
+		// The index cannot see punctuation: "(own mobile number)" in a correction record matched "own". A text whose
+		// only match is a homograph standing as its other word is read again with the punctuation and left out.
+		boolean homographs = q.terms().stream().anyMatch(LanguagePack.allHomographs()::containsKey);
 		for (Row r : rows) {
+			if (homographs && Query.matchedOnlyAsOtherWords(r.str("text"), q.terms())) {
+				continue;
+			}
 			ch.lexical.add(r.lng("id"));
 		}
 	}
@@ -575,6 +589,133 @@ public final class RecallService {
 				}
 			}
 		}
+	}
+
+	/**
+	 * A correction record ("Correction of …: reason → {…}") is bookkeeping about a statement, and ranked as a hit of
+	 * its own beside the statement it corrected it took places from the answer: two corrections of one car pushed
+	 * another car out of the ten (2026-11-24). Each channel's rank for a record goes to the observation behind what it
+	 * corrected, the better rank kept, and the facts the record made current anchor there, so the hit shows what was
+	 * said with what now holds. A record whose statement is forgotten or retired stays a hit of its own.
+	 */
+	private void foldCorrections(Channels ch, Instant now) {
+		var ids = new LinkedHashSet<Long>();
+		ch.ranked().forEach(ids::addAll);
+		ids.addAll(ch.nearMiss);
+		ids.addAll(ch.anchors.keySet());
+		Map<Long, Long> home = correctedStatements(ids);
+		if (home.isEmpty()) {
+			return;
+		}
+		for (List<Long> channel : ch.ranked()) {
+			var folded = new ArrayList<Long>();
+			for (long id : channel) {
+				Channels.rank(folded, home.getOrDefault(id, id));
+			}
+			channel.clear();
+			channel.addAll(folded);
+		}
+		var near = new LinkedHashSet<Long>();
+		for (long id : ch.nearMiss) {
+			near.add(home.getOrDefault(id, id));
+		}
+		ch.nearMiss.clear();
+		ch.nearMiss.addAll(near);
+		for (Map.Entry<Long, Long> e : home.entrySet()) {
+			LinkedHashSet<Fact> anchored = ch.anchors.remove(e.getKey());
+			if (anchored != null) {
+				anchored.forEach(f -> ch.anchor(e.getValue(), f));
+			}
+			for (Fact f : facts.factsOfObservation(e.getKey())) {
+				if ("current".equals(f.state(now)) && !"pending".equals(f.status())) {
+					ch.anchor(e.getValue(), f);
+				}
+			}
+		}
+	}
+
+	/** For each correction record among {@code ids}, the observation behind what it corrected. */
+	private Map<Long, Long> correctedStatements(Set<Long> ids) {
+		if (ids.isEmpty()) {
+			return Map.of();
+		}
+		String in = String.join(",", ids.stream().map(String::valueOf).toList());
+		List<Row> records = db.read(tx -> tx.query("SELECT id, source_ref FROM observation WHERE source_kind = "
+				+ "'correction' AND forgotten_at IS NULL AND id IN (" + in + ")"));
+		var out = new LinkedHashMap<Long, Long>();
+		for (Row r : records) {
+			var seen = new HashSet<Long>();
+			seen.add(r.lng("id"));
+			Long statement = statementBehind(r.str("source_ref"), seen);
+			if (statement == null) {
+				// The fact it names is gone (ids are renumbered by a rebuild): the other observations behind the facts
+				// the record made current say the same thing.
+				statement = statementBesideReplacements(r.lng("id"), seen);
+			}
+			if (statement != null) {
+				out.put(r.lng("id"), statement);
+			}
+		}
+		return out;
+	}
+
+	/** The first live statement, other than a correction record, behind a fact the record made. */
+	private Long statementBesideReplacements(long recordId, Set<Long> seen) {
+		// Breadth first from the facts the record made, back through what each replaced: a second correction's fact
+		// is backed by its record alone, and the statement stands behind the fact the first correction replaced.
+		var frontier = new ArrayList<Long>(facts.factsOfObservation(recordId).stream().map(Fact::id).toList());
+		var visited = new HashSet<Long>(frontier);
+		while (!frontier.isEmpty()) {
+			long factId = frontier.removeFirst();
+			for (long id : facts.observationsOf(factId)) {
+				if (!seen.add(id)) {
+					continue;
+				}
+				Observation o = observation(id);
+				if (o != null && !o.retired() && !"correction".equals(o.source().kind())) {
+					return id;
+				}
+			}
+			for (Row r : db
+					.read(tx -> tx.query("SELECT fact_id FROM supersession WHERE superseded_by_id = ?", factId))) {
+				if (visited.add(r.lng("fact_id"))) {
+					frontier.add(r.lng("fact_id"));
+				}
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * The first live observation behind the fact or event a correction record names ("f-12", "evt-3"), through any
+	 * earlier record in the chain; null when there is none.
+	 */
+	private Long statementBehind(String ref, Set<Long> seen) {
+		List<Long> sources;
+		try {
+			sources = ref == null ? List.of() : ref.startsWith("f-")
+					? facts.observationsOf(Long.parseLong(ref.substring(2)))
+					: ref.startsWith("evt-") ? events.observationsOf(Long.parseLong(ref.substring(4))) : List.of();
+		} catch (NumberFormatException e) {
+			return null;
+		}
+		for (long id : sources) {
+			if (!seen.add(id)) {
+				continue;
+			}
+			Observation o = observation(id);
+			if (o == null || o.retired()) {
+				continue;
+			}
+			if (!"correction".equals(o.source().kind())) {
+				return id;
+			}
+			Long earlier = statementBehind(o.source().ref(), seen);
+			if (earlier != null) {
+				return earlier;
+			}
+		}
+		return null;
 	}
 
 	/** The fused order, with each observation's score and the channels that produced it; budget fields follow. */

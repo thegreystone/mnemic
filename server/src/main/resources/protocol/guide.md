@@ -45,11 +45,11 @@ The rules behind the protocol the server states when a client connects: how to r
 - `conflict`: a one-valued predicate already has a value. Answer `ended` (the earlier one ended, date
   unknown), `supersede` (the new one replaces it from now), `reject` (the new one is wrong), `reinterpret`
   (you misread it; the corrected proposal comes in the same call), `wrong` (the earlier record was an error),
-  or `both` (one value lies within the other on record, a street within its town).
+  or `both` (one value lies within the other, a street within its town).
 - `entity_resolution`, `predicate_resolution`: the facts that depend on it are held until you answer with a
   candidate id or `new`. `type_kind`: a root kind or `none`. `type_mismatch`: `kind:<type>`, `retype:<type>`,
   or `dismiss`. `event_effect`: `opens:<predicate>`, `closes:<predicate>`, `ends_entity`, or `none`.
-  `containment`: `yes` or `no`.
+  `containment`, `same_entity`: `yes` or `no`.
 - Answers go as `resolve: [{question_id: "q-3", choice: ...}]` on the next `remember`, or alone in a
   `remember` with no text.
 
@@ -57,6 +57,6 @@ The rules behind the protocol the server states when a client connects: how to r
 
 - When you misread an observation, `remember(observation_id, proposal)` replaces your reading; the text
   keeps its id and date. `correct` is for when the user says the world is otherwise.
-- `consolidate` merges entities later shown to be the same, closes what a later event ended, and lists what
+- `consolidate` asks if things sharing a name are one, closes what a later event ended, and lists what
   needs you: observations without a reading, open questions, `name_collisions`, vocabulary worth a
   definition, and `review`, the open facts longest unconfirmed on things that change.

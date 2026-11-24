@@ -47,8 +47,8 @@ import static se.hirt.mnemic.TestHomes.remember;
 
 /**
  * A "Peter" on record and a "Peter Andersson" who turns up later (2026-09-24). The store asks whether they are the
- * same; answered the same, the entity takes the fuller name; answered someone else, a later bare "Peter" is asked once
- * more, since it now fits either, and that answer settles the mentions after it.
+ * same; answered the same, the entity takes the fuller name; answered someone else, every later bare "Peter" is asked,
+ * since it fits either (2026-11-24; until then one answer settled the mentions after it).
  */
 class TwoPetersTest {
 
@@ -101,7 +101,7 @@ class TwoPetersTest {
 	}
 
 	@Test
-	void aSecondPeterMakesABareMentionAmbiguousUntilAnsweredOnce() {
+	void aSecondPeterMakesEveryBareMentionAQuestion() {
 		try (Engine e = engine("two-peters-new")) {
 			remember(e, "Peter is my colleague; he lives in Zug.", proposal().entity("p", "Peter", "person")
 					.entity("z", "Zug", "place").fact("self", "knows", "p").fact("p", "lives_in", "z"));
@@ -124,14 +124,15 @@ class TwoPetersTest {
 			assertEquals(List.of(firstPeter, secondPeter, "new"), candidateIds(again), again.toString());
 			assertTrue(bare.applied().facts().isEmpty(), "held until answered: " + bare.applied().facts());
 
-			// Answered, and every later bare mention goes the same way without a question.
+			// Answered for this mention; the next bare "Peter" may mean the other one, so it is asked again
+			// (2026-11-24: every mention, where one answer used to settle the rest).
 			RememberOutcome settled = remember(e, "It was the Zug one.", proposal(),
 					new Resolve(String.valueOf(again.get("id")), firstPeter));
 			assertEquals("answered", settled.resolved().getFirst().get("status"));
 			RememberOutcome later = remember(e, "Peter says hello.",
 					proposal().entity("p3", "Peter", "person").fact("p3", "knows", "self"));
-			assertTrue(later.applied().questions().isEmpty(), later.applied().questions().toString());
-			assertEquals(firstPeter, later.applied().entities().getFirst().id());
+			Map<String, Object> third = firstQuestion(later);
+			assertEquals(List.of(firstPeter, secondPeter, "new"), candidateIds(third), third.toString());
 			// The full name still reaches the other one, unasked.
 			RememberOutcome fullAgain = remember(e, "Peter Andersson moved to Bern.",
 					proposal().entity("pa2", "Peter Andersson", "person").entity("b", "Bern", "place").fact("pa2",
@@ -167,7 +168,7 @@ class TwoPetersTest {
 			assertEquals("answered", settled.resolved().getFirst().get("status"));
 			RememberOutcome later = remember(e, "Eva works at Hooli.", proposal().entity("ev", "Eva Berg", "person")
 					.entity("h3", "Hooli", "organization").fact("ev", "works_at", "h3"));
-			assertTrue(later.applied().questions().isEmpty(), later.applied().questions().toString());
+			assertEquals(List.of(hooli, cloud, "new"), candidateIds(firstQuestion(later)), "asked at every mention");
 			// And the fuller name adopted on a "same" answer is not about people either.
 			RememberOutcome cloudFull = remember(e, "Hooli Cloud Services is the same as Hooli Cloud.",
 					proposal().entity("hcs", "Hooli Cloud Services", "organization").fact("a", "works_at", "hcs"));

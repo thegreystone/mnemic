@@ -446,16 +446,20 @@ entity is reused and the name added as an alias; between **0.40 and 0.85** the
 candidates come back as an `entity_resolution` question and every fact and
 event mentioning the name is held until the caller answers with a candidate
 id or `"new"`; below, a new entity is created. When the name matches one
-entity and a proposed alias another, the two are merged there and then. No
+entity and a proposed alias another, the alias is shared and a `same_entity`
+question asks whether they are one; nothing is merged unasked. No
 embedding is involved. Merges are recorded in `entity_merge` with the facts
 and aliases that moved, so they can be reviewed and undone. An exact name
 under a placed kind that is not the kind on record (Mercury the company,
 Mercury the town), or an untyped name that fits two kinds, is asked about,
 the exact matches being the first candidates at 1.0 ahead of any fuzzy
 match: a caller cannot know what type a thing was first registered under.
-The question is asked once; an answer naming an entity settles every later
-mention (resolution `answered`), and `new` makes another entity that its
-own type then resolves to. `consolidate` lists pairs of different kinds
+With one such entity the question is asked once; an answer naming it
+settles every later mention (resolution `answered`), and `new` makes
+another entity that its own type then resolves to. A name that several
+entities of a fitting kind carry is asked at every mention, and a name
+nobody carries whose alias one entity carries is asked too: names may be
+shared, so an alias alone does not decide identity. `consolidate` lists pairs of different kinds
 sharing a name under `name_collisions`. When nobody typed a name, the
 predicates that use it say what it is: the domains and ranges of the facts
 it appears in shape the fuzzy candidates (an insurer is no candidate for

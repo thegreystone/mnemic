@@ -186,7 +186,7 @@ final class StoreMaintenance {
 				recentFirst(open, mark), recentFirst(c.inferredVocabulary(), mark),
 				recentFirst(c.similarVocabulary(), mark), recentFirst(c.descriptiveEvents(), mark),
 				recentFirst(c.unusedVocabulary(), mark), recentFirst(c.unresolvedDerivations(), mark),
-				recentFirst(c.misfiledRelations(), mark), recentFirst(c.attributeUnknown(), mark), c.merges(),
+				recentFirst(c.misfiledRelations(), mark), recentFirst(c.attributeUnknown(), mark), c.sameEntity(),
 				recentFirst(c.nameCollisions(), mark), c.reclosed(), proposed, c.resolvedQuestions(),
 				recentFirst(c.review(), mark), retired, embedded, recentFirst(c.duplicates(), mark), rebuilt,
 				c.removedEntities(), c.repairs(), notRetired);

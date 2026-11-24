@@ -223,7 +223,27 @@
       "mine",
       "the user",
       "user"
-    ]
+    ],
+    "tense_filler": [
+      "current",
+      "currently",
+      "now",
+      "nowadays",
+      "presently"
+    ],
+    "homographs": {
+      "own": [
+        "my",
+        "his",
+        "her",
+        "its",
+        "our",
+        "your",
+        "their",
+        "whose",
+        "s"
+      ]
+    }
   },
   "fact": {
     "since": " (since {start})",

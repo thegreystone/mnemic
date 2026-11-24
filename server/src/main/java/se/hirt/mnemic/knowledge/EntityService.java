@@ -83,6 +83,8 @@ public final class EntityService {
 	 * depend only on the alias text, entity type, and type registry definitions.
 	 */
 	private static final int ALIAS_FEATURES_MAX = 16_384;
+	/** The seed kind a web address with no kind given is created as. */
+	static final String WEBSITE = "website";
 	private final Map<AliasKey, AliasFeatures> aliasFeaturesCache = new HashMap<>();
 	private long aliasFeaturesTypesVersion = -1;
 
@@ -195,9 +197,18 @@ public final class EntityService {
 		Set<String> want = EntityTypeRegistry.UNKNOWN.equals(given) || types.unplaced(given) ? expected : Set.of();
 		String t = EntityTypeRegistry.UNKNOWN.equals(given) && want.size() == 1 ? want.iterator().next() : given;
 		return db.write(tx -> {
+			// Several things carry this very name ("Mona" for a mother and a colleague): which one is meant is asked,
+			// at every mention. An earlier answer was about that mention; the next may mean the other (2026-11-24).
+			// The kind the mention gives counts: "Java" typed a place is the island, whatever language shares the name.
+			List<Entity> carriers = exactMatches(tx, norm, List.of()).stream()
+					.filter(e -> !distinctFrom.contains(e.id())).toList();
+			List<Entity> fitting = carriers.stream().filter(e -> types.compatible(e.type(), given)).toList();
+			if (fitting.size() > 1) {
+				return ambiguous(tx, name, norm, t, distinctFrom, want, fitting);
+			}
 			// The same name on record, of a kind this mention could not be: the caller cannot know what type a
-			// thing was first registered under, so the exact matches are the first candidates, and the question is
-			// asked once; an answer naming one of them settles every later mention.
+			// thing was first registered under, so the exact matches are the first candidates. With one such thing,
+			// the question is about its kind, asked once; an answer naming it settles later mentions.
 			List<Entity> exact = exactMatches(tx, norm, aliases).stream().filter(e -> !distinctFrom.contains(e.id()))
 					.toList();
 			// Exact names are matched under the type the caller gave, or none: the expectation shapes what is
@@ -207,62 +218,37 @@ public final class EntityService {
 			Entity match = null;
 			String how = "alias";
 			if (!among.isEmpty() && (fits.isEmpty() || !oneKind(fits))) {
-				Optional<Entity> settled = answeredAmong(tx, norm, among);
+				Optional<Entity> settled = among.size() == 1 ? answeredAmong(tx, norm, among) : Optional.empty();
 				if (settled.isEmpty()) {
-					var candidates = new ArrayList<Candidate>();
-					for (Entity o : among) {
-						candidates.add(new Candidate(o, 1.0));
-					}
-					for (Candidate c : fuzzy(tx, name, norm, t, distinctFrom, want)) {
-						if (candidates.stream().noneMatch(x -> x.entity().id() == c.entity().id())) {
-							candidates.add(c);
-						}
-					}
-					return new Resolved(null, "ambiguous", 1.0, candidates);
+					return ambiguous(tx, name, norm, t, distinctFrom, want, among);
 				}
 				match = settled.get();
 				how = "answered";
 			}
 			if (match == null) {
-				Optional<Entity> byName = byAlias(tx, norm, given);
-				match = byName.orElse(null);
-				for (String a : aliases) {
-					if (a == null || a.isBlank()) {
-						continue;
-					}
-					Optional<Entity> byA = byAlias(tx, Names.norm(a), given);
-					if (byA.isEmpty()) {
-						continue;
-					}
-					if (match == null) {
-						match = byA.get();
-					} else if (byA.get().id() != match.id()) {
-						// The name names one entity and an alias another: later evidence says they are the same (G2).
-						merge(tx, byA.get(), match, observationId, "alias '" + a + "' of '" + name + "' matched both");
-						how = "merged";
-					}
+				match = byAlias(tx, norm, given).orElse(null);
+			}
+			if (match == null) {
+				// No thing carries the name, but one or more carry an alias it is given: a name may be shared, so an
+				// alias does not say which thing this is. Asked, with "new" beside them.
+				List<Entity> byAliases = fits.stream().filter(e -> !carriers.contains(e)).toList();
+				if (!byAliases.isEmpty()) {
+					return ambiguous(tx, name, norm, t, distinctFrom, want, byAliases);
 				}
 			}
+			// An alias the name's entity is given that another thing also carries is the alias of both: nothing is
+			// merged on a shared name. Whether they are one thing is asked (ProposalApplier, a same_entity question).
 			if (match != null && "alias".equals(how)) {
 				// "Peter" on record and a "Peter Andersson" the user said was someone else: a bare "Peter" now fits
-				// either, so it is asked, once; the answer settles later mentions (2026-09-24).
+				// either, so it is asked, at every mention (2026-09-24, every mention since 2026-11-24).
 				List<Entity> rivals = distinguishedFuller(tx, name, norm, t, match, distinctFrom);
 				if (!rivals.isEmpty()) {
-					var both = new ArrayList<Entity>();
-					both.add(match);
-					both.addAll(rivals);
-					Optional<Entity> settled = answeredAmong(tx, norm, both);
-					if (settled.isPresent()) {
-						match = settled.get();
-						how = "answered";
-					} else {
-						var candidates = new ArrayList<Candidate>();
-						candidates.add(new Candidate(match, 1.0));
-						for (Entity r : rivals) {
-							candidates.add(new Candidate(r, 0.5));
-						}
-						return new Resolved(null, "ambiguous", 1.0, candidates);
+					var candidates = new ArrayList<Candidate>();
+					candidates.add(new Candidate(match, 1.0));
+					for (Entity r : rivals) {
+						candidates.add(new Candidate(r, 0.5));
 					}
+					return new Resolved(null, "ambiguous", 1.0, candidates);
 				}
 			}
 			if (match == null) {
@@ -290,6 +276,56 @@ public final class EntityService {
 			}
 			return new Resolved(create(tx, name, t, aliases, observationId), "created", 1.0, List.of());
 		});
+	}
+
+	/** A question over {@code exact} (each at 1.0), with the fuzzy candidates after them and "new" beside. */
+	private Resolved ambiguous(
+		Tx tx, String name, String norm, String type, Set<Long> distinctFrom, Set<String> want, List<Entity> exact) {
+		var candidates = new ArrayList<Candidate>();
+		for (Entity o : exact) {
+			candidates.add(new Candidate(o, 1.0));
+		}
+		for (Candidate c : fuzzy(tx, name, norm, type, distinctFrom, want)) {
+			if (candidates.stream().noneMatch(x -> x.entity().id() == c.entity().id())) {
+				candidates.add(c);
+			}
+		}
+		return new Resolved(null, "ambiguous", 1.0, candidates);
+	}
+
+	/** Live entities that carry the name exactly, as their name or an alias, by id. */
+	public List<Entity> carriers(String name) {
+		if (name == null || name.isBlank()) {
+			return List.of();
+		}
+		return db.read(tx -> exactMatches(tx, Names.norm(name), List.of()));
+	}
+
+	/**
+	 * Live entities other than {@code entityId} that carry one of {@code aliases} exactly, of a kind that could be the
+	 * same thing: the ones a shared alias leaves the question open for.
+	 */
+	public Map<Entity, String> sharingAliases(long entityId, List<String> aliases) {
+		Entity self = get(entityId).orElse(null);
+		if (self == null || aliases == null || aliases.isEmpty()) {
+			return Map.of();
+		}
+		var out = new LinkedHashMap<Entity, String>();
+		db.read(tx -> {
+			for (String a : aliases) {
+				if (a == null || a.isBlank() || SELF.contains(Names.norm(a))) {
+					continue;
+				}
+				for (Entity e : exactMatches(tx, Names.norm(a), List.of())) {
+					if (e.id() != self.id() && e.id() != owner.id() && types.compatible(e.type(), self.type())
+							&& out.keySet().stream().noneMatch(x -> x.id() == e.id())) {
+						out.put(e, a.trim());
+					}
+				}
+			}
+			return null;
+		});
+		return out;
 	}
 
 	/** Live entities whose name or an alias is the name or one of the aliases exactly, by id. */
@@ -436,8 +472,16 @@ public final class EntityService {
 					var add = keep.stream().map(String::valueOf).toList();
 					addAliases(tx, id, add, null);
 				}
-				default -> throw MnemicException.invalidArgument(
-						"Unknown entity property '" + c.getKey() + "'; correctable: name, type, aliases.");
+				case "add_aliases" -> {
+					// Another name for the thing ("Konrad" for Konrad Nyberg), added without listing every name kept.
+					if (!(c.getValue() instanceof List<?> more) || more.isEmpty()) {
+						throw MnemicException.invalidArgument(
+								"'add_aliases' takes the names to add, e.g. {\"add_aliases\": [\"Konrad\"]}.");
+					}
+					addAliases(tx, id, more.stream().map(String::valueOf).toList(), null);
+				}
+				default -> throw MnemicException.invalidArgument("Unknown entity property '" + c.getKey()
+						+ "'; correctable: name, type, aliases (the list to keep), add_aliases.");
 				}
 			}
 			return get(id).orElseThrow();
@@ -449,6 +493,41 @@ public final class EntityService {
 			});
 		}
 		return updated;
+	}
+
+	/**
+	 * Records {@code alias} as another name of the entity, and nothing else: no resolution, so an entity that already
+	 * carries the name is never merged into this one. Two things may share a name; an answered question settles which
+	 * one a later mention means. True when the name is new for the entity.
+	 */
+	public boolean addAlias(long entityId, String alias, Long observationId) {
+		if (alias == null || alias.isBlank() || SELF.contains(Names.norm(alias))) {
+			return false;
+		}
+		return db.write(tx -> {
+			boolean had = tx.queryLong("SELECT COUNT(*) FROM entity_alias WHERE entity_id = ? AND alias_norm = ?",
+					entityId, Names.norm(alias)) > 0;
+			addAliases(tx, entityId, List.of(alias), observationId);
+			return !had;
+		});
+	}
+
+	/**
+	 * Entities from before web addresses were typed: an untyped name that is a web address becomes a website. Run at
+	 * start; returns how many changed.
+	 */
+	public int typeWebAddresses() {
+		int changed = db.write(tx -> {
+			int n = 0;
+			for (Row r : tx.query("SELECT id, name FROM entity WHERE type = ? AND merged_into IS NULL",
+					EntityTypeRegistry.UNKNOWN)) {
+				if (r.lng("id") != owner.id() && Names.isWebAddress(r.str("name"))) {
+					n += tx.update("UPDATE entity SET type = ? WHERE id = ?", WEBSITE, r.lng("id"));
+				}
+			}
+			return n;
+		});
+		return changed;
 	}
 
 	/** Changes an entity's type: the answer to a type mismatch that blamed the entity. */
@@ -465,7 +544,9 @@ public final class EntityService {
 		return db.write(tx -> create(tx, name, types.canonical(type), aliases, observationId));
 	}
 
-	private Entity create(Tx tx, String name, String type, List<String> aliases, Long observationId) {
+	private Entity create(Tx tx, String name, String given, List<String> aliases, Long observationId) {
+		// A web address with no kind given is a website, never a thing that "may be" a car (2026-11-24).
+		String type = EntityTypeRegistry.UNKNOWN.equals(given) && Names.isWebAddress(name) ? WEBSITE : given;
 		long id = tx.insert("INSERT INTO entity(name, type, created_from, created_at) VALUES (?,?,?,?)", name.trim(),
 				type, observationId, clock.instant().toString());
 		var all = new ArrayList<String>(aliases);
@@ -879,7 +960,17 @@ public final class EntityService {
 		}).toList());
 	}
 
-	/** Pairs of distinct live entities sharing an alias with compatible types: consolidate merges them. */
+	/** A name two entities both carry, for saying which one they share. */
+	public String sharedAlias(long a, long b) {
+		return db.read(tx -> tx.queryOne("""
+				SELECT x.alias FROM entity_alias x JOIN entity_alias y ON x.alias_norm = y.alias_norm
+				WHERE x.entity_id = ? AND y.entity_id = ? ORDER BY x.id LIMIT 1""", a, b).map(r -> r.str("alias"))
+				.orElse(""));
+	}
+
+	/**
+	 * Pairs of distinct live entities sharing an alias with compatible types: consolidate asks whether they are one.
+	 */
 	public List<long[]> duplicateAliasPairs() {
 		return db.read(tx -> tx.query("""
 				SELECT a.entity_id AS x, b.entity_id AS y FROM entity_alias a JOIN entity_alias b

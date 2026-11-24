@@ -118,7 +118,7 @@ class DuplicateEntityTest {
 					.id();
 			// Consolidate lists the collision and merges nothing on its own.
 			var c = e.consolidate(true);
-			assertTrue(c.merges().isEmpty(), c.merges().toString());
+			assertTrue(c.sameEntity().isEmpty(), c.sameEntity().toString());
 			assertEquals(1, c.nameCollisions().size(), c.nameCollisions().toString());
 			Map<String, Object> collision = c.nameCollisions().getFirst();
 			assertEquals("Mercury", collision.get("shared"));

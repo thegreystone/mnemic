@@ -434,6 +434,14 @@
       "mina",
       "the user",
       "user"
+    ],
+    "tense_filler": [
+      "nuvarande",
+      "aktuell",
+      "aktuella",
+      "aktuellt",
+      "nu",
+      "numera"
     ]
   },
   "fact": {

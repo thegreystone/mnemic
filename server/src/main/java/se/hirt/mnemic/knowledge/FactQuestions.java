@@ -241,6 +241,45 @@ final class FactQuestions {
 		return Optional.of(questions.create("type_kind", obs.id(), null, t.name(), null, c, payload, message));
 	}
 
+	/**
+	 * Asks whether two things that share a name are one thing: yes folds {@code from} into {@code into}, no keeps them
+	 * apart and the name stays shared. Nothing is merged unasked (2026-11-24). Empty when the pair was asked before,
+	 * open or answered: a "no" is not asked again, and {@code observationId} is null when housekeeping asks.
+	 */
+	Optional<Question> sameEntity(Long observationId, Entity into, Entity from, String shared) {
+		if (into.id() == from.id() || askedSameEntity(into.id(), from.id())) {
+			return Optional.empty();
+		}
+		var payload = new LinkedHashMap<String, Object>();
+		payload.put("entity", from.ref());
+		payload.put("into", into.ref());
+		payload.put("shared", shared);
+		List<Map<String, Object>> c = List.of(
+				choice(1, "yes",
+						from.name() + " (" + from.ref() + ") and " + into.name() + " (" + into.ref() + ") are one: "
+								+ from.ref() + " is folded into " + into.ref(),
+						null),
+				choice(2, "no", "two different things that share the name \"" + shared + "\"", null));
+		String message = into.name() + " (" + into.ref() + ", " + into.type() + ") and " + from.name() + " ("
+				+ from.ref() + ", " + from.type() + ") are both called \"" + shared + "\". Are they the same? Answer "
+				+ "yes to merge them, no to keep them apart; nothing is merged unasked.";
+		return Optional.of(questions.create("same_entity", observationId, null, from.name(), null, c,
+				Json.write(payload), message));
+	}
+
+	/** Whether the pair was asked about before, in either order, whatever the answer. */
+	boolean askedSameEntity(long a, long b) {
+		for (Question q : questions.ofKind("same_entity")) {
+			Map<String, Object> p = Json.readMap(q.payload());
+			String x = String.valueOf(p.get("entity"));
+			String y = String.valueOf(p.get("into"));
+			if ((x.equals("ent-" + a) && y.equals("ent-" + b)) || (x.equals("ent-" + b) && y.equals("ent-" + a))) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	/** Asks whether {@code top} lies within {@code bound}; empty when the same question is already open. */
 	Optional<Question> containment(Observation obs, long top, long bound, long servesFactId, String predicate) {
 		String payload = Json.write(Map.of("entity", "ent-" + top, "within", "ent-" + bound));

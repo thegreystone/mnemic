@@ -506,6 +506,12 @@
       "conmigo",
       "the user",
       "user"
+    ],
+    "tense_filler": [
+      "actual",
+      "actuales",
+      "actualmente",
+      "ahora"
     ]
   },
   "fact": {

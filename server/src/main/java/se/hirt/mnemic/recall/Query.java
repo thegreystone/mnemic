@@ -136,8 +136,14 @@ public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<Strin
 		}
 		// The names found first, so that a phrase compared by meaning never lies inside one of them.
 		List<Cue> cues = predicates.cues(text, entityTokens);
-		List<String> terms = Names.contentTokens(text).stream().filter(t -> !ownerTokens.contains(t)).distinct()
-				.toList();
+		// Words no search should use: "current" places the question in the present, which the valid-time rules do
+		// already, and as a term it ranked every observation that called anything current above the answer; "own" in
+		// "my own" is the adjective, not the relation (2026-11-24).
+		Set<String> unsearched = new HashSet<>(LanguagePack.of(language).query().tenseFiller());
+		unsearched.addAll(adjectivalOnly(text));
+		List<String> terms = withoutUnless(
+				Names.contentTokens(text).stream().filter(t -> !ownerTokens.contains(t)).distinct().toList(),
+				unsearched);
 		List<String> beyondEntities = terms.stream().filter(t -> !entityTokens.contains(t)).toList();
 		boolean polar = isPolar(text, language);
 		List<Bound> bound = bind(text, cues, mentions, spotted);
@@ -153,10 +159,48 @@ public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<Strin
 		// name the facts must mention.
 		List<String> named = namedThings(text, entityTokens, types, language).stream()
 				.filter(t -> !cueTokens.contains(t)).toList();
+		List<String> kinds = kindsAskedFor(text, entityTokens, cueTokens, cues, language);
+		if (kinds.isEmpty() && bound.isEmpty()) {
+			// "What are my current cars": no relation named and no verb after the kind; what follows the copula is
+			// the kind asked for, which the probe looks for under any relation.
+			kinds = kindsAfterCopula(text, entityTokens, language);
+		}
 		return new Query(text, spotted, cues, ownerTokens, terms, entityTokens, beyondEntities, polar,
 				isPast(text, language), isForward(text, language), cueTokens, residual, named,
-				ftsQuery(text, ownerTokens), kindsAskedFor(text, entityTokens, cueTokens, cues, language), bound,
-				language);
+				ftsQuery(text, ownerTokens, unsearched), kinds, bound, language);
+	}
+
+	/** The list without the dropped words, unless nothing else would remain. */
+	private static List<String> withoutUnless(List<String> words, Set<String> dropped) {
+		List<String> kept = words.stream().filter(t -> !dropped.contains(t)).toList();
+		return kept.isEmpty() ? words : kept;
+	}
+
+	/**
+	 * Whether token {@code i} is a homograph standing as its other word: "own" after "my" is the adjective. Read in
+	 * every language's list, since the text may be in another language than the question.
+	 */
+	static boolean asOtherWord(List<String> tokens, int i) {
+		if (i <= 0 || i >= tokens.size()) {
+			return false;
+		}
+		Set<String> before = LanguagePack.allHomographs().get(tokens.get(i));
+		return before != null && before.contains(tokens.get(i - 1));
+	}
+
+	/** The homographs a text uses only as their other word ("what is my own number": "own" is no verb in it). */
+	static Set<String> adjectivalOnly(String text) {
+		List<String> tokens = Names.tokens(text);
+		var other = new HashSet<String>();
+		var plain = new HashSet<String>();
+		for (int i = 0; i < tokens.size(); i++) {
+			if (!LanguagePack.allHomographs().containsKey(tokens.get(i))) {
+				continue;
+			}
+			(asOtherWord(tokens, i) ? other : plain).add(tokens.get(i));
+		}
+		other.removeAll(plain);
+		return other;
 	}
 
 	/**
@@ -276,6 +320,10 @@ public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<Strin
 						free = false;
 						break;
 					}
+				}
+				// "my own phone": the adjective, not the owns relation.
+				for (int k = i; k < i + term.size() && free; k++) {
+					free = !asOtherWord(tokens, k);
 				}
 				if (!free) {
 					continue;
@@ -433,10 +481,30 @@ public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<Strin
 				vocabulary.addAll(Names.tokens(q));
 			}
 		}
+		return kindWords(m.group(1), entityTokens, cueTokens, vocabulary, qc, language);
+	}
+
+	/**
+	 * "What are my current cars", "which are Anna's bikes": with no relation named, the words after the question word
+	 * and its verb that are no entity, filler, or tense word.
+	 */
+	static List<String> kindsAfterCopula(String query, Set<String> entityTokens, Lang language) {
+		QueryCues qc = LanguagePack.of(language).query();
+		Matcher m = qc.kindCopulaPattern().matcher(query == null ? "" : query);
+		if (!m.find()) {
+			return List.of();
+		}
+		return kindWords(m.group(1), entityTokens, Set.of(), Set.of(), qc, language);
+	}
+
+	private static List<String> kindWords(
+		String phrase, Set<String> entityTokens, Set<String> cueTokens, Set<String> vocabulary, QueryCues qc,
+		Lang language) {
 		var out = new ArrayList<String>();
-		for (String t : Names.tokens(m.group(1))) {
+		for (String t : Names.tokens(phrase)) {
 			if (t.length() < 2 || entityTokens.contains(t) || cueTokens.contains(t) || Names.STOPWORDS.contains(t)
-					|| qc.polarFiller().contains(t) || qc.kindFiller().contains(t) || out.contains(t)
+					|| qc.polarFiller().contains(t) || qc.kindFiller().contains(t) || qc.tenseFiller().contains(t)
+					|| qc.selfPronouns().contains(t) || out.contains(t)
 					|| Lang.singulars(t, language).stream().anyMatch(vocabulary::contains)) {
 				continue;
 			}
@@ -605,28 +673,97 @@ public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<Strin
 	 * English stemmer does to German and Swedish. Owner-alias tokens are dropped when anything else remains.
 	 */
 	static String ftsQuery(String query, Set<String> ownerTokens) {
+		return ftsQuery(query, ownerTokens, Set.of());
+	}
+
+	/**
+	 * As above, without the {@code unsearched} words unless nothing else remains. A homograph matches only where it is
+	 * not its other word: "own" in a text that says "her own account" is not the verb the question asked with.
+	 */
+	static String ftsQuery(String query, Set<String> ownerTokens, Set<String> unsearched) {
 		List<String> tokens = Names.contentTokens(query);
 		List<String> kept = tokens.stream().filter(t -> !ownerTokens.contains(t)).toList();
 		if (kept.isEmpty()) {
 			kept = tokens;
 		}
+		kept = withoutUnless(kept, unsearched);
 		var terms = new LinkedHashSet<String>();
 		for (String t : kept) {
-			terms.add(t.length() >= 4 ? "\"" + t + "\"*" : "\"" + t + "\"");
+			String term = t.length() >= 4 ? "\"" + t + "\"*" : "\"" + t + "\"";
+			Set<String> before = LanguagePack.allHomographs().get(t);
+			if (before != null && !before.isEmpty()) {
+				term = "(" + term + " NOT ("
+						+ String.join(" OR ", before.stream().sorted().map(b -> "\"" + b + " " + t + "\"").toList())
+						+ "))";
+			}
+			terms.add(term);
 		}
 		return String.join(" OR ", terms);
 	}
 
-	/** Distinct query terms present in a rendering, with the same prefix rule as the FTS query. */
+	/**
+	 * Distinct query terms present in a rendering, with the same prefix rule as the FTS query; a homograph counts only
+	 * where it is not its other word ("own mobile number" after a possessive).
+	 */
 	static int matchedTerms(String rendering, List<String> queryTerms) {
 		List<String> words = Names.tokens(rendering);
 		int n = 0;
 		for (String t : queryTerms) {
-			boolean hit = t.length() >= 4 ? words.stream().anyMatch(w -> w.startsWith(t)) : words.contains(t);
+			boolean hit = LanguagePack.allHomographs().containsKey(t) ? usedAsItself(rendering, t)
+					: t.length() >= 4 ? words.stream().anyMatch(w -> w.startsWith(t)) : words.contains(t);
 			if (hit) {
 				n++;
 			}
 		}
 		return n;
+	}
+
+	/**
+	 * Whether a text the full-text index matched did so only through homographs standing as their other word: no other
+	 * term is in it, read as the index splits words, and each homograph in it is the other word.
+	 */
+	static boolean matchedOnlyAsOtherWords(String text, List<String> terms) {
+		List<String> words = List.of(Names.norm(text == null ? "" : text).split("[^\\p{L}\\p{N}]+"));
+		for (String t : terms) {
+			boolean hit = LanguagePack.allHomographs().containsKey(t) ? usedAsItself(text, t)
+					: t.length() >= 4 ? words.stream().anyMatch(w -> w.startsWith(t)) : words.contains(t);
+			if (hit) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	private static final Map<String, Pattern> WHOLE_WORD = new java.util.concurrent.ConcurrentHashMap<>();
+	/**
+	 * What opens a parenthesis, a quotation, or a label: a word right after one begins a noun phrase ("(own mobile
+	 * number)", a reading's {@code "qualifier":"own mobile number"}), not a clause with the verb in it.
+	 */
+	private static final String OPENERS = "([{\"“‘'«:";
+
+	/**
+	 * Whether a text uses a homograph as itself somewhere: not after one of the words that make it another word, read
+	 * as the full-text index splits words ("Mattias's own" is "mattias", "s", "own"), and not right after an opening
+	 * parenthesis, quotation mark, or colon, where a fact's qualifier stands ("has phone … (own mobile number)").
+	 */
+	static boolean usedAsItself(String text, String word) {
+		String n = Names.norm(text == null ? "" : text);
+		Set<String> before = LanguagePack.allHomographs().getOrDefault(word, Set.of());
+		Matcher m = WHOLE_WORD
+				.computeIfAbsent(word,
+						w -> Pattern.compile("(?<![\\p{L}\\p{N}])" + Pattern.quote(w) + "(?![\\p{L}\\p{N}])"))
+				.matcher(n);
+		while (m.find()) {
+			String head = n.substring(0, m.start()).stripTrailing();
+			if (!head.isEmpty() && OPENERS.indexOf(head.charAt(head.length() - 1)) >= 0) {
+				continue;
+			}
+			String[] previous = head.split("[^\\p{L}\\p{N}]+");
+			if (previous.length > 0 && before.contains(previous[previous.length - 1])) {
+				continue;
+			}
+			return true;
+		}
+		return false;
 	}
 }

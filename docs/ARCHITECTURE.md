@@ -133,7 +133,7 @@ change), and nothing is deleted except by `forget`. Corrections (`FactService.co
 implemented by `FactCorrector`) build a replacement proposal from the original row and send it through the same
 path, so history reads the same whether a fact was corrected by the user or superseded by an event.
 
-`Consolidator` is the housekeeping pass: merges entities that share an alias, dates ended facts from closing events
+`Consolidator` is the housekeeping pass: asks (`same_entity`) whether entities that share an alias are one, never merging unasked, dates ended facts from closing events
 that arrived later, settles entity questions whose subject now exists, and folds duplicate facts and events.
 
 ## The read path: a question becomes a block

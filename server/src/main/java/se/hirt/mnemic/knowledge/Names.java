@@ -129,6 +129,13 @@ public final class Names {
 		return p.matcher(source).find();
 	}
 
+	private static final Pattern WEB_ADDRESS = Pattern.compile("^(?:https?://|www\\.)\\S+$", Pattern.CASE_INSENSITIVE);
+
+	/** Whether a name is a web address ("https://github.com/sandell-example", "www.example.com"). */
+	public static boolean isWebAddress(String name) {
+		return name != null && WEB_ADDRESS.matcher(name.trim()).matches();
+	}
+
 	public static List<String> tokens(String s) {
 		var out = new ArrayList<String>();
 		var m = tokenMatcher(s);

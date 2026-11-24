@@ -475,6 +475,11 @@ final class ProposalApplier {
 			a.refs.put(key, r.entity());
 			a.refs.put(Names.norm(er.name()), r.entity());
 			a.entityOut.add(new EntityOut(key, r.entity().ref(), r.entity().name(), r.how(), r.score()));
+			// An alias given here that another thing already carries: shared, never merged; whether they are one
+			// thing is asked (2026-11-24, where a shared alias used to merge them).
+			for (Map.Entry<Entity, String> other : entities.sharingAliases(r.entity().id(), er.aliases()).entrySet()) {
+				asks.sameEntity(a.obs.id(), r.entity(), other.getKey(), other.getValue()).ifPresent(a::ask);
+			}
 			if ("created".equals(r.how())) {
 				List<Entity> twins = entities.homonymsOf(r.entity().id());
 				if (!twins.isEmpty()) {

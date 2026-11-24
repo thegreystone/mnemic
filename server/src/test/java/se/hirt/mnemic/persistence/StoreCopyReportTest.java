@@ -90,7 +90,7 @@ class StoreCopyReportTest {
 			}
 			System.out.println("== similar_vocabulary " + c.similarVocabulary());
 			System.out.println("== review " + c.review().size() + ", duplicates " + c.duplicates().size() + ", merges "
-					+ c.merges().size());
+					+ c.sameEntity().size());
 			for (Question q : e.questions().open(20)) {
 				System.out.println("  open " + q.ref() + " " + q.kind() + " " + q.subject());
 			}

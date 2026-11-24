@@ -87,13 +87,14 @@ final class CorrectionCoordinator {
 
 	/**
 	 * Corrects an entity: its name, its type, the aliases it keeps ({@code aliases} is the list to keep; the entity's
-	 * own name and the owner's identity always stay), or {@code merge_into}, which folds it into the entity named
-	 * (facts, events, and aliases move; the id keeps resolving to the survivor). The user says what a thing is called;
-	 * a wrong fuzzy match earlier is undone by dropping the alias it left.
+	 * own name and the owner's identity always stay), names it is also called by ({@code add_aliases}, nothing
+	 * dropped), or {@code merge_into}, which folds it into the entity named (facts, events, and aliases move; the id
+	 * keeps resolving to the survivor). The user says what a thing is called; a wrong fuzzy match earlier is undone by
+	 * dropping the alias it left.
 	 */
 	Map<String, Object> correctEntity(long entityId, Map<String, Object> replacement, String reason) {
-		requireReplacement(replacement, "{\"aliases\": [\"Hooli\", \"Hooli Inc\"]} or {\"name\": \"Hooli AG\"} or "
-				+ "{\"type\": \"organization\"} or {\"merge_into\": \"ent-7\"}");
+		requireReplacement(replacement, "{\"add_aliases\": [\"Hooli\"]} or {\"aliases\": [\"Hooli\", \"Hooli Inc\"]} "
+				+ "or {\"name\": \"Hooli AG\"} or {\"type\": \"organization\"} or {\"merge_into\": \"ent-7\"}");
 		return runCorrection(() -> {
 			var before = knowledge.entities().get(entityId)
 					.orElseThrow(() -> MnemicException.notFound("No entity ent-" + entityId));

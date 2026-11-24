@@ -90,13 +90,16 @@ final class ToolDescriptions {
 			+ "(joined, purchased_property), never a sentence: a sentence where the type goes is kept as a plain "
 			+ "occurrence and never becomes vocabulary, so put the detail in the text and the things involved in "
 			+ "participants. A participant alongside or in a capacity gets a role, {\"Calle Wilund\": \"with\"} "
-			+ "(\"created JMAPI with Calle Wilund\"), and is left out of the type's effects. Dates are ISO (2018, 2018-03, 2018-03-05); resolve relative dates yourself.";
+			+ "(\"created JMAPI with Calle Wilund\"), and is left out of the type's effects. Dates are ISO (2018, 2018-03, 2018-03-05); resolve relative dates yourself. "
+			+ "A name the text gives an entity on record that you resolved yourself (\"my father (Konrad)\" for "
+			+ "Konrad Nyberg) goes in its aliases, {\"name\": \"Konrad Nyberg\", \"aliases\": [\"Konrad\"]}, so later "
+			+ "mentions resolve to it.";
 
 	static final String REMEMBER_RESOLVE = "Answers to open questions: [{question_id: q-N, choice}]. The choice is one of the "
 			+ "question's numbered candidate ids; entity and predicate questions also take \"new\", conflicts take ended | "
 			+ "supersede | reject | reinterpret | wrong (reinterpret rejects the pending fact and applies this call's "
 			+ "proposal instead) or both (only when one value lies within the other on record: a street address "
-			+ "within its town; both then stand), containment questions take yes | no. Answers may come with a new text, alone, or "
+			+ "within its town; both then stand), containment and same_entity questions take yes | no (yes merges two things that share a name; nothing is merged unasked). A name several things carry is asked at every mention: answer each from what the conversation says. Answers may come with a new text, alone, or "
 			+ "with a re-reading (observation_id + proposal): they are applied first, so what an answer creates (a new "
 			+ "entity) is there when the reading resolves its names.";
 
@@ -149,8 +152,9 @@ final class ToolDescriptions {
 			+ "\"M.Sc. in Computer Science\"} says what the type and participants leave unsaid; {\"roles\": "
 			+ "{\"Calle Wilund\": \"with\"}} gives participants roles (an empty one clears it). A fact's object may "
 			+ "name an entity by its id (\"object\": \"ent-12\"). An entity (ent-12) "
-			+ "with {name | type | aliases | merge_into}, where aliases is the list to keep (drop the alias a wrong match "
-			+ "left) and {\"merge_into\": \"ent-7\"} folds a duplicate into the entity it names (facts, events, and "
+			+ "with {name | type | aliases | add_aliases | merge_into}, where aliases is the list to keep (drop the alias "
+			+ "a wrong match left), add_aliases adds names it is also called by and drops none ({\"add_aliases\": "
+			+ "[\"Konrad\"]}), and {\"merge_into\": \"ent-7\"} folds a duplicate into the entity it names (facts, events, and "
 			+ "aliases move; the old id keeps resolving to the survivor). A predicate "
 			+ "(pred:parent_of) with {render | renders | lexicon | qualifiers | functional | symmetric | "
 			+ "volatility | lasting | domain | range | description | defined_as | implies | containment | groups | ends} (ends: the "
@@ -185,8 +189,8 @@ final class ToolDescriptions {
 	static final String CONSOLIDATE = "Writes report.md in the data home, a page of the store as a person reads it, with "
 			+ "'findings' (what to look at, each with the call that fixes it; the reply carries them too), and returns "
 			+ "its path; inspect('report') reads it later. "
-			+ "Housekeeping over stored knowledge: merges entities that later evidence showed to be "
-			+ "the same, closes facts whose ending event was recorded afterwards, lists observations still waiting for a "
+			+ "Housekeeping over stored knowledge: asks whether things of one kind that share a name are one "
+			+ "(same_entity: a 'same_entity' question each, answered yes to merge or no; nothing is merged unasked), closes facts whose ending event was recorded afterwards, lists observations still waiting for a "
 			+ "reading, open questions, vocabulary registered from use that still lacks a description or an effect "
 			+ "(inferred_vocabulary: settle them with the user through correct), predicates close in meaning to another "
 			+ "(similar_vocabulary: merge_into through correct when they are one relation), events whose type is a sentence "

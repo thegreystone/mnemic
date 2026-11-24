@@ -183,7 +183,7 @@ public final class Engine implements AutoCloseable {
 			List<Map<String, Object>> similarVocabulary, List<Map<String, Object>> descriptiveEvents,
 			List<Map<String, Object>> unusedVocabulary, List<Map<String, Object>> unresolvedDerivations,
 			List<Map<String, Object>> misfiledRelations, List<Map<String, Object>> attributeUnknown,
-			List<Map<String, Object>> merges, List<Map<String, Object>> nameCollisions, int reclosed,
+			List<Map<String, Object>> sameEntity, List<Map<String, Object>> nameCollisions, int reclosed,
 			List<Map<String, Object>> proposed, List<Map<String, Object>> resolvedQuestions,
 			List<Map<String, Object>> review, List<String> retired, int embedded, List<Map<String, Object>> duplicates,
 			Rebuilt rebuilt, int removedEntities, List<Map<String, Object>> repairs,
@@ -236,6 +236,8 @@ public final class Engine implements AutoCloseable {
 		knowledge.factService().backfillCorrectionReadings();
 		// Events retyped from a sentence before events kept a detail get the sentence back as their detail.
 		knowledge.events().backfillRetypedDetails();
+		// Web addresses stored with no kind are websites (2026-11-24).
+		knowledge.entities().typeWebAddresses();
 		indexer.ensureScheme(db);
 		// A seed that took over a predicate registered from use: its facts read the seed's way from now on.
 		for (String adopted : knowledge.predicates().adoptedAtStart()) {
@@ -274,6 +276,7 @@ public final class Engine implements AutoCloseable {
 		Observation obs = observations.get(r.observationId()).orElseThrow();
 		List<Map<String, Object>> resolved = resolves == null || resolves.isEmpty() ? List.of()
 				: knowledge.resolver().resolve(obs, resolves);
+		foldAfterMerges(resolved);
 		if (proposal != null) {
 			Applied applied = knowledge.factService().apply(obs, proposal);
 			if (definesOnly(proposal) && applied.definitions().isEmpty() && !applied.warnings().isEmpty()) {
@@ -347,9 +350,22 @@ public final class Engine implements AutoCloseable {
 		return reread(observationId, proposal).applied();
 	}
 
+	/**
+	 * A "yes" to whether two things that share a name are one merged them: the facts that now say the same thing twice
+	 * fold at once, as after correct(merge_into).
+	 */
+	private void foldAfterMerges(List<Map<String, Object>> resolved) {
+		for (Map<String, Object> r : resolved) {
+			if (r.get("merged") != null && r.get("entity") instanceof String ref && ref.startsWith("ent-")) {
+				r.put("folded", knowledge.consolidator().foldDuplicatesOf(Long.parseLong(ref.substring(4))));
+			}
+		}
+	}
+
 	/** Answers open questions without recording an observation: the answers live on the questions themselves. */
 	public List<Map<String, Object>> answer(List<Resolve> resolves) {
 		List<Map<String, Object>> resolved = knowledge.resolver().resolve(resolves, options.clock().instant());
+		foldAfterMerges(resolved);
 		indexer.embedMissing(50);
 		if (!resolved.isEmpty()) {
 			derive();

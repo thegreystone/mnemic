@@ -305,7 +305,7 @@ final class ToolViews {
 
 	Map<String, Object> consolidate(Consolidation c, boolean dryRun, List<String> findings, Path reportPath) {
 		Fields out = new Fields().put("dry_run", dryRun).put("findings", findings).put("report", reportPath.toString())
-				.putCapped("merges", c.merges()).putCapped("name_collisions", c.nameCollisions())
+				.putCapped("same_entity", c.sameEntity()).putCapped("name_collisions", c.nameCollisions())
 				.put("reclosed_facts", c.reclosed()).put("pending_proposals", c.pendingProposals())
 				.putCapped("proposed", c.proposed()).putCapped("resolved_questions", c.resolvedQuestions())
 				.putCapped("backlog", c.backlog()).putCapped("open_questions", c.openQuestions())

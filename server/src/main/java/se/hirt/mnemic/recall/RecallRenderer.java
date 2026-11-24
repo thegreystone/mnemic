@@ -220,8 +220,10 @@ final class RecallRenderer {
 
 	private static void verdictLine(
 		StringBuilder sb, String prefix, Structured s, List<Event> events, Instant now, boolean polar) {
-		String key = s.entityName() + " · " + s.predicate() + (s.qualifier() != null ? "[" + s.qualifier() + "]" : "")
+		String relation = s.predicate() + (s.qualifier() != null ? "[" + s.qualifier() + "]" : "")
 				+ (s.group() != null ? " (via " + s.group() + ")" : "");
+		// A kind that picked the facts ("what are my cars") leads, with the relations they stand under.
+		String key = s.entityName() + " · " + (s.kind() != null ? s.kind() + " (under " + relation + ")" : relation);
 		sb.append(prefix);
 		switch (s.state()) {
 		case "matched" -> {

@@ -767,7 +767,12 @@ public final class EntityTypeRegistry {
 				seed("animal", "An animal: a pet, livestock, wildlife.", null, List.of("pet", "animals"), List.of(),
 						List.of("dog", "cat", "horse", "pony", "bird", "rabbit", "hamster", "puppy", "kitten", "fish",
 								"cow", "sheep", "goat", "chicken")),
-				seed("domain", "A field of knowledge or activity.", null, List.of("field", "area"), List.of()));
+				seed("domain", "A field of knowledge or activity.", null, List.of("field", "area"), List.of()),
+				// A web address names a site or a profile: SoundCloud, LinkedIn, and GitHub profiles stored with no
+				// kind were offered as possible cars (2026-11-24). Untyped names that are web addresses take it.
+				seed("website", "A website, web page, or online profile, named by its address.", null,
+						List.of("web site", "web page", "webpage", "homepage", "web address", "url", "websites"),
+						List.of(), List.of("profile", "blog")));
 	}
 
 	private static EntityType seed(

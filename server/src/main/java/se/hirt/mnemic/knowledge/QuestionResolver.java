@@ -144,6 +144,14 @@ public final class QuestionResolver {
 						chosen = entities.get(chosen.id()).orElseThrow();
 						result.put("renamed", Map.of("from", from, "to", chosen.name(), "rerendered_facts",
 								facts.rerenderMentioning(chosen.id())));
+					} else if (entities.addAlias(chosen.id(), q.subject(), q.observationId())) {
+						// "Clara" confirmed to be Clara Nyberg: the name the question was about is another name of the
+						// chosen entity, so a later mention resolves to it unless another thing carries the name too.
+						// Said in the reply.
+						result.put("alias_added", q.subject());
+					}
+					for (String alias : heldAliases(q)) {
+						entities.addAlias(chosen.id(), alias, q.observationId());
 					}
 				}
 				bindings.put(q.subject(), chosen);
@@ -156,6 +164,7 @@ public final class QuestionResolver {
 			case "event_effect" -> result.putAll(resolveEventEffect(q, choice));
 			case "type_kind" -> result.putAll(resolveTypeKind(q, choice, obs));
 			case "derivation" -> result.putAll(resolveDerivation(q, choice, obs));
+			case "same_entity" -> result.putAll(resolveSameEntity(q, choice, obs));
 			default -> {
 				questions.dismiss(q.id(), choice);
 				result.put("status", "dismissed");
@@ -174,28 +183,35 @@ public final class QuestionResolver {
 	}
 
 	/** The entity an entity question's answer names: a listed candidate, any existing {@code ent-N}, or a new one. */
+	/** The aliases the held proposal gave the entity the question is about ("Clara Lind, Clara at work"). */
+	private static List<String> heldAliases(Question q) {
+		return Proposal.parse(q.payload()).entities().stream()
+				.filter(e -> e.name() != null && Names.norm(e.name()).equals(Names.norm(q.subject())))
+				.flatMap(e -> e.aliases().stream()).filter(a -> a != null && !a.isBlank()).toList();
+	}
+
 	private Entity chooseEntity(Question q, String choice) {
 		Proposal held = Proposal.parse(q.payload());
 		if ("new".equalsIgnoreCase(choice)) {
 			String type = held.entities().stream().filter(e -> Names.norm(e.name()).equals(Names.norm(q.subject())))
 					.map(EntityRef::type).findFirst().orElse(null);
 			// Created once: a second answer naming the same new subject in the same call reuses it. An entity the
-			// question offered and the answer passed over is not it, whatever its name.
+			// question offered and the answer passed over is not it, whatever its name. It keeps the aliases the
+			// proposal gave it, a name another thing carries included (2026-11-24: they were dropped).
 			return entities.byRef(q.subject())
 					.filter(e -> e.id() != entities.owner().id()
 							&& q.candidates().stream().noneMatch(c -> e.ref().equals(c.get("id")))
 							&& entityTypes.compatible(e.type(), entityTypes.canonical(type)))
-					.orElseGet(() -> entities.create(q.subject(), type, List.of(), q.observationId()));
+					.orElseGet(() -> entities.create(q.subject(), type, heldAliases(q), q.observationId()));
 		}
 		boolean listed = q.candidates().stream().anyMatch(c -> choice.equals(c.get("id")));
 		if (!listed && !choice.startsWith("ent-")) {
 			throw MnemicException.invalidArgument("'" + choice + "' is not a candidate of " + q.ref()
 					+ "; answer with one of " + q.candidates() + ", an existing entity id (ent-N), or \"new\".");
 		}
-		Entity chosen = entities.byRef(choice).orElseThrow(() -> MnemicException.notFound("No entity " + choice));
-		// The name the question was about is now known to be an alias of the chosen entity.
-		entities.resolve(chosen.name(), chosen.type(), List.of(q.subject()), q.observationId());
-		return chosen;
+		// The name the question was about becomes an alias of the chosen entity in the caller: added directly, since
+		// resolving the chosen name with that alias merged an entity already carrying it into the one chosen.
+		return entities.byRef(choice).orElseThrow(() -> MnemicException.notFound("No entity " + choice));
 	}
 
 	private Map<String, Object> applyHeld(
@@ -224,7 +240,9 @@ public final class QuestionResolver {
 			if (!"entity_resolution".equals(q.kind()) || q.subject() == null) {
 				continue;
 			}
-			Optional<Entity> exact = entities.byRef(q.subject());
+			// Only a name one thing carries settles a question; several carrying it is what the question is for.
+			List<Entity> carriers = entities.carriers(q.subject());
+			Optional<Entity> exact = carriers.size() == 1 ? Optional.of(carriers.getFirst()) : Optional.empty();
 			if (exact.isEmpty() || exact.get().id() == entities.owner().id()) {
 				continue;
 			}
@@ -361,6 +379,37 @@ public final class QuestionResolver {
 				.invalidArgument("'" + choice + "' is not an answer to " + q.ref() + "; use keep or wrong.");
 		}
 		questions.answer(q.id(), choice);
+		m.put("status", "answered");
+		return m;
+	}
+
+	/**
+	 * Two things that share a name: yes folds one into the other (facts, events, and aliases move; the old id resolves
+	 * to the survivor), no keeps them apart, the name shared, and the pair is not asked about again.
+	 */
+	private Map<String, Object> resolveSameEntity(Question q, String choice, Observation obs) {
+		Map<String, Object> payload = Json.readMap(q.payload());
+		Entity from = entities.byRef(String.valueOf(payload.get("entity")))
+				.orElseThrow(() -> MnemicException.notFound("No entity " + payload.get("entity")));
+		Entity into = entities.byRef(String.valueOf(payload.get("into")))
+				.orElseThrow(() -> MnemicException.notFound("No entity " + payload.get("into")));
+		var m = new LinkedHashMap<String, Object>();
+		switch (choice.toLowerCase(Locale.ROOT)) {
+		case "yes" -> {
+			if (from.id() != into.id()) {
+				m.put("merged", entities.merge(from.id(), into.id(), obs == null ? null : obs.id(),
+						"answered " + q.ref() + ": the same, both called \"" + payload.get("shared") + "\""));
+			}
+			m.put("entity", into.ref());
+		}
+		case "no" -> m.put("note",
+				from.name() + " (" + from.ref() + ") and " + into.name() + " (" + into.ref()
+						+ ") stay apart and both keep the name \"" + payload.get("shared")
+						+ "\"; a mention of it is asked about.");
+		default -> throw MnemicException
+				.invalidArgument("'" + choice + "' is not an answer to " + q.ref() + "; use yes or no.");
+		}
+		questions.answer(q.id(), choice.toLowerCase(Locale.ROOT));
 		m.put("status", "answered");
 		return m;
 	}

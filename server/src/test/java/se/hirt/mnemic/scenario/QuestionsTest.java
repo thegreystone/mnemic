@@ -598,7 +598,7 @@ class QuestionsTest {
 
 	@Test
 	@Scenario("G2")
-	void laterAliasMergesEarlierDuplicates() {
+	void aLaterAliasAsksWhetherAnEarlierThingIsTheSame() {
 		try (Engine e = engine("g2")) {
 			remember(e, "I met Anna Lindqvist.",
 					proposal().entity("e1", "Anna Lindqvist", "person").fact("self", "knows", "e1"));
@@ -608,7 +608,15 @@ class QuestionsTest {
 			long alId = Long.parseLong(al.applied().entities().getFirst().id().substring(4));
 			RememberOutcome third = remember(e, "Anna — AL to her friends — is visiting.",
 					proposal().entity("e1", "Anna Lindqvist", "person", "AL", "Anna").fact("self", "knows", "e1"));
-			assertEquals("merged", third.applied().entities().getFirst().resolution(), third.applied().toString());
+			// The alias is shared, not taken as proof: nothing is merged unasked (2026-11-24).
+			assertEquals("alias", third.applied().entities().getFirst().resolution(), third.applied().toString());
+			assertEquals(0, e.entities().merges().size(), "nothing merged before the answer");
+			Map<String, Object> same = third.applied().questions().getFirst();
+			assertEquals("same_entity", same.get("kind"), same.toString());
+			assertTrue(same.get("message").toString().contains("both called \"AL\""), same.toString());
+			RememberOutcome yes = remember(e, "Yes, AL is Anna.", proposal(),
+					new Resolve(String.valueOf(same.get("id")), "yes"));
+			assertTrue(yes.resolved().getFirst().containsKey("merged"), yes.resolved().toString());
 			Entity anna = e.entities().byRef("Anna Lindqvist").orElseThrow();
 			assertEquals(anna.id(), e.entities().byRef("AL").orElseThrow().id());
 			assertEquals(anna.id(), e.entities().byRef("Anna").orElseThrow().id());
@@ -619,7 +627,7 @@ class QuestionsTest {
 					"facts re-pointed");
 			assertEquals(1, e.entities().merges().size(), "merge recorded");
 			Consolidation c = e.consolidate(false);
-			assertTrue(c.merges().isEmpty(), "nothing left to merge");
+			assertTrue(c.sameEntity().isEmpty(), "nothing left to ask");
 		}
 	}
 
@@ -632,7 +640,7 @@ class QuestionsTest {
 			assertEquals(1, c.pendingProposals());
 			assertEquals(1, c.backlog().size());
 			assertEquals(0, e.facts().count(), "no facts invented");
-			assertTrue(c.merges().isEmpty());
+			assertTrue(c.sameEntity().isEmpty());
 			assertTrue(c.inferredVocabulary().isEmpty());
 		}
 	}

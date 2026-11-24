@@ -90,7 +90,8 @@ final class StructuredProbe {
 			return new Structured("unresolved", null, null, null, null, List.of(), List.of(), List.of());
 		}
 		if (q.bound().isEmpty()) {
-			return entityOnly(q, asOf, now, includeHistory);
+			Structured byKind = kindOnly(q, asOf, now, includeHistory);
+			return byKind != null ? byKind : entityOnly(q, asOf, now, includeHistory);
 		}
 		// In the question's order: the verdict is the first relation the question names that answered.
 		List<Query.Bound> bound = q.bound().stream().sorted((a, b) -> Integer.compare(a.start(), b.start())).toList();
@@ -267,6 +268,7 @@ final class StructuredProbe {
 				notes.add("the question names " + String.join(", ", q.named()) + ", which none of the facts mention");
 			}
 		}
+		String narrowedTo = null;
 		if (!q.kinds().isEmpty() && !matched.isEmpty() && decidedBy == null && !cue.predicate().literalRange()) {
 			// "What motorcycles does Mattias own": the kind asked for is checked against the type of the other side
 			// of each fact. A kind on record narrows the answer, the rest becoming near-misses; one the store never
@@ -299,12 +301,21 @@ final class StructuredProbe {
 						continue;
 					}
 					other.add(f);
-					// What the store cannot classify (no kind, or a kind nobody has placed) may be one: said.
-					if (t == null || EntityTypeRegistry.UNKNOWN.equals(t)) {
-						unsure.add(otherName(f, q.spotted()) + " (no kind on record)");
-					} else if (types.unplaced(t)) {
-						unsure.add(otherName(f, q.spotted()) + " (" + t + ", a kind nobody has placed)");
+					// What the store cannot classify (no kind, or a kind nobody has placed) may be one: said. A web
+					// address written as words is a site or a profile, never a car (2026-11-24).
+					String name = otherName(f, q.spotted());
+					if (Names.isWebAddress(name)) {
+						continue;
 					}
+					if (t == null || EntityTypeRegistry.UNKNOWN.equals(t)) {
+						unsure.add(name + " (no kind on record)");
+					} else if (types.unplaced(t)) {
+						unsure.add(name + " (" + t + ", a kind nobody has placed)");
+					}
+				}
+				if (!kept.isEmpty()) {
+					// Narrowed to what was asked for: an answer, which ranks even for the owner (RecallService gates).
+					narrowedTo = String.join(" or ", asked);
 				}
 				if (kept.isEmpty()) {
 					notes.add("nothing under " + under + " is recorded as a " + String.join(" or ", asked) + "; the "
@@ -362,7 +373,8 @@ final class StructuredProbe {
 		List<Fact> chain = matched.isEmpty() ? List.of() : chain(matched, asOf, now);
 		return new Structured(state, entity.ref(), entity.name(), cue.predicate().name(), cue.qualifier(),
 				List.copyOf(matched), List.copyOf(near), chain, List.copyOf(bounds), decidedBy, basis,
-				List.copyOf(notes), List.copyOf(future), List.copyOf(ended)).withGroup(cue.group());
+				List.copyOf(notes), List.copyOf(future), List.copyOf(ended)).withGroup(cue.group())
+				.withKind(narrowedTo);
 	}
 
 	/** The facts of one entity under the cue, sorted into matched, near (the qualifier differs), and future. */
@@ -555,21 +567,74 @@ final class StructuredProbe {
 
 	/** An entity without a predicate cue ("who is Bosse"): its facts are the channel. */
 	private Structured entityOnly(Query q, Instant asOf, Instant now, boolean includeHistory) {
-		// With another entity in the query, the owner's own facts carry no signal ("what did I say about Anna").
-		List<Entity> subjects = q.spotted().size() > 1 ? q.others(entities.owner().id()) : q.spotted();
 		var all = new ArrayList<Fact>();
-		for (Entity e : subjects) {
+		for (Entity e : unnamedRelationSubjects(q)) {
 			for (Fact f : facts.factsOf(e.id())) {
-				boolean holds = asOf != null
-						? (!"pending".equals(f.status()) && !"corrected".equals(f.status()) && f.mayHoldAt(asOf))
-						: ("current".equals(f.state(now)) || (includeHistory && !"pending".equals(f.status())));
-				if (holds) {
+				if (holds(f, asOf, now, includeHistory)) {
 					all.add(f);
 				}
 			}
 		}
 		Entity first = q.spotted().getFirst();
 		return new Structured("entity", first.ref(), first.name(), null, null, List.copyOf(all), List.of(), List.of());
+	}
+
+	/**
+	 * The subjects of a question that names no relation: with another entity in it, the owner's own facts carry no
+	 * signal ("what did I say about Anna").
+	 */
+	private List<Entity> unnamedRelationSubjects(Query q) {
+		return q.spotted().size() > 1 ? q.others(entities.owner().id()) : q.spotted();
+	}
+
+	private static boolean holds(Fact f, Instant asOf, Instant now, boolean includeHistory) {
+		return asOf != null ? (!"pending".equals(f.status()) && !"corrected".equals(f.status()) && f.mayHoldAt(asOf))
+				: ("current".equals(f.state(now)) || (includeHistory && !"pending".equals(f.status())));
+	}
+
+	/**
+	 * "What are my current cars" names no relation, only a kind of thing on record: the answer is the subject's
+	 * asserted facts whose other side is of that kind, under whatever relation they stand (the cars owned, the car
+	 * driven). Before, no cue meant no verdict, and the cars came back 4th, 9th, and 10th behind every observation that
+	 * said "current" (2026-11-24). A kind the store never heard of, or nothing of the kind on record, leaves the
+	 * question to the entity's facts as before: null.
+	 */
+	private Structured kindOnly(Query q, Instant asOf, Instant now, boolean includeHistory) {
+		if (q.kinds().isEmpty()) {
+			return null;
+		}
+		var asked = new ArrayList<String>();
+		for (String k : q.kinds()) {
+			types.kindNamedBy(k, q.language()).filter(t -> !asked.contains(t)).ifPresent(asked::add);
+		}
+		if (asked.isEmpty()) {
+			return null;
+		}
+		List<Entity> subjects = unnamedRelationSubjects(q);
+		var matched = new ArrayList<Fact>();
+		for (Entity e : subjects) {
+			for (Fact f : facts.factsOf(e.id())) {
+				if (!f.asserted() || !holds(f, asOf, now, includeHistory)
+						|| matched.stream().anyMatch(m -> m.id() == f.id())) {
+					continue;
+				}
+				Long otherId = f.subjectId() == e.id() ? f.objectId() : Long.valueOf(f.subjectId());
+				if (otherId == null || otherId == e.id()) {
+					continue;
+				}
+				String t = entities.get(otherId).map(Entity::type).orElse(null);
+				if (t != null && asked.stream().anyMatch(k -> types.isA(t, k))) {
+					matched.add(f);
+				}
+			}
+		}
+		if (matched.isEmpty()) {
+			return null;
+		}
+		Entity first = subjects.getFirst();
+		String relations = String.join(", ", matched.stream().map(Fact::predicate).distinct().toList());
+		return new Structured("matched", first.ref(), first.name(), relations, null, List.copyOf(matched), List.of(),
+				List.of()).withKind(String.join(" or ", asked));
 	}
 
 	/** The basis on which a bound decides the question false, or null when it does not. */

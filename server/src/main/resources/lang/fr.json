@@ -453,6 +453,14 @@
       "mes",
       "the user",
       "user"
+    ],
+    "tense_filler": [
+      "actuel",
+      "actuelle",
+      "actuels",
+      "actuelles",
+      "actuellement",
+      "maintenant"
     ]
   },
   "fact": {

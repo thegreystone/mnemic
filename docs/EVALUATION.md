@@ -122,7 +122,7 @@ remember(text: "Yes, the same Anna.",
 Expect: the held fact is applied against `ent-AnnaLindqvist` and is
 `current`; `Anna` becomes one of her aliases; question closed.
 
-### B3. Same name, different type, is asked once
+### B3. Same name, different type, is asked
 
 ```text
 remember(text: "Java is the language Mnemic is written in.", proposal: { entities: [ Java (technology) ] ... })
@@ -134,9 +134,8 @@ candidate at score 1.0 and `new` beside it: a caller cannot know what type
 a thing was first registered under, so an exact name of another kind is
 never a silent second entity and never a silent match. Answered `new`, two
 entities; typed, each later mention resolves to its own kind without a
-word. An untyped mention that fits both asks too, and the answer settles
-every later untyped mention (resolution `answered`): the question is asked
-once.
+word. An untyped mention that fits both asks too, at every such mention:
+the next may mean the other one (T31).
 
 ### B4. Type mismatch overrides string similarity
 
@@ -1002,7 +1001,7 @@ consolidate()
 Expect: facts derived under spec 1 re-derived; results identical for this
 input; the stored spec version updated to 2; original observation unchanged.
 
-### G2. Later alias merges earlier duplicates
+### G2. A later alias asks whether an earlier thing is the same
 
 ```text
 remember(text: "I met Anna Lindqvist.")
@@ -1012,11 +1011,13 @@ remember(text: "Anna — AL to her friends — is visiting.",
 consolidate()
 ```
 
-Expect: the third call merges the `AL` entity into Anna Lindqvist
-(`resolution: merged`); one entity, aliases `AL` and `Anna`, the old id
-following the merge; facts from the second observation re-pointed to it;
-the merge recorded (`merges`). `consolidate()` afterwards has nothing left
-to merge.
+Expect: the third call resolves Anna Lindqvist by her name, gives her the
+aliases `AL` and `Anna`, and merges nothing: `AL` is now a name two things
+carry, which may be so (T31). It raises a `same_entity` question about the
+`AL` entity and Anna. Answered `yes`, one entity: the old id follows the
+merge, the facts from the second observation are re-pointed, and the merge
+is recorded (`merges`). `consolidate()` afterwards has nothing left to ask.
+Before 2026-11-24 the alias merged them unasked.
 
 ### G3. Consolidate without a model does not fabricate
 
@@ -3041,3 +3042,121 @@ instead leaves the event with the first, undated again: what the dated
 death had closed is closed still, without a day (T18). A rebuild finds the
 sources again from the observations.
 
+### T26. A kind asked for with no relation named is answered from every relation
+
+```text
+recall(query: "What are my current cars?")       # three cars owned, one of them driven by Konrad
+recall(query: "What are Konrad's cars?")
+recall(query: "which cars do I have")
+```
+
+Expect: no relation is named, but "cars" names a kind on record, so the
+verdict is matched: the subject's facts whose other side is a car, under
+whatever relation they hold ("Mattias Sandell · car (under owns)";
+Konrad's under drives). They rank first, ahead of observations that only
+say "current". A kind the store never heard of ("gliders") leaves the
+question to the entity's facts as before. A question that names the
+relation ("what cars does Mattias own") is narrowed as in F19; narrowed to
+a kind on record, the verdict is an answer that ranks first even though
+the owner is its subject ("Mattias Sandell · car (under owns)").
+
+### T27. A correction is shown with the statement it corrected
+
+```text
+correct(ref: "f-N", changes: { qualifier: "formally; in practice Konrad's car" })
+correct(ref: "f-M", changes: { valid_time: { start: "2021-11-11" } })
+recall(query: "What are my current cars?")
+```
+
+Expect: no correction record ("Correction of …") is a hit of its own.
+Whatever ranked a record ranks the observation behind what it corrected,
+through a chain of corrections, and that hit carries the fact as it now
+holds. The ten places go to statements, so two corrections of one car no
+longer push another car out. A record whose fact is gone (ids renumbered
+by a rebuild) is followed through the facts it made current and back
+through what they replaced. A record whose statement is forgotten or
+retired stays a hit of its own.
+
+### T28. Words that only place a question in time, or are another word, are not searched
+
+```text
+recall(query: "What are my current cars?")       # "my current go-to tool", "my current languages" on record
+recall(query: "what cars does Mattias own")      # "my own mobile number", "her own Garmin account" on record
+recall(query: "what is my own phone number")
+```
+
+Expect: "current", "currently", "now" (and their equivalents in each
+language pack) are no search terms unless nothing else is left; the
+valid-time rules already read the present. "own" after a possessive
+("my own", "her own", "Mattias's own") or right after an opening
+parenthesis, quotation mark, or colon (a qualifier, "(own mobile
+number)", a correction record's reading) is the adjective: it matches no
+text or rendering, a full-text hit that matched only so is dropped, and
+in a question it cues no `owns` (the phone number is asked under
+`has_phone`). "does not own" is still the verb.
+
+### T29. A web address with no kind is a website
+
+```text
+remember(text: "My GitHub profile is https://github.com/sandell-example.", proposal: { entities: [ https://github.com/sandell-example ] })
+recall(query: "what cars does Mattias own")
+```
+
+Expect: an entity named by a web address and given no kind is created as
+a `website` (a seed type), so it is never offered as "may be one" of a
+kind asked for. Untyped web addresses already in a store become websites
+when it opens, and a web address kept as words (an older store's literal
+object) is no candidate either.
+
+### T30. A name confirmed for an entity is its alias, never a merge
+
+```text
+remember(text: "My mother (Clara) drives the Yaris.", proposal: { entities: [ Clara Nyberg, aliases: [Clara] ] })
+correct(ref: "ent-N", changes: { add_aliases: ["Mamma"] })
+remember(resolve: [{ question_id: "q-N", choice: "ent-M" }])   # "Peter": the one not yet called so
+```
+
+Expect: a name the assistant resolved itself is passed in the entity's
+`aliases` and attached to the entity on record; a later bare "Clara"
+resolves to her without a question. `add_aliases` adds names and drops
+none (`aliases` stays the list to keep, T21). Answering which entity a
+name means adds the name as an alias of the one chosen and says so
+(`alias_added`), and never merges another entity that already carries the
+name into it: both Peters stay.
+
+### T31. Two things may share a name; which one is meant, and whether they are one, is asked
+
+```text
+remember(text: "My mother is Clara Nyberg; everyone calls her Clara.", proposal: { entities: [ Clara Nyberg, aliases: [Clara] ] })
+remember(text: "Clara Lind, Clara at work, is my colleague.", proposal: { entities: [ Clara Lind, aliases: [Clara] ] })
+remember(text: "Clara called.", proposal: { entities: [ Clara ] })   # twice
+consolidate()
+remember(text: "My mother Clara Nyberg is Freja to her grandchildren.", proposal: { entities: [ Clara Nyberg, aliases: [Freja] ] })   # a Freja on record
+```
+
+Expect: an alias is not proof of identity. A name nobody carries whose
+alias one thing carries is an `entity_resolution` question (Clara Lind or
+Clara Nyberg, or `new`); answered `new`, the new entity keeps the aliases
+the proposal gave it, so both carry "Clara". A bare "Clara" is asked at
+every mention, both people candidates: an answer is about that mention,
+and the next may mean the other one. A mention typed with a kind only one
+of them has is not asked (B3). Nothing is merged unasked: `consolidate`
+raises one `same_entity` question per pair of one kind that shares a name
+(`same_entity` in its reply, never merged), and an alias given to one
+entity that another carries raises the same question at `remember`.
+`yes` merges, `no` keeps them apart, and a pair once answered is not asked
+again. `correct(ent-N, {merge_into})` stays the explicit merge.
+
+### T32. A role word in the plural cues its relation
+
+```text
+recall(query: "who are my brothers")       # two brothers and a sister on record
+recall(query: "who are Mattias's sisters")
+```
+
+Expect: a one-word role (a qualifier, or a word of a predicate's inverse
+lexicon) also matches a question word that is its plural in any language
+pack: `sibling_of[brother]` with both brothers, `sibling_of[sister]` with
+the sister. Before, only the singular cued the relation, and the plural
+was answered by meaning alone. A predicate's own words (mostly verbs that
+list their forms) take no plural this way.

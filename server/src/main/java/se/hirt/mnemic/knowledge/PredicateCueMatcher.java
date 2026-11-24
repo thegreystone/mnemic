@@ -236,13 +236,42 @@ final class PredicateCueMatcher {
 	}
 
 	/**
+	 * A term of a relation's vocabulary as the question writes it: the term itself, or, for a one-word term, a word of
+	 * the question that is its plural in any language pack ("who are my brothers" for the qualifier "brother", which
+	 * the exact match missed while "who is my brother" answered, 2026-11-24). Null when the question has neither.
+	 */
+	private static String asWritten(String q, List<String> tokens, String key) {
+		if (key.isEmpty()) {
+			return null;
+		}
+		if (q.contains(" " + key + " ")) {
+			return key;
+		}
+		if (key.indexOf(' ') >= 0) {
+			return null;
+		}
+		for (String t : tokens) {
+			if (t.length() <= key.length()) {
+				continue;
+			}
+			for (Lang l : Lang.values()) {
+				if (Lang.singulars(t, l).contains(key)) {
+					return t;
+				}
+			}
+		}
+		return null;
+	}
+
+	/**
 	 * The cues of a question whose entity names are already known: {@code excluded} holds the tokens of the entities
 	 * spotted in it, which no phrase compared by meaning may contain.
 	 */
 	List<Cue> cues(
 		String query, Set<String> excluded, Collection<Predicate> predicates, Collection<Group> groups,
 		Function<String, List<Predicate>> membersOf) {
-		String q = " " + String.join(" ", Names.tokens(query)) + " ";
+		List<String> tokens = Names.tokens(query);
+		String q = " " + String.join(" ", tokens) + " ";
 		var out = new ArrayList<Cue>();
 		var cued = new HashSet<String>(); // predicates the question names by their own words
 		var freeCued = new HashSet<Cue>();
@@ -255,10 +284,12 @@ final class PredicateCueMatcher {
 			boolean free = p.qualifiers().isEmpty();
 			for (String term : free ? inUse.getOrDefault(p.name(), List.of()) : p.qualifiers()) {
 				String key = String.join(" ", Names.tokens(term));
-				if (!q.contains(" " + key + " ") || terms.containsKey(key)) {
+				String written = asWritten(q, tokens, key);
+				if (written == null || terms.containsKey(key)) {
 					continue;
 				}
-				Cue c = new Cue(p, term, term, free || p.symmetric() ? "any" : "object");
+				Cue c = new Cue(p, term, written.equals(key) ? term : written,
+						free || p.symmetric() ? "any" : "object");
 				terms.put(key, c);
 				if (free) {
 					freeCued.add(c);
@@ -266,10 +297,11 @@ final class PredicateCueMatcher {
 			}
 			for (String term : p.inverseLexicon()) {
 				String key = String.join(" ", Names.tokens(term));
-				if (!q.contains(" " + key + " ") || terms.containsKey(key)) {
+				String written = asWritten(q, tokens, key);
+				if (written == null || terms.containsKey(key)) {
 					continue;
 				}
-				Cue c = new Cue(p, null, term, p.symmetric() ? "any" : "subject");
+				Cue c = new Cue(p, null, written.equals(key) ? term : written, p.symmetric() ? "any" : "subject");
 				terms.put(key, c);
 				viaInverse.add(c);
 			}
@@ -277,6 +309,7 @@ final class PredicateCueMatcher {
 			for (String alias : p.aliases()) {
 				own.addAll(Predicate.lexiconOf(alias)); // a name the caller once used, in any language
 			}
+			// A predicate's own words are mostly verbs whose forms it lists; only role words take a plural here.
 			for (String term : own) {
 				String key = String.join(" ", Names.tokens(term));
 				if (!q.contains(" " + key + " ") || terms.containsKey(key)) {
