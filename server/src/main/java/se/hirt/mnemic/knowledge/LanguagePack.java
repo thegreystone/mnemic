@@ -86,14 +86,15 @@ public final class LanguagePack {
 	 * rules already do; as search terms they matched every observation that said "current" about anything.
 	 * {@code homographs}: a word and the words before which it is another word ("own" after "my", "his": the adjective,
 	 * not the verb the {@code owns} cue reads). {@code kindCopulaPattern}: "what are my cars", the kind after the
-	 * copula.
+	 * copula. {@code determiners}: the articles and possessives that make a role word a common noun ("the mother", "his
+	 * brother"); without one, a role word stands as a name does ("what car does mom drive") and is the owner's.
 	 */
 	public record QueryCues(Set<String> markers, Set<String> questionWords, Set<String> ofWords, Set<String> andWords,
 			Set<String> polar, Set<String> past, Set<String> perfectAuxiliaries, Set<String> pastParticiples,
 			Set<String> pastMarkers, String ambiguousWhereWasWord, Set<String> ambiguousWhereWasVerbs,
 			Pattern forwardPattern, Set<String> polarFiller, Set<String> kindFiller, Pattern kindPhrasePattern,
 			Set<String> selfPronouns, Set<String> tenseFiller, Map<String, Set<String>> homographs,
-			Pattern kindCopulaPattern) {
+			Pattern kindCopulaPattern, Set<String> determiners) {
 
 		/**
 		 * Whether {@code first} followed by {@code second} is an ambiguous where/was opener acting as "where" (e.g.
@@ -382,9 +383,10 @@ public final class LanguagePack {
 		for (Map.Entry<String, JsonNode> e : node.path("homographs").properties()) {
 			homographs.put(Names.norm(e.getKey()), normSet(e.getValue()));
 		}
+		Set<String> determiners = normSet(node.path("determiners"));
 		return new QueryCues(markers, questionWords, ofWords, andWords, polar, past, perfectAuxiliaries,
 				pastParticiples, pastMarkers, ambigWord, ambigVerbs, forward, polarFiller, kindFiller, kindPhrase,
-				selfPronouns, tenseFiller, Map.copyOf(homographs), kindCopula);
+				selfPronouns, tenseFiller, Map.copyOf(homographs), kindCopula, determiners);
 	}
 
 	private static FactTemplates parseFact(JsonNode node, String path) {

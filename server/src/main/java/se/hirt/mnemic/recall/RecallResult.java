@@ -129,6 +129,20 @@ public record RecallResult(String query, Instant asOf, Structured structured, Li
 					decidedBy, basis, notes, future, ended, group, newAlso, kind);
 		}
 
+		/**
+		 * The verdict with the facts a question's path took to its subject before its own chain ("what car does mom
+		 * drive": the owner's mother first), shown on the {@code via:} line.
+		 */
+		public Structured withVia(List<Fact> path) {
+			if (path.isEmpty()) {
+				return this;
+			}
+			var through = new java.util.ArrayList<>(path);
+			chain.stream().filter(f -> through.stream().noneMatch(x -> x.id() == f.id())).forEach(through::add);
+			return new Structured(state, entity, entityName, predicate, qualifier, facts, nearMisses,
+					List.copyOf(through), bounds, decidedBy, basis, notes, future, ended, group, also, kind);
+		}
+
 		public Structured withKind(String newKind) {
 			return new Structured(state, entity, entityName, predicate, qualifier, facts, nearMisses, chain, bounds,
 					decidedBy, basis, notes, future, ended, group, also, newKind);

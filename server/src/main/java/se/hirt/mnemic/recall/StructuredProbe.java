@@ -37,6 +37,7 @@ import se.hirt.mnemic.knowledge.Fact;
 import se.hirt.mnemic.knowledge.FactQueries;
 import se.hirt.mnemic.knowledge.PredicateRegistry;
 import se.hirt.mnemic.knowledge.Lang;
+import se.hirt.mnemic.knowledge.LanguagePack;
 import se.hirt.mnemic.knowledge.Names;
 import se.hirt.mnemic.knowledge.Predicate;
 import se.hirt.mnemic.knowledge.PredicateRegistry.Cue;
@@ -52,6 +53,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * The structured channel: the spotted entities and the first predicate cue looked up directly over valid time. The
@@ -94,13 +96,15 @@ final class StructuredProbe {
 			return byKind != null ? byKind : entityOnly(q, asOf, now, includeHistory);
 		}
 		// In the question's order: the verdict is the first relation the question names that answered.
-		List<Query.Bound> bound = q.bound().stream().sorted((a, b) -> Integer.compare(a.start(), b.start())).toList();
+		List<Asked> asked = throughRoles(q,
+				q.bound().stream().sorted((a, b) -> Integer.compare(a.start(), b.start())).toList(), asOf, now);
+		List<Query.Bound> bound = asked.stream().map(Asked::bound).toList();
 		var verdicts = new ArrayList<Structured>();
 		// A literal may be checked against several entities and cues. Read its mentions once per recall, so
 		// subsequent recalls still see new aliases and entity merges.
 		var literalMentions = new HashMap<String, List<Entity>>();
-		for (Query.Bound b : bound) {
-			verdicts.add(probeOne(q, b, asOf, now, includeHistory, literalMentions));
+		for (Asked a : asked) {
+			verdicts.add(probeOne(q, a.bound(), asOf, now, includeHistory, literalMentions).withVia(a.via()));
 		}
 		Structured primary = verdicts.stream().filter(Structured::answered).findFirst().orElse(verdicts.getFirst());
 		var also = new ArrayList<Structured>();
@@ -112,6 +116,90 @@ final class StructuredProbe {
 			also.add(v);
 		}
 		return primary.withAlso(also);
+	}
+
+	/** A relation the question asks, with the facts its path took to the subject ("mom" to the owner's mother). */
+	private record Asked(Query.Bound bound, List<Fact> via) {
+	}
+
+	/** Tokens a path from a role word to the relation after it may skip: "what car does my mother usually drive". */
+	private static final int PATH_GAP = 2;
+
+	/**
+	 * "What car does mom drive", "where does my mother's sister live": a person's role with a subject ("my mother", or
+	 * "mom" as the owner's), followed closely by a relation the question gives no subject of its own, is a path, not
+	 * the question. The role is resolved to the people who hold it now, and they are the next relation's subjects; the
+	 * facts the path took are shown with its verdict. Before, the relation after the role was asked of the owner, and
+	 * the kind asked for ("car") was looked for under parent_of. A role nobody holds on record stays the question, its
+	 * miss the answer, and the relation after it is dropped: it was asked of someone the store does not know.
+	 */
+	private List<Asked> throughRoles(Query q, List<Query.Bound> bound, Instant asOf, Instant now) {
+		var asked = new ArrayList<Asked>();
+		for (Query.Bound b : bound) {
+			asked.add(new Asked(b, List.of()));
+		}
+		List<String> tokens = Names.tokens(q.text());
+		for (int i = 0; i + 1 < asked.size(); i++) {
+			Asked role = asked.get(i);
+			Query.Bound next = asked.get(i + 1).bound();
+			if (!isPath(role.bound(), next, tokens, q.entityTokens())) {
+				continue;
+			}
+			var path = new ArrayList<Fact>();
+			List<Entity> holders = holders(q, role.bound(), asOf, now, path);
+			if (holders.isEmpty()) {
+				asked.remove(i + 1);
+			} else {
+				var via = new ArrayList<>(role.via());
+				via.addAll(path);
+				asked.set(i + 1,
+						new Asked(new Query.Bound(next.cue(), holders, next.others(), next.start(), next.end()),
+								List.copyOf(via)));
+				asked.remove(i);
+			}
+			i--; // the role, or the relation that took its place, against what follows it now
+		}
+		return asked;
+	}
+
+	/** Whether {@code next} is asked of whoever holds {@code role}: see {@link #throughRoles}. */
+	private boolean isPath(Query.Bound role, Query.Bound next, List<String> tokens, Set<String> entityTokens) {
+		Cue c = role.cue();
+		if (!role.hasSubject() || next.hasSubject() || c.group() != null || !Query.betweenPeople(c.predicate())
+				|| next.start() < role.end() || next.start() - role.end() > PATH_GAP) {
+			return false;
+		}
+		Set<String> andWords = LanguagePack.allAndWords();
+		for (int k = role.end(); k < next.start(); k++) {
+			if (andWords.contains(tokens.get(k)) || entityTokens.contains(tokens.get(k))) {
+				return false;
+			}
+		}
+		List<String> person = types.lineage("person");
+		return next.cue().predicate().acceptsSubject(person) || next.cue().predicate().acceptsObject(person);
+	}
+
+	/** The people who hold the role for its subjects now; the facts that say so are added to {@code path}. */
+	private List<Entity> holders(Query q, Query.Bound role, Instant asOf, Instant now, List<Fact> path) {
+		var matched = new ArrayList<Fact>();
+		Query present = q.inPresent();
+		for (Entity e : role.subjects()) {
+			probeFacts(present, role.cue(), e, direction(role.cue(), e, q.text()), asOf, now, false, matched,
+					new ArrayList<>(), new ArrayList<>(), new ArrayList<>());
+		}
+		var holders = new LinkedHashMap<Long, Entity>();
+		Set<Long> subjects = role.subjects().stream().map(Entity::id).collect(Collectors.toSet());
+		for (Fact f : matched) {
+			Long other = subjects.contains(f.subjectId()) ? f.objectId() : Long.valueOf(f.subjectId());
+			if (other == null || subjects.contains(other)) {
+				continue;
+			}
+			entities.get(other).ifPresent(x -> {
+				holders.putIfAbsent(x.id(), x);
+				path.add(f);
+			});
+		}
+		return List.copyOf(holders.values());
 	}
 
 	/** One relation, for the subject the question binds it to, or for every spotted entity when it binds none. */
@@ -283,6 +371,10 @@ final class StructuredProbe {
 				}, () -> unknown.add(k));
 			}
 			String under = cue.predicate().name() + " for " + entity.name();
+			// The side asked about: the relation's subjects, who may be no name in the question ("mom" read as the
+			// owner's mother), and the names it holds.
+			var askedSide = new ArrayList<>(subjects);
+			askedSide.addAll(q.spotted());
 			if (asked.isEmpty()) {
 				// The store cannot evaluate the word, so it neither narrows nor denies: the facts are everything
 				// recorded, and the note says none is classified as what was asked.
@@ -295,7 +387,7 @@ final class StructuredProbe {
 				var other = new ArrayList<Fact>();
 				var unsure = new ArrayList<String>();
 				for (Fact f : matched) {
-					String t = otherType(f, q.spotted());
+					String t = otherType(f, askedSide);
 					if (t != null && asked.stream().anyMatch(k -> types.isA(t, k))) {
 						kept.add(f);
 						continue;
@@ -303,7 +395,7 @@ final class StructuredProbe {
 					other.add(f);
 					// What the store cannot classify (no kind, or a kind nobody has placed) may be one: said. A web
 					// address written as words is a site or a profile, never a car (2026-11-24).
-					String name = otherName(f, q.spotted());
+					String name = otherName(f, askedSide);
 					if (Names.isWebAddress(name)) {
 						continue;
 					}
@@ -450,11 +542,12 @@ final class StructuredProbe {
 					}
 				}
 			} else {
+				boolean sameRole = sameRole(cue.predicate(), cue.qualifier(), f.qualifier());
 				qualifierOk = cue.qualifier() == null || cue.qualifier().equalsIgnoreCase(f.qualifier())
-						|| Predicate.qualifierWithin(cue.qualifier(), f.qualifier())
+						|| Predicate.qualifierWithin(cue.qualifier(), f.qualifier()) || sameRole
 						|| (f.qualifier() == null && cue.predicate().qualifiers().isEmpty());
 				// "aunt" asked, "aunt or uncle" on record: it answers, and says what is not on record.
-				if (qualifierOk && cue.qualifier() != null && f.qualifier() != null
+				if (qualifierOk && !sameRole && cue.qualifier() != null && f.qualifier() != null
 						&& !cue.qualifier().equalsIgnoreCase(f.qualifier())) {
 					note = f.ref() + " is recorded as '" + f.qualifier() + "', which covers '" + cue.qualifier()
 							+ "' without settling it";
@@ -474,6 +567,18 @@ final class StructuredProbe {
 				}
 			}
 		}
+	}
+
+	/**
+	 * Two words for one role: of one family of qualifiers, saying the same gender ("mom" asked, "mother" on record).
+	 * Before, "who is my mom" was a miss beside the fact that said "mother" (2026-11-25).
+	 */
+	private boolean sameRole(Predicate p, String asked, String stored) {
+		if (asked == null || stored == null || !Predicate.sameQualifierFamily(asked, stored)) {
+			return false;
+		}
+		String a = impliedGender(p, asked);
+		return a != null && a.equals(impliedGender(p, stored));
 	}
 
 	/**

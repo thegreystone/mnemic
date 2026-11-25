@@ -231,6 +231,28 @@
       "nowadays",
       "presently"
     ],
+    "determiners": [
+      "the",
+      "a",
+      "an",
+      "his",
+      "her",
+      "its",
+      "our",
+      "your",
+      "their",
+      "whose",
+      "this",
+      "that",
+      "these",
+      "those",
+      "any",
+      "some",
+      "no",
+      "every",
+      "each",
+      "another"
+    ],
     "homographs": {
       "own": [
         "my",

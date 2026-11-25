@@ -3160,3 +3160,56 @@ pack: `sibling_of[brother]` with both brothers, `sibling_of[sister]` with
 the sister. Before, only the singular cued the relation, and the plural
 was answered by meaning alone. A predicate's own words (mostly verbs that
 list their forms) take no plural this way.
+
+### T33. A role word that is also an alias stays the relation
+
+```text
+remember(text: "My mother is Gunilla Nyberg, mom to me ...", proposal: { entities: [ Gunilla Nyberg, aliases: [mom, mother] ] })
+recall(query: "who is my mother")
+recall(query: "who is Oskar Nyberg's mother")      # Marit Nyberg
+recall(query: "who is my mom")                     # stored as "mother"
+```
+
+Expect: a word that names a person's role under a relation between
+people (a qualifier, a word of the lexicon or the inverse lexicon, or its
+plural) is never read as a name in a question, whoever carries it as an
+alias: "who is my mother" is `parent_of[mother]` for the owner and
+matched, and "Oskar Nyberg's mother" is Marit, not the owner's mother.
+Before, "mother" as an alias spotted the owner's mother in every question
+that said it, and took the word from the relation ("no predicate cue").
+Two words for one role, of one family of qualifiers and saying the same
+gender, match each other: "mom" asked finds the fact stored as "mother",
+"dad" the one stored as "father".
+
+### T34. A role word standing alone is the owner's
+
+```text
+recall(query: "who is mom")
+recall(query: "what car does mom drive")
+recall(query: "where does mom live")
+```
+
+Expect: a role word in the singular with no possessor, no article or
+other determiner before it (each language pack's `determiners`), no "of"
+after it, and no role word before it, stands as a name stands, and is the
+owner's: "who is mom" is `parent_of[mom]` for the owner. "the mother of
+Oskar Nyberg" stays Oskar's, and "does Konrad have brothers" Konrad's.
+
+### T35. A role before a relation is the path to whoever holds it
+
+```text
+recall(query: "what car does my mother drive")
+recall(query: "where does my mother's sister live")
+recall(query: "what car does my grandmother drive")   # no grandmother on record
+```
+
+Expect: a role with a subject ("my mother", or "mom" as the owner's),
+followed within two words by a relation the question gives no subject of
+its own, is resolved to the people who hold it now, and the relation is
+asked of them: `drives` for the owner's mother, narrowed to cars, matched;
+the facts the path took come first on the `via:` line. Roles chain ("my
+mother's sister": the mother, then her sister). Before, the relation after
+the role was asked of the owner, and the kind asked for was looked for
+under `parent_of` (a miss). A role nobody holds on record is the answer: a
+miss under its own relation, and the relation after it is not asked of
+the owner instead.

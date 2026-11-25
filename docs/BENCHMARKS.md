@@ -99,6 +99,7 @@ store, the conversation empty), 43 steps are statements. The script is `bench/us
 | Qwen 3.5 9B | native tools, closest relations offered | `usage-qwen9b-s12`, 2026-09-26 | 60 (62) | 10 | 39 | 1 | 0 | 0.7 | none |
 | Qwen 3.5 9B | native tools, store-audit fixes and event roles | `usage-qwen9b-s13`, 2026-09-29 | 58 (60) | 11 | 36 | 0 | 0 | 0.9 | none |
 | Qwen 3.5 9B | native tools, 0.4.0 release candidate, native binary | `usage-qwen9b-v040-native`, 2026-11-24 | 61 (62) | 10 (11) | 41 | 0 | 0 | 0.8 | none |
+| Qwen 3.5 9B | native tools, 0.4.1 release candidate, native binary | `usage-qwen9b-v041-native`, 2026-11-25 | 62 (62) | 11 (11) | 39 | 0 | 0 | 0.8 | none |
 
 The judge is Opus 5.5 for the Claude rows and the 9B itself for the Qwen rows, whose verdicts were checked by
 hand; the number in parentheses is the hand count where it differs (a correct abstention or a partial answer

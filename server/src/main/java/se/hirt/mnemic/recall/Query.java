@@ -36,10 +36,12 @@ import se.hirt.mnemic.knowledge.Lang;
 import se.hirt.mnemic.knowledge.LanguagePack;
 import se.hirt.mnemic.knowledge.LanguagePack.QueryCues;
 import se.hirt.mnemic.knowledge.Names;
+import se.hirt.mnemic.knowledge.Predicate;
 import se.hirt.mnemic.knowledge.PredicateRegistry;
 import se.hirt.mnemic.knowledge.PredicateRegistry.Cue;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.EnumMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -118,14 +120,16 @@ public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<Strin
 	public static Query analyse(
 		String text, EntityService entities, PredicateRegistry predicates, EntityTypeRegistry types) {
 		Lang language = detectLanguage(text, predicates.lang());
-		List<EntityService.Mention> mentions = entities.mentions(text, language);
+		Entity owner = entities.owner();
+		List<EntityService.Mention> mentions = withoutRoleWords(text, entities.mentions(text, language),
+				predicates.all());
 		var spottedById = new LinkedHashMap<Long, Entity>();
 		for (EntityService.Mention m : mentions) {
 			spottedById.putIfAbsent(m.entity().id(), m.entity());
 		}
 		List<Entity> spotted = new ArrayList<>(spottedById.values());
 		var ownerTokens = new HashSet<String>();
-		for (String a : entities.aliases(entities.owner().id())) {
+		for (String a : entities.aliases(owner.id())) {
 			ownerTokens.addAll(Names.tokens(a));
 		}
 		var entityTokens = new HashSet<>(ownerTokens);
@@ -146,7 +150,11 @@ public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<Strin
 				unsearched);
 		List<String> beyondEntities = terms.stream().filter(t -> !entityTokens.contains(t)).toList();
 		boolean polar = isPolar(text, language);
-		List<Bound> bound = bind(text, cues, mentions, spotted);
+		List<Bound> bound = bind(text, cues, mentions, spotted, owner, LanguagePack.of(language).query().determiners());
+		if (spotted.stream().noneMatch(e -> e.id() == owner.id())
+				&& bound.stream().anyMatch(b -> b.subjects().stream().anyMatch(e -> e.id() == owner.id()))) {
+			spotted.add(owner); // "mom" alone: the owner is who the question is about
+		}
 		var cueTokens = new HashSet<String>();
 		for (Bound b : bound) {
 			cueTokens.addAll(Names.tokens(b.cue().term()));
@@ -168,6 +176,86 @@ public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<Strin
 		return new Query(text, spotted, cues, ownerTokens, terms, entityTokens, beyondEntities, polar,
 				isPast(text, language), isForward(text, language), cueTokens, residual, named,
 				ftsQuery(text, ownerTokens, unsearched), kinds, bound, language);
+	}
+
+	/**
+	 * The mentions that are not a person's role standing as the relation. "mother" in "who is my mother" or
+	 * "Alexander's mother" is parent_of even when it is also the alias of someone's mother, and "mom" alone is the
+	 * owner's mother (see {@link #bind}); read as a name, the word swallowed the relation, and every question about
+	 * anyone's mother lost its verdict once "mother" was an alias of the owner's (2026-11-25).
+	 */
+	static List<Mention> withoutRoleWords(String text, List<Mention> mentions, Collection<Predicate> predicates) {
+		if (mentions.isEmpty()) {
+			return mentions;
+		}
+		List<String> tokens = Names.tokens(text);
+		return mentions.stream()
+				.filter(m -> !isRoleWord(String.join(" ", tokens.subList(m.start(), m.end())), predicates)).toList();
+	}
+
+	/**
+	 * Whether the words are a person's role under a relation between people, as its vocabulary writes it or in the
+	 * plural ("mother", "mom", "brothers", "children").
+	 */
+	static boolean isRoleWord(String words, Collection<Predicate> predicates) {
+		var forms = new HashSet<String>();
+		forms.add(words);
+		if (words.indexOf(' ') < 0) {
+			for (Lang l : Lang.values()) {
+				forms.addAll(Lang.singulars(words, l));
+			}
+		}
+		for (Predicate p : predicates) {
+			if (!betweenPeople(p)) {
+				continue;
+			}
+			for (List<String> vocabulary : List.of(p.qualifiers(), p.lexicon(), p.inverseLexicon())) {
+				for (String term : vocabulary) {
+					if (forms.contains(String.join(" ", Names.tokens(term)))) {
+						return true;
+					}
+				}
+			}
+		}
+		return false;
+	}
+
+	/** A relation between people: a role in it is a person, who can be asked about in turn. */
+	static boolean betweenPeople(Predicate p) {
+		return p.domain().contains("person") && p.range().contains("person");
+	}
+
+	/**
+	 * Whether a role word stands alone in the question, as a name stands: "what car does mom drive", "who is dad". One
+	 * person's role, in the singular as the relation writes it, with no possessor, article, or "of" around it, and not
+	 * after another role word ("my mother's sister" is the sister of the mother). Such a word is the owner's: no
+	 * personal memory says "mom" of anyone else's mother. "does Mattias have brothers" and "a brother" are not.
+	 */
+	static boolean standsAlone(
+		Cue c, List<String> tokens, int start, int end, List<Object[]> placed, Set<String> ofWords,
+		Set<String> determiners) {
+		if (c.group() != null || c.qualifier() == null || !betweenPeople(c.predicate())
+				|| !Names.tokens(c.term()).equals(Names.tokens(c.qualifier()))) {
+			return false;
+		}
+		if (start > 0 && determiners.contains(tokens.get(start - 1))) {
+			return false;
+		}
+		if (end < tokens.size() && ofWords.contains(tokens.get(end))) {
+			return false;
+		}
+		for (Object[] other : placed) {
+			if ((int) other[2] == start) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/** The same question in the present tense: a path through a role goes through the roles held now. */
+	Query inPresent() {
+		return !past ? this : new Query(text, spotted, cues, ownerTokens, terms, entityTokens, beyondEntities, polar,
+				false, forward, cueTokens, residual, named, fts, kinds, bound, language);
 	}
 
 	/** The list without the dropped words, unless nothing else would remain. */
@@ -288,6 +376,16 @@ public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<Strin
 	 * the other entities of its stretch of the question.
 	 */
 	static List<Bound> bind(String text, List<Cue> cues, List<Mention> mentions, List<Entity> spotted) {
+		return bind(text, cues, mentions, spotted, null, Set.of());
+	}
+
+	/**
+	 * As {@link #bind(String, List, List, List)}, and a role word that {@link #standsAlone} ("what car does mom drive")
+	 * is bound to {@code self}, the owner; with a null one, none is.
+	 */
+	static List<Bound> bind(
+		String text, List<Cue> cues, List<Mention> mentions, List<Entity> spotted, Entity self,
+		Set<String> determiners) {
 		Set<String> ofWords = LanguagePack.allOfWords();
 		Set<String> andWords = LanguagePack.allAndWords();
 		List<String> tokens = Names.tokens(text);
@@ -383,6 +481,16 @@ public record Query(String text, List<Entity> spotted, List<Cue> cues, Set<Strin
 				if ((int) placed.get(o)[2] == previousEnd && !subjects.get(o).isEmpty()) {
 					subjects.set(p, subjects.get(o));
 					break;
+				}
+			}
+		}
+		// "What car does mom drive": a role word standing alone is the owner's. After the lists, so "Anna's mother
+		// and dad" stays Anna's.
+		if (self != null) {
+			for (int p = 0; p < placed.size(); p++) {
+				if (subjects.get(p).isEmpty() && standsAlone((Cue) placed.get(p)[0], tokens, (int) placed.get(p)[1],
+						(int) placed.get(p)[2], placed, ofWords, determiners)) {
+					subjects.set(p, List.of(self));
 				}
 			}
 		}
